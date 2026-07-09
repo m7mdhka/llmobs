@@ -48,3 +48,7 @@ Thumbs.db
 /dist-release/
 *.sbom.json
 *.sig
+
+# ---- Example app build outputs ----
+examples/*/otel-genai-demo
+examples/**/*.bin

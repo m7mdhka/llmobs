@@ -1,0 +1,25 @@
+# Code owners. Ownership review is required for the areas below. As the project
+# grows, replace @m7mdhka with per-area maintainer teams.
+
+# Default owner for everything.
+*                                   @m7mdhka
+
+# Contracts are the source of truth — extra scrutiny.
+/api/                               @m7mdhka
+
+# Kernel and its public plugin-facing surface.
+/kernel/                            @m7mdhka
+
+# The SDK is semver-sacred; breaking changes need deliberate review.
+/packages/plugin-sdk/               @m7mdhka
+
+# Security-sensitive surfaces.
+/kernel/internal/gateway/           @m7mdhka
+/kernel/internal/controlplane/auth/ @m7mdhka
+
+# Deployment, governance, and CI.
+/deploy/                            @m7mdhka
+/.github/                           @m7mdhka
+/GOVERNANCE.md                      @m7mdhka
+/VERSIONING.md                      @m7mdhka
+/docs/adr/                          @m7mdhka

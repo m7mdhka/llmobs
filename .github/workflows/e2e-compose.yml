@@ -1,0 +1,20 @@
+# Lite profile end-to-end: compose up, loadgen smoke, assert a trace is visible
+# end-to-end. Runs on PRs targeting develop or release/*.
+name: e2e-compose
+
+on:
+  pull_request:
+    branches: [develop, "release/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: make setup
+      - name: Lite profile up + loadgen smoke + trace visible
+        run: make e2e

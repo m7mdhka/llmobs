@@ -1,0 +1,18 @@
+# Commitizen configuration. `cz commit` authors Conventional Commits, `cz check`
+# enforces them in pre-commit + CI, and `cz bump` cuts platform train releases
+# (version bump + CHANGELOG.md + annotated tag).
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "scm"
+tag_format = "v$version"
+annotated_tag = true
+update_changelog_on_bump = true
+changelog_file = "CHANGELOG.md"
+
+# DCO sign-off is required on every commit (also enforced by the DCO GitHub App).
+# Author commits with `cz commit --signoff` or `git commit -s`.
+
+# Scopes are the top-level directories. Conventional-commit scope enforcement is
+# applied via the commit-msg pre-commit hook and CI; the canonical list is:
+#   kernel, cli, web, sdk, ui, plugins, api, deploy, docs, tools, ci, repo

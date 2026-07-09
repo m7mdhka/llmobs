@@ -1,0 +1,26 @@
+# Replays every SDK dialect fixture through the ingestion pipeline and asserts
+# the canonical output (D3). Triggered when ingest/normalize/fixtures change.
+name: conformance
+
+on:
+  pull_request:
+    paths:
+      - "kernel/internal/dataplane/ingest/**"
+      - "kernel/internal/dataplane/normalize/**"
+      - "kernel/internal/dataplane/pipeline/**"
+      - "kernel/testdata/fixtures/**"
+      - "tools/conformance/**"
+      - "api/model/**"
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: make setup
+      - name: Replay dialect fixtures and assert canonical output
+        run: make conformance

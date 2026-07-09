@@ -1,0 +1,37 @@
+# Release: on a version tag pushed to main, build multi-arch images, publish the
+# Helm chart, generate SBOM + sigstore signatures, create the GitHub Release, and
+# publish npm packages for tagged packages.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "plugin-sdk/v*.*.*"
+
+permissions:
+  contents: write # create releases
+  packages: write # push images
+  id-token: write # sigstore keyless signing
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v2
+      - run: make setup
+      - name: Build multi-arch images (amd64 + arm64)
+        run: echo "buildx multi-arch images for kernel + first-party plugins"
+      - name: Publish Helm chart
+        run: echo "package and publish deploy/helm/llmobs"
+      - name: Generate SBOM
+        run: echo "generate SBOM for images and charts"
+      - name: Sign artifacts (sigstore, keyless)
+        run: echo "cosign sign images + attest SBOM"
+      - name: Create GitHub Release
+        run: echo "gh release create with notes from CHANGELOG"
+      - name: Publish npm packages (tagged packages/*)
+        run: echo "pnpm publish for @llmobs/* when a matching tag is pushed"

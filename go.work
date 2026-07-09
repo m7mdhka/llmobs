@@ -1,0 +1,15 @@
+// Go workspace for the monorepo. The kernel and cli are separate modules; each
+// first-party plugin backend is its own module too. This lets tools operate
+// across them while keeping module boundaries (and kernel/internal privacy)
+// intact. Add plugin backends with `go work use ./plugins/<name>/backend`.
+go 1.23
+
+use (
+	./kernel
+	./cli
+	// ./plugins/tracing/backend
+	// ./plugins/evals/backend
+	// ./plugins/prompt-management/backend
+	// ./plugins/langfuse-compat/backend
+	// ./runtimes/shared
+)

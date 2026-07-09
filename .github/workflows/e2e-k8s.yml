@@ -1,0 +1,23 @@
+# Kubernetes end-to-end: kind cluster, Helm install, operator reconcile, plugin
+# lifecycle (enable -> degrade -> recover -> disable). Release-blocking on
+# release/*; also runs nightly.
+name: e2e-k8s
+
+on:
+  pull_request:
+    branches: ["release/**"]
+  schedule:
+    - cron: "0 3 * * *" # nightly
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: make setup
+      - name: kind + Helm + operator reconcile + plugin lifecycle
+        run: make e2e-k8s

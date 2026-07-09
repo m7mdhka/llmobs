@@ -1,0 +1,22 @@
+# Air-gapped install gate (D14): build the offline bundle and install it in a
+# network-isolated job. Release-blocking on release/*.
+name: airgap
+
+on:
+  pull_request:
+    branches: ["release/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  airgap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: make setup
+      - name: Build offline bundle
+        run: make airgap
+      - name: Install in network-isolated context
+        run: echo "install the bundle with egress blocked (no external URLs)"

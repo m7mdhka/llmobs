@@ -1,0 +1,46 @@
+# ---- Local Claude Code overrides ----
+.claude/settings.local.json
+
+# ---- Secrets / env ----
+.env
+.env.*
+!.env.example
+**/secrets/
+
+# ---- Go ----
+/kernel/bin/
+/cli/bin/
+*.test
+*.out
+coverage.txt
+
+# ---- Node / TypeScript ----
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+*.tsbuildinfo
+pnpm-debug.log*
+
+# ---- Tooling caches ----
+.mise/
+.cache/
+
+# ---- Deploy / local clusters ----
+deploy/**/charts/*.tgz
+kubeconfig
+*.kubeconfig
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+# Keep shared VS Code config; ignore only personal, machine-local files.
+.vscode/*.local.json
+
+# ---- Airgap / release artifacts ----
+/dist-release/
+*.sbom.json
+*.sig

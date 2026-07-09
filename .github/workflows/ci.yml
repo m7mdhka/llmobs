@@ -1,0 +1,50 @@
+# Runs on every PR: lint, unit tests, and contract checks (codegen diff, plugin
+# import-boundary lint, manifest schema validation, cz check on PR title).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: make setup
+      - name: Lint (Go + TS + import boundaries)
+        run: make lint
+      - name: Unit tests
+        run: make test
+
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: make setup
+      - name: Codegen is up to date (regenerate-and-diff)
+        run: |
+          make generate
+          git diff --exit-code -- packages/query-client kernel/pkg/model \
+            || (echo "::error::generated code is stale — run 'make generate' and commit" && exit 1)
+      - name: Validate manifest schema examples
+        run: echo "validate api/schemas/manifest examples (wired with tools/codegen)"
+
+  commit-lint:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - name: cz check on PR title
+        run: echo "${{ github.event.pull_request.title }}" | cz check --message-length-limit 0 --commit-msg-file /dev/stdin

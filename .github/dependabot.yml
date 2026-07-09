@@ -1,0 +1,45 @@
+# Dependency updates. Note: only Apache-2.0 / MIT / BSD dependencies are
+# permitted (AGPL/SSPL are prohibited) — review license on every bump.
+version: 2
+updates:
+  # Go — kernel module
+  - package-ecosystem: gomod
+    directory: "/kernel"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(kernel)"
+
+  # Go — cli module
+  - package-ecosystem: gomod
+    directory: "/cli"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(cli)"
+
+  # TypeScript workspace (pnpm)
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(web)"
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(ci)"
+
+  # Devcontainer base + features
+  - package-ecosystem: devcontainers
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(repo)"

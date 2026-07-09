@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "kernel: llmobsd",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/kernel/cmd/llmobsd",
+      "cwd": "${workspaceFolder}/kernel",
+      "env": {},
+      "args": []
+    },
+    {
+      "name": "cli: llmobs",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cli/cmd/llmobs",
+      "cwd": "${workspaceFolder}/cli",
+      "args": []
+    },
+    {
+      "name": "web shell (attach)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/web/shell"
+    },
+    {
+      "name": "plugin backend (tracing)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/plugins/tracing/backend",
+      "cwd": "${workspaceFolder}/plugins/tracing/backend",
+      "args": []
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+# pnpm workspace: the web shell, the TypeScript packages, and every first-party
+# plugin frontend. Plugin frontends are laid out exactly like third-party ones,
+# so they participate in the same workspace during development.
+packages:
+  - "web/shell"
+  - "packages/*"
+  - "plugins/*/frontend"
+  - "templates/*/frontend"

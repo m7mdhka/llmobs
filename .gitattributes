@@ -1,0 +1,24 @@
+# Normalize line endings to LF across platforms.
+* text=auto eol=lf
+
+# Explicit binary types (never munge).
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.tgz binary
+*.gz binary
+*.zip binary
+
+# Generated code — mark so diffs collapse and linguist ignores it in stats.
+packages/query-client/** linguist-generated=true
+kernel/pkg/model/**_gen.go linguist-generated=true
+
+# Vendored / third-party design-system code counts as vendored, not authored.
+packages/ui/** linguist-vendored=true
+
+# Docs and fixtures shouldn't dominate language stats.
+docs/** linguist-documentation=true
+kernel/testdata/fixtures/** linguist-generated=true

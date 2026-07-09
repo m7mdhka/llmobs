@@ -1,0 +1,22 @@
+# Performance gate: loadgen against the D13 targets. A regression is a failure.
+# Runs nightly and on release/*.
+name: perf
+
+on:
+  pull_request:
+    branches: ["release/**"]
+  schedule:
+    - cron: "30 3 * * *" # nightly
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: make setup
+      - name: loadgen against ingest/query targets (regression = failure)
+        run: make perf

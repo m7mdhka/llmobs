@@ -1,0 +1,24 @@
+# Pinned toolchain versions. The devcontainer, CI, and bare-metal contributors
+# all read these pins so "works on my machine" is defined by a file, not luck.
+# Run `mise install` to materialize this toolchain.
+
+[tools]
+go = "1.23"
+node = "22"
+pnpm = "9"
+golangci-lint = "1.62"
+helm = "3.16"
+kubectl = "1.31"
+kind = "0.24"
+pre-commit = "4.0"
+commitizen = "3.29"
+gitleaks = "8.21"
+
+[env]
+# The pnpm store and Go module cache are mounted as named volumes in the
+# devcontainer; keep their locations stable across environments.
+GOFLAGS = "-mod=mod"
+
+[settings]
+# Fail loudly if a tool is used that isn't pinned here.
+experimental = true

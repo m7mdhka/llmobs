@@ -1,0 +1,63 @@
+# Pre-commit hooks are law: never bypass with --no-verify. If a hook fails, fix
+# the cause. Installed by `make setup`. Runs in CI as well.
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  # Conventional Commits enforcement (commit-msg stage).
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.29.1
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # Baseline hygiene.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+      - id: check-json
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # Go: format + imports + lint (changed packages).
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+      - id: go-imports
+      - id: golangci-lint
+
+  # TypeScript / web: eslint + prettier on staged files.
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: pnpm exec eslint --fix
+        language: system
+        files: \.(ts|tsx|js|jsx)$
+        pass_filenames: true
+      - id: prettier
+        name: prettier
+        entry: pnpm exec prettier --write
+        language: system
+        files: \.(ts|tsx|js|jsx|json|css|md|ya?ml)$
+        pass_filenames: true
+
+  # Secret scanning.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # License-header insert/check (Apache-2.0 headers on source files).
+  - repo: local
+    hooks:
+      - id: license-header
+        name: license-header check
+        entry: scripts/license-header.sh
+        language: script
+        files: \.(go|ts|tsx)$

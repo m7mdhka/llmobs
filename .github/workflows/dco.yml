@@ -1,0 +1,31 @@
+# DCO sign-off enforcement on every PR. In addition to (or in place of) the DCO
+# GitHub App, this workflow verifies every commit in the PR carries a valid
+# Signed-off-by trailer matching the author.
+name: dco
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dco-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Signed-off-by on all PR commits
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          missing=0
+          for sha in $(git rev-list "$base..$head"); do
+            author="$(git show -s --format='%an <%ae>' "$sha")"
+            if ! git show -s --format='%b' "$sha" | grep -qiF "Signed-off-by: $author"; then
+              echo "::error::commit $sha is missing a matching Signed-off-by: $author"
+              missing=1
+            fi
+          done
+          exit $missing

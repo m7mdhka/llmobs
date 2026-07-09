@@ -1,0 +1,47 @@
+{
+  "name": "llmobs",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    // Needed for the lite compose profile and kind (Kubernetes e2e).
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    // Language runtimes are installed via mise in postCreate so versions come
+    // from mise.toml, not the feature pins. These features provide the base
+    // tooling; mise reconciles exact versions.
+    "ghcr.io/devcontainers/features/go:1": {},
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers-extra/features/mise:1": {}
+  },
+  // `make setup` installs deps, pre-commit hooks, and runs git-flow init with
+  // our branch names, non-interactively.
+  "postCreateCommand": "mise install && make setup",
+  "forwardPorts": [3000, 8080, 4317, 4318, 5432],
+  "portsAttributes": {
+    "3000": { "label": "web shell" },
+    "8080": { "label": "gateway" },
+    "4317": { "label": "OTLP gRPC" },
+    "4318": { "label": "OTLP HTTP" },
+    "5432": { "label": "postgres" }
+  },
+  "mounts": [
+    // Fast rebuilds: cache the pnpm store and the Go module cache in named
+    // volumes that survive container rebuilds.
+    "source=llmobs-pnpm-store,target=/home/vscode/.local/share/pnpm/store,type=volume",
+    "source=llmobs-go-mod,target=/home/vscode/go/pkg/mod,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      // Recommendations live in .vscode/extensions.json; list the essentials
+      // here so a fresh container installs them automatically.
+      "extensions": [
+        "golang.go",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "redhat.vscode-yaml",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "anthropic.claude-code"
+      ]
+    }
+  },
+  "remoteUser": "vscode"
+}

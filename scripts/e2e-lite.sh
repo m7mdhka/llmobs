@@ -12,6 +12,7 @@ export LLMOBS_BOOTSTRAP_API_KEY="$KEY"
 # Overridable host ports (defaults dodge common local conflicts; CI can override).
 export LLMOBS_API_PORT="${LLMOBS_API_PORT:-18080}"
 export LLMOBS_OTLP_PORT="${LLMOBS_OTLP_PORT:-14318}"
+export LLMOBS_OTLP_GRPC_PORT="${LLMOBS_OTLP_GRPC_PORT:-14317}"
 API="http://localhost:${LLMOBS_API_PORT}"
 
 cleanup() { "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true; }

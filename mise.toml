@@ -6,13 +6,16 @@
 go = "1.23"
 node = "22"
 pnpm = "9"
+python = "3.12"
 golangci-lint = "1.62"
 helm = "3.16"
 kubectl = "1.31"
 kind = "0.24"
-pre-commit = "4.0"
-commitizen = "3.29"
 gitleaks = "8.21"
+# Python-backed tools are not in mise's core registry — install them via the
+# pipx backend so `mise install` resolves them.
+"pipx:pre-commit" = "4.0"
+"pipx:commitizen" = "3.29"
 
 [env]
 # The pnpm store and Go module cache are mounted as named volumes in the

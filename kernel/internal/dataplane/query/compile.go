@@ -230,11 +230,11 @@ func compileSimpleCond(b *builder, f struct {
 		for i, v := range arr {
 			vals[i] = coerce(f, v)
 		}
-		expr := col + " = ANY(" + b.ph(vals) + ")"
 		if op == "not_in" {
-			return "NOT (" + expr + ")", nil
+			// Uniform NULL policy (DSL §2.2): negations match unset rows.
+			return "(" + col + " IS NULL OR " + col + " <> ALL(" + b.ph(vals) + "))", nil
 		}
-		return expr, nil
+		return col + " = ANY(" + b.ph(vals) + ")", nil
 	case "gt", "gte", "lt", "lte":
 		if !num {
 			return "", errf("operator_not_allowed", 422, "%s not allowed on field", op)
@@ -267,12 +267,13 @@ func compileMapCond(b *builder, col string, c map[string]any, numeric bool) (str
 		return col + " ? " + b.ph(key), nil
 	case "eq":
 		if numeric {
-			return "(" + jsonPath + ")::numeric = " + b.ph(asNumber(c["value"])), nil
+			return numGuard(b, col, key, "=", c["value"], false), nil
 		}
 		return jsonPath + " = " + b.ph(asString(c["value"])), nil
 	case "neq":
 		if numeric {
-			return "(" + jsonPath + ")::numeric IS DISTINCT FROM " + b.ph(asNumber(c["value"])), nil
+			// Negation: unset/non-number values match (DSL §2.2, §9.1).
+			return numGuard(b, col, key, "IS DISTINCT FROM", c["value"], true), nil
 		}
 		return jsonPath + " IS DISTINCT FROM " + b.ph(asString(c["value"])), nil
 	case "contains":
@@ -284,10 +285,26 @@ func compileMapCond(b *builder, col string, c map[string]any, numeric bool) (str
 		if !numeric {
 			return "", errf("operator_not_allowed", 422, "%s only on numeric map", op)
 		}
-		return "(" + jsonPath + ")::numeric " + sqlCmp(op) + " " + b.ph(asNumber(c["value"])), nil
+		return numGuard(b, col, key, sqlCmp(op), c["value"], false), nil
 	default:
 		return "", errf("operator_not_allowed", 422, "map operator %q not allowed", op)
 	}
+}
+
+// numGuard compiles a numeric comparison against a map value, guarding the
+// ::numeric cast behind a jsonb_typeof check so non-numeric or missing values
+// never raise a cast error (DSL §9.1, Decision 3). CASE guarantees the cast is
+// evaluated only when the value is a JSON number — a bare `guard AND cast`
+// would let Postgres attempt the cast on other rows. unsetMatches is the ELSE
+// result: true for negations (unset/non-number rows match), false otherwise.
+func numGuard(b *builder, col, key, cmp string, value any, unsetMatches bool) string {
+	elseVal := "false"
+	if unsetMatches {
+		elseVal = "true"
+	}
+	typeExpr := "jsonb_typeof(" + col + " -> " + b.ph(key) + ")"
+	castExpr := "(" + col + " ->> " + b.ph(key) + ")::numeric " + cmp + " " + b.ph(asNumber(value))
+	return "(CASE WHEN " + typeExpr + " = 'number' THEN " + castExpr + " ELSE " + elseVal + " END)"
 }
 
 func compileRefCond(b *builder, col string, c map[string]any) (string, error) {

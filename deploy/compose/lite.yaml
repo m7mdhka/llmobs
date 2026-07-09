@@ -27,10 +27,12 @@ services:
       LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:-sk-e2e-demo-key}"
       LLMOBS_LOG_FORMAT: "text"
       LLMOBS_OTLP_HTTP_ADDR: ":4318"
+      LLMOBS_OTLP_GRPC_ADDR: ":4317"
       LLMOBS_API_ADDR: ":8080"
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "${LLMOBS_OTLP_PORT:-4318}:4318"
+      - "${LLMOBS_OTLP_GRPC_PORT:-4317}:4317"
       - "${LLMOBS_API_PORT:-8080}:8080"

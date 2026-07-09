@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"google.golang.org/grpc"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingest"
@@ -87,9 +90,23 @@ func run() error {
 	// OTLP HTTP receiver server.
 	otlpServer := &http.Server{Addr: cfg.OTLPHTTPAddr, Handler: receiver.Handler(), ReadHeaderTimeout: 5 * time.Second}
 
-	errCh := make(chan error, 2)
+	// OTLP gRPC receiver server (4317).
+	grpcServer := grpc.NewServer()
+	receiver.RegisterGRPC(grpcServer)
+	grpcLis, err := net.Listen("tcp", cfg.OTLPGRPCAddr)
+	if err != nil {
+		return err
+	}
+
+	errCh := make(chan error, 3)
 	go serve(apiServer, log, "api", errCh)
 	go serve(otlpServer, log, "otlp-http", errCh)
+	go func() {
+		log.Info("otlp-grpc listening", "addr", cfg.OTLPGRPCAddr)
+		if err := grpcServer.Serve(grpcLis); err != nil {
+			errCh <- err
+		}
+	}()
 
 	select {
 	case <-rootCtx.Done():
@@ -102,6 +119,7 @@ func run() error {
 	defer cancel()
 	_ = apiServer.Shutdown(shutdownCtx)
 	_ = otlpServer.Shutdown(shutdownCtx)
+	grpcServer.GracefulStop()
 	receiver.Stop()
 	log.Info("stopped")
 	return nil

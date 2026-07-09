@@ -16,6 +16,7 @@ import (
 type Config struct {
 	DatabaseURL      string `json:"database_url"`
 	OTLPHTTPAddr     string `json:"otlp_http_addr"`
+	OTLPGRPCAddr     string `json:"otlp_grpc_addr"`
 	APIAddr          string `json:"api_addr"`
 	LogLevel         string `json:"log_level"`
 	LogFormat        string `json:"log_format"`
@@ -29,6 +30,7 @@ func defaults() Config {
 	return Config{
 		DatabaseURL:      "postgres://llmobs:llmobs@localhost:5432/llmobs?sslmode=disable",
 		OTLPHTTPAddr:     ":4318",
+		OTLPGRPCAddr:     ":4317",
 		APIAddr:          ":8080",
 		LogLevel:         "info",
 		LogFormat:        "json",
@@ -53,6 +55,7 @@ func LoadConfig() (Config, error) {
 	}
 	envStr(brand.Env("DATABASE_URL"), &c.DatabaseURL)
 	envStr(brand.Env("OTLP_HTTP_ADDR"), &c.OTLPHTTPAddr)
+	envStr(brand.Env("OTLP_GRPC_ADDR"), &c.OTLPGRPCAddr)
 	envStr(brand.Env("API_ADDR"), &c.APIAddr)
 	envStr(brand.Env("LOG_LEVEL"), &c.LogLevel)
 	envStr(brand.Env("LOG_FORMAT"), &c.LogFormat)

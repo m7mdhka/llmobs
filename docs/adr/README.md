@@ -28,5 +28,11 @@ decision history exists from the start:
 | ADR-0014 | Governance: DCO, Apache-2.0, air-gap as first-class (D14) |
 | ADR-0015 | Rename stays cheap — brand in one module per language (D15) |
 
-These are backfilled during bootstrap (see the design doc's bootstrap order).
-New decisions continue the numbering.
+ADR-0001..0015 are backfilled during bootstrap (see the design doc's bootstrap
+order). New decisions continue the numbering:
+
+| ADR | Decision |
+|---|---|
+| [ADR-0016](0016-canonical-data-model-v1alpha1.md) | Canonical data model `v1alpha1` (master; LM-1..LM-12) |
+| [ADR-0017](0017-score-model.md) | Score model (LM-3 + LM-8) |
+| [ADR-0018](0018-span-taxonomy-and-payload-shapes.md) | Span taxonomy and payload shapes (LM-1 + LM-2) |

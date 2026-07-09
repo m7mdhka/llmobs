@@ -99,6 +99,21 @@ tuple (this is ruling **Q6** made concrete — it is how filter-by-prompt works)
 - Every reference field of every future plugin-owned reference type is queryable
   by this same mechanism, uniformly.
 
+### 2.2 Negation and NULL (Normative)
+
+**Negations match unset (NULL) rows.** `neq`, `not_in`, and negated reference
+equality select rows where the field is **unset** as well as rows whose value
+differs. Worked example: `{"field":"user_id","op":"neq","value":"bob"}` returns
+spans with no `user_id` — a span with no user *is* not bob. Likewise
+`{"field":"kind","op":"not_in","value":["generation"]}` returns rows whose `kind`
+is anything other than `generation`, **including** rows where `kind` is unset.
+
+This is **observable Query API semantics**: every adapter's compiler MUST
+reproduce it (e.g. Postgres compiles `neq` as `IS DISTINCT FROM` and `not_in` as
+`col IS NULL OR col <> ALL(...)`; the ClickHouse compiler MUST match). It is part
+of the compiler-interface conformance expectations. `is_null` remains the
+explicit "field is unset" test.
+
 ## 3. Boolean structure — deliberately shallow (Normative) — QD-3
 
 - `filters` is an array; its members are combined with an **implicit AND**.
@@ -243,6 +258,22 @@ Every response is:
   included truncated payloads carries a warning referencing
   `llmobs.dq.truncated`). A partial result (e.g. a scan cut short by an adapter
   guard) MUST emit a warning; it MUST NOT silently drop data.
+
+### 9.1 Bad data never fails a valid query (Normative)
+
+**A stored row MUST NEVER be able to turn someone else's valid query into a
+`500`.** This is an invariant, not a nicety: query validity depends only on the
+query, never on the data it scans.
+
+Concretely, when a condition cannot be evaluated against a row because the
+**stored value has the wrong type** — e.g. a numeric-map condition
+(`usage_details.input > 100`) meets a row whose `usage_details.input` is not a
+number — the row **does not match** (it is excluded from results); the adapter
+MUST NOT raise an error. The response MAY carry an `llmobs.dq.*` warning so the
+caller can tell "no matches" from "some rows had malformed data". This is **not**
+a `422`: the *query* is valid; the *data* is bad, and a plugin must be able to
+distinguish the two. (Adapters implement this by guarding the cast, e.g.
+`jsonb_typeof(...) = 'number'` before `::numeric`.)
 
 The envelope is versioned; fields are additive within a major.
 

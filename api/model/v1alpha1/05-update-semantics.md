@@ -22,6 +22,15 @@ An adapter MAY implement this as literal event storage (event-sourced) or as an
 in-place upsert that reproduces the same fold — the choice is invisible to the
 Query API (`00-overview.md` §1.1).
 
+**`event_ts` for stamp-less transports (Normative).** A transport that carries a
+producer version stamp (e.g. a future `langfuse-compat` dialect) MUST use that
+stamp as `event_ts`. A transport that does **not** carry one — notably OTLP —
+MUST derive `event_ts` **deterministically from payload content**: for OTLP a
+span's `event_ts` is its `end_time` when set, else its `start_time`. Determinism
+is the point: the same source event always yields the same `event_ts`, so
+re-delivery folds to the same state (idempotency, `01-entities.md` §3.2). A
+normalizer MUST NOT stamp `event_ts` from wall-clock receipt time.
+
 > Evidence: Langfuse models every update and delete as an insert into a
 > `ReplacingMergeTree(event_ts, is_deleted)` and reconciles at read time; its worker
 > also does a read-modify-write that folds all events for an entity into one merged
@@ -34,7 +43,12 @@ Query API (`00-overview.md` §1.1).
 State is computed **per field-group**. A field-group is the unit of merge:
 
 - Each **scalar** promoted/dimension field is its own field-group
-  (`name`, `status`, `end_time`, `model`, `total_cost`, …).
+  (`name`, `status`, `end_time`, `model`, `total_cost`, …). An **object-valued**
+  scalar (e.g. `status = {code, message}`) is a **single** field-group replaced
+  **wholesale** — it is NOT deep-merged. So a later `status: {code: "error"}`
+  replaces the whole object and drops a prior `message`; this is deliberate
+  (a stale `ok`-era message on an errored span is worse than no message). Only
+  the map fields (next bullet) deep-merge (V17).
 - Each **key** of a map field (`attributes`, `model_parameters`,
   `usage_details`, `cost_details`, `metadata`, …) is its own field-group,
   recursively for nested objects (deep merge). The unit is the leaf key path.
@@ -94,7 +108,9 @@ span events is idempotent (§2). Span events are never removed by an update in
 - `is_deleted` follows the same greatest-`(event_ts, event_id)`-wins fold. Hence
   an `upsert` with a greater `(event_ts, event_id)` than a prior `delete`
   **resurrects** the entity, and a `delete` with a greater stamp than all upserts
-  tombstones it.
+  tombstones it. Stated directionally: **a tombstone loses to any later revival
+  by `(event_ts, event_id)`, and a revival loses to any later tombstone** — it is
+  strictly the greatest stamp that decides, never the operation kind (V8–V10).
 - A tombstoned entity (`is_deleted = true`) MUST NOT be returned by default Query
   API reads.
 
@@ -772,6 +788,43 @@ parses these blocks and runs them against every storage adapter.
 }
 ```
 
-An implementation that reproduces V1–V16 for both the Postgres and ClickHouse
+### V17 — object-valued scalar (status) replaces wholesale — a later status drops a prior message
+
+```json
+{
+  "name": "V17",
+  "entity": "span",
+  "note": "object-valued scalar (status) replaces wholesale \u2014 a later status drops a prior message",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "status": {
+          "code": "ok",
+          "message": "done"
+        }
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "status": {
+          "code": "error"
+        }
+      }
+    }
+  ],
+  "expect": {
+    "status": {
+      "code": "error"
+    },
+    "is_deleted": false
+  }
+}
+```
+
+An implementation that reproduces V1–V17 for both the Postgres and ClickHouse
 adapters satisfies the update-semantics conformance bar. Additional vectors MAY
 be added additively.

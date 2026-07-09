@@ -36,6 +36,15 @@ example.
 | `invalid-08-cursor-with-aggregations` | QD-1 | `cursor` combined with `aggregations` |
 | `invalid-09-unknown-key` | QD-1 | unknown top-level key |
 | `invalid-10-missing-timerange` | QD-5 | `timeRange` is mandatory |
+| `invalid-11-score-missing-data-type` | QD-9 (tightened) | `scoreCondition.data_type` is now required |
+| `invalid-12-score-numeric-string-value` | QD-9 | `numeric` score with a string `value` (no coercion) |
+| `invalid-13-score-categorical-gt-op` | QD-9 | `categorical` score with a numeric-only op (`gt`) |
+| `invalid-14-score-boolean-nonbool-value` | QD-9 | `boolean` score with a non-boolean `value` |
+
+Note on error codes: the schema catches these as `schema_invalid` (400). The
+kernel additionally enforces the score-typing rules semantically as
+`score_type_mismatch` (422) for any request that bypasses schema validation
+(00-dsl-spec.md §8, §11) — `dsl.schema.json` is necessary but not sufficient.
 
 Note: two ceilings are enforced by the **kernel against `fields.json`**, not the
 schema, so they have no schema-level invalid example here: the *exact*

@@ -188,14 +188,54 @@
     "scoreCondition": {
       "type": "object",
       "additionalProperties": false,
+      "$comment": "QD-9 (tightened): data_type is required and fully determines the allowed op and the JSON type of value. No coercion. The schema encodes this (a violation the schema catches is schema_invalid/400); the kernel also enforces it semantically as score_type_mismatch/422.",
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "data_type": { "enum": ["numeric", "categorical", "boolean"] },
-        "op": { "enum": ["eq", "neq", "gt", "gte", "lt", "lte", "in", "not_in"] },
+        "op": { "enum": ["eq", "neq", "gt", "gte", "lt", "lte", "in"] },
         "value": true,
         "source": { "enum": ["human", "llm_judge", "code", "external"] }
       },
-      "required": ["name", "op", "value"]
+      "required": ["name", "data_type", "op", "value"],
+      "allOf": [
+        {
+          "$comment": "numeric: ops {eq,neq,gt,gte,lt,lte}; value is a number.",
+          "if": { "properties": { "data_type": { "const": "numeric" } }, "required": ["data_type"] },
+          "then": {
+            "properties": {
+              "op": { "enum": ["eq", "neq", "gt", "gte", "lt", "lte"] },
+              "value": { "type": "number" }
+            }
+          }
+        },
+        {
+          "$comment": "boolean: op eq only; value is a boolean.",
+          "if": { "properties": { "data_type": { "const": "boolean" } }, "required": ["data_type"] },
+          "then": {
+            "properties": {
+              "op": { "const": "eq" },
+              "value": { "type": "boolean" }
+            }
+          }
+        },
+        {
+          "$comment": "categorical: ops {eq,neq,in}; value is a string, or (for in) an array of strings.",
+          "if": { "properties": { "data_type": { "const": "categorical" } }, "required": ["data_type"] },
+          "then": {
+            "properties": { "op": { "enum": ["eq", "neq", "in"] } },
+            "allOf": [
+              {
+                "if": { "properties": { "op": { "const": "in" } }, "required": ["op"] },
+                "then": { "properties": { "value": { "type": "array", "items": { "type": "string" }, "maxItems": 256 } } }
+              },
+              {
+                "if": { "properties": { "op": { "enum": ["eq", "neq"] } }, "required": ["op"] },
+                "then": { "properties": { "value": { "type": "string" } } }
+              }
+            ]
+          }
+        }
+      ]
     }
   }
 }

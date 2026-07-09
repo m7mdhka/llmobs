@@ -156,17 +156,17 @@ components:
 
   responses:
     InvalidQuery:
-      description: Malformed query or unauthorized field.
+      description: "400: the document fails dsl.schema.json (schema_invalid). Necessary-but-not-sufficient; see 422."
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Unauthorized:
-      description: The effective permission does not grant the requested target/entity.
+      description: "403: the effective permission does not grant the requested target/entity (unauthorized)."
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     OverLimit:
-      description: A contract ceiling (QD-7) or the timeRange window was exceeded.
+      description: "422: structurally valid but semantically rejected — unknown_field, operator_not_allowed, condition_limit_exceeded, ceiling_exceeded, score_type_mismatch, not_orderable, not_groupable (00-dsl-spec.md §11)."
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -235,7 +235,7 @@ components:
       properties:
         code:
           type: string
-          enum: [invalid_query, unauthorized_field, over_limit, unauthorized, not_found]
+          enum: [schema_invalid, unknown_field, operator_not_allowed, condition_limit_exceeded, ceiling_exceeded, score_type_mismatch, not_orderable, not_groupable, unauthorized, not_found]
         message: { type: string }
         detail:
           type: object

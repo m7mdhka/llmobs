@@ -62,4 +62,8 @@ node "$CG/bundle_openapi.mjs" "$OPENAPI" "$BUNDLE"
 go run "github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@${OAPI_CODEGEN_VERSION}" \
   -generate types,std-http-server -package queryapi -o "$GO_SERVER_OUT" "$BUNDLE"
 
+# gofmt the generated Go so output is deterministic and gofmt-clean (the CI
+# regenerate-and-diff compares against the committed, gofmt'd files).
+gofmt -w "$GO_MODEL_OUT" "$GO_SERVER_OUT"
+
 echo ">> codegen: done"

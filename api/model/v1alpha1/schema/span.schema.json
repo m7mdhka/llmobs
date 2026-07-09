@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.com/schemas/model/v1alpha1/span.schema.json",
+  "title": "LLMObs canonical Span (v1alpha1)",
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "Closed promoted set (02-span.md §1): any non-promoted attribute MUST live in 'attributes', hence additionalProperties:false. Generation fields are permitted on any kind per 02-span.md §3.3 (a span is generation_shaped iff it carries a generation field). x-llmobs-frozen marks frozen fields (05-update-semantics.md §5).",
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/id", "x-llmobs-frozen": true },
+    "project_id": { "$ref": "common.schema.json#/$defs/id", "x-llmobs-frozen": true },
+    "trace_id": { "$ref": "common.schema.json#/$defs/id", "x-llmobs-frozen": true },
+    "parent_span_id": { "type": ["string", "null"], "description": "In-trace parent; null for a trace-root span." },
+    "kind": {
+      "enum": ["span", "generation", "embedding", "tool_call", "retrieval", "agent_step", "guardrail"],
+      "x-llmobs-frozen": true,
+      "description": "Closed canonical enum (02-span.md §2)."
+    },
+    "raw_kind": { "type": ["string", "null"], "description": "Original pre-normalization source type (02-span.md §2.1)." },
+    "name": { "type": "string", "minLength": 1 },
+    "start_time": { "$ref": "common.schema.json#/$defs/timestamp", "x-llmobs-frozen": true },
+    "end_time": { "oneOf": [ { "$ref": "common.schema.json#/$defs/timestamp" }, { "type": "null" } ], "description": "Absent/null ⇒ open or point_event (02-span.md §3)." },
+    "status": { "$ref": "common.schema.json#/$defs/status" },
+    "environment": { "$ref": "common.schema.json#/$defs/environment", "x-llmobs-frozen": true },
+    "release": { "type": ["string", "null"] },
+    "version": { "type": ["string", "null"] },
+    "session_id": { "type": ["string", "null"] },
+    "user_id": { "type": ["string", "null"] },
+    "input": { "description": "Opaque payload; MAY contain media tokens (02-span.md §4.3, §7)." },
+    "output": { "description": "Opaque payload." },
+    "attributes": { "$ref": "common.schema.json#/$defs/attributeMap" },
+
+    "model": { "type": ["string", "null"], "description": "Generation field: provided model name (06-usage-cost.md)." },
+    "model_parameters": { "type": ["object", "null"], "description": "Generation field: opaque request parameters." },
+    "completion_start_time": { "oneOf": [ { "$ref": "common.schema.json#/$defs/timestamp" }, { "type": "null" } ], "description": "Generation field: time to first token." },
+    "provided_usage_details": { "$ref": "common.schema.json#/$defs/usageMap" },
+    "usage_details": { "$ref": "common.schema.json#/$defs/usageMap" },
+    "provided_cost_details": { "$ref": "common.schema.json#/$defs/costMap" },
+    "cost_details": { "$ref": "common.schema.json#/$defs/costMap" },
+    "total_cost": { "type": ["number", "null"] },
+    "cost_source": { "enum": ["provided", "derived", null] },
+    "pricing_snapshot_ref": { "oneOf": [ { "$ref": "common.schema.json#/$defs/reference" }, { "type": "null" } ] },
+    "prompt_ref": { "oneOf": [ { "$ref": "common.schema.json#/$defs/reference" }, { "type": "null" } ], "description": "Optional prompt linkage as a reference, not a promoted column (02-span.md §5.4)." }
+  },
+  "required": ["id", "project_id", "trace_id", "kind", "name", "start_time", "status", "environment", "attributes"],
+  "allOf": [
+    {
+      "$comment": "06-usage-cost.md §4 step 1: provided cost short-circuits derivation, so pricing_snapshot_ref MUST be null/absent when cost_source is 'provided'.",
+      "if": {
+        "properties": { "cost_source": { "const": "provided" } },
+        "required": ["cost_source"]
+      },
+      "then": {
+        "properties": { "pricing_snapshot_ref": { "const": null } }
+      }
+    }
+  ]
+}

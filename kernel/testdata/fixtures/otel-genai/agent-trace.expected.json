@@ -1,0 +1,114 @@
+[
+  {
+    "attributes": {
+      "gen_ai.agent.name": "support-agent",
+      "llmobs.dq.dimension_coerced.environment": true,
+      "llmobs.raw.environment": "Production",
+      "resource.service.name": "support-svc",
+      "server.address": "api.openai.com"
+    },
+    "end_time": "2024-07-03T09:46:44.5Z",
+    "environment": "production",
+    "id": "aaaaaaaaaaaaaaaa",
+    "kind": "agent_step",
+    "name": "invoke_agent support-agent",
+    "project_id": "proj_demo",
+    "raw_kind": "invoke_agent",
+    "release": "2.3.1",
+    "session_id": "conv-789",
+    "start_time": "2024-07-03T09:46:40Z",
+    "status": {
+      "code": "ok"
+    },
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+  },
+  {
+    "attributes": {
+      "llmobs.dq.dimension_coerced.environment": true,
+      "llmobs.raw.environment": "Production",
+      "llmobs.raw.model_requested": "gpt-4o",
+      "resource.service.name": "support-svc"
+    },
+    "end_time": "2024-07-03T09:46:42.2Z",
+    "environment": "production",
+    "events": [
+      {
+        "attributes": {
+          "finish_reason": "tool_calls"
+        },
+        "name": "gen_ai.choice",
+        "timestamp": "2024-07-03T09:46:42.1Z"
+      }
+    ],
+    "id": "bbbbbbbbbbbbbbbb",
+    "input": "[{\"role\":\"user\",\"content\":\"refund order 55\"}]",
+    "kind": "generation",
+    "model": "gpt-4o-2024-08-06",
+    "model_parameters": {
+      "max_tokens": "256",
+      "temperature": "0.2"
+    },
+    "name": "chat gpt-4o",
+    "output": "[{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_1\",\"name\":\"get_order\"}]}]",
+    "parent_span_id": "aaaaaaaaaaaaaaaa",
+    "project_id": "proj_demo",
+    "provided_usage_details": {
+      "input": 812,
+      "output": 96,
+      "total": 908
+    },
+    "provider": "openai",
+    "raw_kind": "chat",
+    "release": "2.3.1",
+    "start_time": "2024-07-03T09:46:41Z",
+    "status": {
+      "code": "ok"
+    },
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+  },
+  {
+    "attributes": {
+      "gen_ai.tool.call.id": "call_1",
+      "gen_ai.tool.name": "get_order",
+      "llmobs.dq.dimension_coerced.environment": true,
+      "llmobs.raw.environment": "Production",
+      "resource.service.name": "support-svc"
+    },
+    "end_time": "2024-07-03T09:46:42.8Z",
+    "environment": "production",
+    "id": "cccccccccccccccc",
+    "kind": "tool_call",
+    "name": "execute_tool get_order",
+    "parent_span_id": "aaaaaaaaaaaaaaaa",
+    "project_id": "proj_demo",
+    "raw_kind": "execute_tool",
+    "release": "2.3.1",
+    "start_time": "2024-07-03T09:46:42.3Z",
+    "status": {
+      "code": "ok"
+    },
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+  },
+  {
+    "attributes": {
+      "db.system": "qdrant",
+      "db.vector.query.top_k": 5,
+      "llmobs.dq.dimension_coerced.environment": true,
+      "llmobs.raw.environment": "Production",
+      "resource.service.name": "support-svc"
+    },
+    "end_time": "2024-07-03T09:46:43.4Z",
+    "environment": "production",
+    "id": "dddddddddddddddd",
+    "kind": "span",
+    "name": "vector_search refund_policies",
+    "parent_span_id": "aaaaaaaaaaaaaaaa",
+    "project_id": "proj_demo",
+    "release": "2.3.1",
+    "start_time": "2024-07-03T09:46:42.9Z",
+    "status": {
+      "code": "ok"
+    },
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+  }
+]

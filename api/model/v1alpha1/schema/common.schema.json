@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.com/schemas/model/v1alpha1/common.schema.json",
+  "title": "LLMObs canonical model — common definitions (v1alpha1)",
+  "$comment": "The host in $id is the product's canonical schema URL; per D15 the product name/brand lives only in packages/brand and kernel/pkg/brand, and this URL is the one permitted textual appearance. x-llmobs-frozen marks fields immutable after first write (see 05-update-semantics.md).",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identity string, unique within (project_id, entity)."
+    },
+    "hexId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]+$",
+      "description": "Lowercase hex id (OTel trace_id/span_id rendering). Plugin/compat ids MAY be non-hex; use 'id' for those."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC instant, millisecond precision or finer."
+    },
+    "environment": {
+      "type": "string",
+      "pattern": "^[a-z0-9._-]{1,40}$",
+      "default": "default",
+      "description": "Sanitized low-cardinality dimension (08-data-quality.md §2). Frozen."
+    },
+    "attributeValue": true,
+    "attributeMap": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/attributeValue" },
+      "description": "Open key/value map. Holds every non-promoted attribute; raw attributes always preserved. Keys under 'llmobs.*' are kernel-owned (02-span.md §6)."
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": { "enum": ["unset", "ok", "error"], "default": "unset" },
+        "message": { "type": "string" }
+      },
+      "required": ["code"],
+      "description": "OTel-aligned status (02-span.md §4.1)."
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "minLength": 1, "description": "Referent kind, e.g. score_config, prompt, price, or a plugin namespaced type (evals/dataset_run_item)." },
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string", "description": "Optional human-readable snapshot captured at write time (07-references.md §2)." }
+      },
+      "required": ["type", "id"],
+      "description": "A (type, id) soft pointer with an optional label snapshot (07-references.md). No FK; MAY dangle."
+    },
+    "spanEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "timestamp": { "$ref": "#/$defs/timestamp" },
+        "attributes": { "$ref": "#/$defs/attributeMap" }
+      },
+      "required": ["name", "timestamp"],
+      "description": "A generic (name, timestamp, attributes) record attached to a span (02-span.md §4.4). Not an entity; union-merged on update."
+    },
+    "usageMap": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 },
+      "description": "Usage counts (non-negative integers). Well-known keys: input, output, total, cache_read, cache_write, reasoning, audio, image (06-usage-cost.md §3). Provider-reported semantics; not comparable across providers."
+    },
+    "costMap": {
+      "type": "object",
+      "additionalProperties": { "type": "number" },
+      "description": "Cost amounts as decimals (adapters preserve >= 12 fractional digits). Same well-known keys as usageMap."
+    }
+  }
+}

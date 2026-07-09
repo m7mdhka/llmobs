@@ -1,0 +1,13 @@
+{
+  "id": "cfg_sentiment",
+  "project_id": "proj_demo",
+  "name": "sentiment",
+  "data_type": "categorical",
+  "is_archived": false,
+  "categories": [
+    { "label": "positive", "value": 1 },
+    { "label": "neutral", "value": 0 },
+    { "label": "negative", "value": -1 }
+  ],
+  "description": "3-way sentiment label"
+}

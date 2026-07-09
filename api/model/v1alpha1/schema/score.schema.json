@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.com/schemas/model/v1alpha1/score.schema.json",
+  "title": "LLMObs canonical Score (v1alpha1)",
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "04-score.md. A measurement only. Both value fields are nullable; data_type selects the authoritative one; no sentinel values. The allOf/if-then blocks enforce exactly one authoritative value per data_type.",
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/id", "x-llmobs-frozen": true },
+    "project_id": { "$ref": "common.schema.json#/$defs/id", "x-llmobs-frozen": true },
+    "subject_type": {
+      "x-llmobs-frozen": true,
+      "anyOf": [
+        { "enum": ["span", "trace", "session"] },
+        { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*$", "description": "Plugin-namespaced subject type (04-score.md §5.2)." }
+      ]
+    },
+    "subject_id": { "$ref": "common.schema.json#/$defs/id", "x-llmobs-frozen": true },
+    "name": { "type": "string", "minLength": 1 },
+    "data_type": { "enum": ["numeric", "categorical", "boolean"] },
+    "value_numeric": { "type": ["number", "null"] },
+    "value_string": { "type": ["string", "null"] },
+    "source": { "enum": ["human", "llm_judge", "code", "external"] },
+    "config_ref": { "oneOf": [ { "$ref": "common.schema.json#/$defs/reference" }, { "type": "null" } ] },
+    "comment": { "type": ["string", "null"] },
+    "metadata": { "$ref": "common.schema.json#/$defs/attributeMap" },
+    "timestamp": { "$ref": "common.schema.json#/$defs/timestamp", "x-llmobs-frozen": true },
+    "environment": { "$ref": "common.schema.json#/$defs/environment", "x-llmobs-frozen": true }
+  },
+  "required": ["id", "project_id", "subject_type", "subject_id", "name", "data_type", "source", "timestamp", "environment", "metadata"],
+  "allOf": [
+    {
+      "$comment": "numeric: value_numeric required, value_string MUST be null.",
+      "if": { "properties": { "data_type": { "const": "numeric" } }, "required": ["data_type"] },
+      "then": {
+        "properties": {
+          "value_numeric": { "type": "number" },
+          "value_string": { "type": "null" }
+        },
+        "required": ["value_numeric"]
+      }
+    },
+    {
+      "$comment": "boolean: value_numeric in {0,1}, value_string MUST be null.",
+      "if": { "properties": { "data_type": { "const": "boolean" } }, "required": ["data_type"] },
+      "then": {
+        "properties": {
+          "value_numeric": { "enum": [0, 1] },
+          "value_string": { "type": "null" }
+        },
+        "required": ["value_numeric"]
+      }
+    },
+    {
+      "$comment": "categorical: value_string required (the label), value_numeric MAY be the mapped number or null.",
+      "if": { "properties": { "data_type": { "const": "categorical" } }, "required": ["data_type"] },
+      "then": {
+        "properties": {
+          "value_string": { "type": "string", "minLength": 1 },
+          "value_numeric": { "type": ["number", "null"] }
+        },
+        "required": ["value_string"]
+      }
+    }
+  ]
+}

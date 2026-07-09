@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.com/schemas/model/v1alpha1/trace.schema.json",
+  "title": "LLMObs canonical Trace (v1alpha1)",
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "03-trace.md. A trace has no kind and no generation fields. Non-promoted attributes live in 'attributes'.",
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/id", "x-llmobs-frozen": true },
+    "project_id": { "$ref": "common.schema.json#/$defs/id", "x-llmobs-frozen": true },
+    "name": { "type": ["string", "null"] },
+    "start_time": { "$ref": "common.schema.json#/$defs/timestamp", "x-llmobs-frozen": true },
+    "end_time": { "oneOf": [ { "$ref": "common.schema.json#/$defs/timestamp" }, { "type": "null" } ], "description": "MAY be derived as max(span.end_time) by an adapter (03-trace.md §3)." },
+    "status": { "$ref": "common.schema.json#/$defs/status" },
+    "input": { "description": "Opaque trace-level input." },
+    "output": { "description": "Opaque trace-level output." },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": [],
+      "description": "Set semantics; union-merged on update (03-trace.md §2)."
+    },
+    "environment": { "$ref": "common.schema.json#/$defs/environment", "x-llmobs-frozen": true },
+    "release": { "type": ["string", "null"] },
+    "version": { "type": ["string", "null"] },
+    "session_id": { "type": ["string", "null"] },
+    "user_id": { "type": ["string", "null"] },
+    "attributes": { "$ref": "common.schema.json#/$defs/attributeMap" }
+  },
+  "required": ["id", "project_id", "start_time", "environment", "attributes"]
+}

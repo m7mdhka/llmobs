@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.com/schemas/model/v1alpha1/media-reference.schema.json",
+  "title": "LLMObs canonical MediaReference (v1alpha1)",
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "02-span.md §7. Content-addressed pointer to out-of-band bytes. Identity is (project_id, sha256); referenced from span fields by the @@@llmobsMedia:<sha256>@@@ token.",
+  "properties": {
+    "project_id": { "$ref": "common.schema.json#/$defs/id" },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lowercase hex SHA-256 of the content; the dedup key within a project."
+    },
+    "content_type": { "type": ["string", "null"] },
+    "size_bytes": { "type": ["integer", "null"], "minimum": 0 },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  },
+  "required": ["project_id", "sha256", "created_at"]
+}

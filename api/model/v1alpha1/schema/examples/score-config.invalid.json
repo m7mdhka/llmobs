@@ -1,0 +1,8 @@
+{
+  "id": "cfg_bad",
+  "project_id": "proj_demo",
+  "name": "score1",
+  "data_type": "numeric",
+  "is_archived": false,
+  "categories": [ { "label": "x", "value": 1 } ]
+}

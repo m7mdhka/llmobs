@@ -52,10 +52,12 @@ var mapFields = map[string]bool{
 // isDeletedKey is the reserved provenance key for the is_deleted field-group.
 const isDeletedKey = "is_deleted"
 
-// pathSep joins field-group path segments. It is NUL so that attribute keys
-// containing dots (e.g. "gen_ai.request.model") stay a single key and only real
-// nested objects deep-merge — never conflate a dotted key with a path.
-const pathSep = "\x00"
+// pathSep joins field-group path segments so that attribute keys containing dots
+// (e.g. "gen_ai.request.model") stay a single key and only real nested objects
+// deep-merge — never conflate a dotted key with a path. It is SOH (0x01): absent
+// from real keys, and unlike NUL (0x00) it is legal in Postgres jsonb, which the
+// provenance column persists (NUL raises SQLSTATE 22P05).
+const pathSep = "\x01"
 
 // isSet reports whether a value "sets" its field-group (05 §2.1): not-set when
 // nil, "", empty array, or a composite whose leaves are all unset (recursively).

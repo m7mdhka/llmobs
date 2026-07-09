@@ -75,7 +75,7 @@ pos={s["id"]:i for i,s in enumerate(spans)}
 for i,s in enumerate(spans):
     p=s.get("parent_span_id") or ""
     if p and p in pos:
-        assert pos[p] < i, f"child {s[\"id\"]} precedes parent {p}"
+        assert pos[p] < i, "child precedes parent: "+s["id"]
 assert trace.get("start_time"), "trace.start_time not synthesized"
 print(f"   assert OK: tree of {len(spans)} spans in parent-before-child order, trace synthesized")
 '

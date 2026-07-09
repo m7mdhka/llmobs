@@ -6,7 +6,9 @@
 package query
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -41,6 +43,10 @@ type Compiled struct {
 	Args  []any
 	Order string
 	Limit int
+	// Fingerprint binds a keyset cursor to the query shape (filters, timeRange,
+	// orderBy). The next page's cursor must carry it; a cursor from a different
+	// query shape is rejected (DSL §7).
+	Fingerprint string
 }
 
 type fieldClass int
@@ -98,10 +104,27 @@ func (b *builder) ph(v any) string {
 	return "$" + strconv.Itoa(len(b.args))
 }
 
+// allowedTopKeys is the closed set of top-level query keys (DSL §1). Unknown
+// keys are rejected (schema_invalid) so typos never silently no-op.
+var allowedTopKeys = map[string]bool{
+	"version": true, "target": true, "timeRange": true, "filters": true,
+	"orderBy": true, "limit": true, "cursor": true,
+	"groupBy": true, "aggregations": true, "scores": true,
+}
+
 // CompileSpans compiles a spans query for the given project.
 func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration) (*Compiled, error) {
 	if t, _ := doc["target"].(string); t != "spans" {
 		return nil, errf("schema_invalid", 400, "target must be 'spans'")
+	}
+	for k := range doc {
+		if !allowedTopKeys[k] {
+			return nil, errf("schema_invalid", 400, "unknown top-level key %q", k)
+		}
+	}
+	// scoreConditions only apply to the traces target (DSL §8).
+	if _, hasScores := doc["scores"]; hasScores {
+		return nil, errf("schema_invalid", 400, "scores are only valid on the traces target")
 	}
 	b := &builder{}
 	// project scoping is always first.
@@ -137,6 +160,11 @@ func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration)
 				var ors []string
 				for _, c := range anyList {
 					cm, _ := c.(map[string]any)
+					// MAX_NESTING_DEPTH = 2 (an AND of ORs): an OR member must be a
+					// leaf condition, never another group (DSL §2.4).
+					if _, nested := cm["any"]; nested {
+						return nil, errf("schema_invalid", 400, "nesting exceeds MAX_NESTING_DEPTH (2)")
+					}
 					sql, err := compileCondition(b, cm)
 					if err != nil {
 						return nil, err
@@ -174,16 +202,34 @@ func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration)
 		limit = lv
 	}
 
-	// keyset cursor (default order only in B1)
+	// keyset cursor (default order only in B1). The cursor is bound to the query
+	// shape so paging with a mutated query is rejected rather than silently wrong.
+	fp := queryFingerprint(doc)
 	if cur, ok := doc["cursor"].(string); ok && cur != "" {
-		st, id, err := decodeCursor(cur)
+		cfp, st, id, err := decodeCursor(cur)
 		if err != nil {
 			return nil, errf("schema_invalid", 400, "invalid cursor")
+		}
+		if cfp != fp {
+			return nil, errf("schema_invalid", 400, "cursor does not match query (filters/timeRange/orderBy changed)")
 		}
 		preds = append(preds, "(start_time < "+b.ph(st)+" OR (start_time = "+b.ph(st)+" AND id > "+b.ph(id)+"))")
 	}
 
-	return &Compiled{Where: strings.Join(preds, " AND "), Args: b.args, Order: order, Limit: limit}, nil
+	return &Compiled{Where: strings.Join(preds, " AND "), Args: b.args, Order: order, Limit: limit, Fingerprint: fp}, nil
+}
+
+// queryFingerprint hashes the query shape that a cursor sequence must hold fixed:
+// filters, timeRange, and orderBy (limit and cursor may vary between pages).
+func queryFingerprint(doc map[string]any) string {
+	shape := map[string]any{
+		"filters":   doc["filters"],
+		"timeRange": doc["timeRange"],
+		"orderBy":   doc["orderBy"],
+	}
+	b, _ := json.Marshal(shape)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }
 
 func compileCondition(b *builder, c map[string]any) (string, error) {
@@ -422,22 +468,24 @@ func toInt(v any) (int, bool) {
 	return 0, false
 }
 
-// Cursor: base64 of "<rfc3339nano>|<id>".
-func EncodeCursor(startTime time.Time, id string) string {
-	return base64.StdEncoding.EncodeToString([]byte(startTime.UTC().Format(time.RFC3339Nano) + "|" + id))
+// Cursor: base64 of "<fingerprint>|<rfc3339nano>|<id>". The fingerprint binds
+// the cursor to the query shape (DSL §7).
+func EncodeCursor(fingerprint string, startTime time.Time, id string) string {
+	return base64.StdEncoding.EncodeToString(
+		[]byte(fingerprint + "|" + startTime.UTC().Format(time.RFC3339Nano) + "|" + id))
 }
 
-func decodeCursor(s string) (time.Time, string, error) {
-	b, err := base64.StdEncoding.DecodeString(s)
-	if err != nil {
-		return time.Time{}, "", err
+func decodeCursor(s string) (fingerprint string, t time.Time, id string, err error) {
+	b, derr := base64.StdEncoding.DecodeString(s)
+	if derr != nil {
+		return "", time.Time{}, "", derr
 	}
-	parts := strings.SplitN(string(b), "|", 2)
-	if len(parts) != 2 {
-		return time.Time{}, "", fmt.Errorf("bad cursor")
+	parts := strings.SplitN(string(b), "|", 3)
+	if len(parts) != 3 {
+		return "", time.Time{}, "", fmt.Errorf("bad cursor")
 	}
-	t, err := time.Parse(time.RFC3339Nano, parts[0])
-	return t, parts[1], err
+	t, err = time.Parse(time.RFC3339Nano, parts[1])
+	return parts[0], t, parts[2], err
 }
 
 // jsonBody decodes a request body into a query doc.

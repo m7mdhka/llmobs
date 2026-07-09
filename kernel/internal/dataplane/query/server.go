@@ -100,7 +100,7 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	if len(rows) > c.Limit {
 		rows = rows[:c.Limit]
 		if st, id2, ok := cursorFromDoc(rows[len(rows)-1]); ok {
-			cursor = EncodeCursor(st, id2)
+			cursor = EncodeCursor(c.Fingerprint, st, id2)
 		}
 	}
 

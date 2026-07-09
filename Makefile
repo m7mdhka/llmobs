@@ -28,6 +28,10 @@ help: ## Show this help
 setup: ## Install toolchain deps, pre-commit hooks, and init git-flow
 	@echo ">> setup: installing pinned toolchain (mise)"
 	@command -v mise >/dev/null 2>&1 && mise install || echo "   (mise not found; skipping — see mise.toml)"
+	@echo ">> setup: installing codegen toolchain (tools/codegen)"
+	@command -v pnpm >/dev/null 2>&1 && pnpm --dir tools/codegen install --ignore-workspace || echo "   (pnpm not found; skipping codegen deps)"
+	@echo ">> setup: installing workspace deps (pnpm)"
+	@command -v pnpm >/dev/null 2>&1 && pnpm install || echo "   (pnpm not found; skipping workspace install)"
 	@echo ">> setup: installing pre-commit hooks"
 	@command -v pre-commit >/dev/null 2>&1 && pre-commit install --install-hooks --hook-type commit-msg --hook-type pre-commit || echo "   (pre-commit not found; skipping)"
 	@echo ">> setup: initializing git-flow (non-interactive, project branch names)"
@@ -38,9 +42,9 @@ setup: ## Install toolchain deps, pre-commit hooks, and init git-flow
 # ---------------------------------------------------------------------------
 
 .PHONY: generate
-generate: ## Regenerate code from api/ contracts (openapi -> Go/TS, schema -> types)
-	@echo ">> generate: api/ -> pkg/model, packages/query-client, schema types"
-	@echo "   (delegates to tools/codegen)"
+generate: ## Regenerate code from api/ contracts (JSON Schema -> Go/TS types, OpenAPI -> Go server)
+	@echo ">> generate: api/ -> kernel/pkg/model, kernel gateway server, packages/query-client"
+	@bash tools/codegen/generate.sh
 
 # ---------------------------------------------------------------------------
 # Build

@@ -1,0 +1,71 @@
+{
+  "version": "v1alpha1",
+  "_comment": "QUERYABLE FIELD REGISTRY. HAND-AUTHORED NOW, TO BE GENERATED from api/model/v1alpha1 later. It MUST exactly match the promoted/first-class fields in api/model/v1alpha1/02-span.md (spans), 03-trace.md (traces), and 04-score.md (scores). A CI consistency check asserts this. class values map to the operator sets in 00-dsl-spec.md §2. 'orderable' = usable in orderBy (promoted/indexed); 'groupable' = usable in groupBy; map/reference fields are queried via key-scoped / reference conditions, never orderBy/groupBy.",
+  "classes": ["string", "enum", "numeric", "decimal", "timestamp", "boolean", "string_array", "attr_map", "reference"],
+  "targets": {
+    "spans": {
+      "timeAnchor": "start_time",
+      "fields": [
+        { "name": "id", "class": "string", "orderable": true, "groupable": false, "anchor": "02-span.md §4 (id)" },
+        { "name": "trace_id", "class": "string", "orderable": true, "groupable": false, "anchor": "02-span.md §4 (trace_id)" },
+        { "name": "parent_span_id", "class": "string", "orderable": false, "groupable": false, "anchor": "02-span.md §4" },
+        { "name": "kind", "class": "enum", "orderable": false, "groupable": true, "anchor": "02-span.md §2" },
+        { "name": "raw_kind", "class": "string", "orderable": false, "groupable": true, "anchor": "02-span.md §2.1" },
+        { "name": "name", "class": "string", "orderable": true, "groupable": true, "anchor": "02-span.md §4" },
+        { "name": "start_time", "class": "timestamp", "orderable": true, "groupable": true, "anchor": "02-span.md §4 (time anchor)" },
+        { "name": "end_time", "class": "timestamp", "orderable": true, "groupable": false, "anchor": "02-span.md §4" },
+        { "name": "status.code", "class": "enum", "orderable": false, "groupable": true, "anchor": "02-span.md §4.1" },
+        { "name": "environment", "class": "string", "orderable": false, "groupable": true, "anchor": "02-span.md §4.2" },
+        { "name": "release", "class": "string", "orderable": false, "groupable": true, "anchor": "02-span.md §4.2" },
+        { "name": "version", "class": "string", "orderable": false, "groupable": true, "anchor": "02-span.md §4.2" },
+        { "name": "session_id", "class": "string", "orderable": false, "groupable": true, "anchor": "02-span.md §4 (dimension)" },
+        { "name": "user_id", "class": "string", "orderable": false, "groupable": true, "anchor": "02-span.md §4 (dimension)" },
+        { "name": "model", "class": "string", "orderable": false, "groupable": true, "anchor": "02-span.md §5 (generation)" },
+        { "name": "provider", "class": "string", "orderable": false, "groupable": true, "anchor": "02-span.md §5 (generation, F7)" },
+        { "name": "total_cost", "class": "decimal", "orderable": true, "groupable": false, "anchor": "02-span.md §5 (generation)" },
+        { "name": "attributes", "class": "attr_map", "value_type": "string", "orderable": false, "groupable": false, "anchor": "02-span.md §6" },
+        { "name": "usage_details", "class": "attr_map", "value_type": "numeric", "orderable": false, "groupable": false, "anchor": "06-usage-cost.md §1" },
+        { "name": "cost_details", "class": "attr_map", "value_type": "numeric", "orderable": false, "groupable": false, "anchor": "06-usage-cost.md §1" },
+        { "name": "provided_usage_details", "class": "attr_map", "value_type": "numeric", "orderable": false, "groupable": false, "anchor": "06-usage-cost.md §1" },
+        { "name": "provided_cost_details", "class": "attr_map", "value_type": "numeric", "orderable": false, "groupable": false, "anchor": "06-usage-cost.md §1" },
+        { "name": "prompt_ref", "class": "reference", "orderable": false, "groupable": false, "anchor": "02-span.md §5.4, 07-references.md §1.1" },
+        { "name": "pricing_snapshot_ref", "class": "reference", "orderable": false, "groupable": false, "anchor": "06-usage-cost.md §5, 07-references.md §1.1" }
+      ]
+    },
+    "traces": {
+      "timeAnchor": "start_time",
+      "fields": [
+        { "name": "id", "class": "string", "orderable": true, "groupable": false, "anchor": "03-trace.md §1 (id)" },
+        { "name": "name", "class": "string", "orderable": true, "groupable": true, "anchor": "03-trace.md §1" },
+        { "name": "start_time", "class": "timestamp", "orderable": true, "groupable": true, "anchor": "03-trace.md §1 (time anchor)" },
+        { "name": "end_time", "class": "timestamp", "orderable": true, "groupable": false, "anchor": "03-trace.md §1" },
+        { "name": "status.code", "class": "enum", "orderable": false, "groupable": true, "anchor": "03-trace.md §1" },
+        { "name": "environment", "class": "string", "orderable": false, "groupable": true, "anchor": "03-trace.md §1" },
+        { "name": "release", "class": "string", "orderable": false, "groupable": true, "anchor": "03-trace.md §1" },
+        { "name": "version", "class": "string", "orderable": false, "groupable": true, "anchor": "03-trace.md §1" },
+        { "name": "session_id", "class": "string", "orderable": false, "groupable": true, "anchor": "03-trace.md §1 (dimension)" },
+        { "name": "user_id", "class": "string", "orderable": false, "groupable": true, "anchor": "03-trace.md §1 (dimension)" },
+        { "name": "tags", "class": "string_array", "orderable": false, "groupable": false, "anchor": "03-trace.md §2" },
+        { "name": "attributes", "class": "attr_map", "value_type": "string", "orderable": false, "groupable": false, "anchor": "03-trace.md §1" }
+      ]
+    },
+    "scores": {
+      "timeAnchor": "timestamp",
+      "fields": [
+        { "name": "id", "class": "string", "orderable": true, "groupable": false, "anchor": "04-score.md §5 (id)" },
+        { "name": "subject_type", "class": "string", "orderable": false, "groupable": true, "anchor": "04-score.md §5" },
+        { "name": "subject_id", "class": "string", "orderable": false, "groupable": false, "anchor": "04-score.md §5" },
+        { "name": "name", "class": "string", "orderable": true, "groupable": true, "anchor": "04-score.md §5" },
+        { "name": "data_type", "class": "enum", "orderable": false, "groupable": true, "anchor": "04-score.md §2" },
+        { "name": "value_numeric", "class": "numeric", "orderable": true, "groupable": false, "anchor": "04-score.md §2" },
+        { "name": "value_string", "class": "string", "orderable": false, "groupable": true, "anchor": "04-score.md §2" },
+        { "name": "source", "class": "enum", "orderable": false, "groupable": true, "anchor": "04-score.md §4" },
+        { "name": "timestamp", "class": "timestamp", "orderable": true, "groupable": true, "anchor": "04-score.md §5 (time anchor)" },
+        { "name": "environment", "class": "string", "orderable": false, "groupable": true, "anchor": "04-score.md §5" },
+        { "name": "comment", "class": "string", "orderable": false, "groupable": false, "anchor": "04-score.md §5" },
+        { "name": "metadata", "class": "attr_map", "value_type": "string", "orderable": false, "groupable": false, "anchor": "04-score.md §5" },
+        { "name": "config_ref", "class": "reference", "orderable": false, "groupable": false, "anchor": "04-score.md §5, 07-references.md §1.1" }
+      ]
+    }
+  }
+}

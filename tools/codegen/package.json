@@ -1,0 +1,14 @@
+{
+  "name": "@llmobs/codegen",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Codegen toolchain: JSON Schema + OpenAPI -> Go/TS. Pinned generator versions.",
+  "type": "module",
+  "scripts": {
+    "generate": "bash generate.sh"
+  },
+  "devDependencies": {
+    "quicktype": "23.0.171",
+    "yaml": "2.5.1"
+  }
+}

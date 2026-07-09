@@ -27,6 +27,10 @@ pnpm-debug.log*
 .mise/
 .cache/
 
+# ---- Codegen build artifacts ----
+tools/codegen/.openapi-bundle.json
+tools/codegen/.deref/
+
 # ---- Deploy / local clusters ----
 deploy/**/charts/*.tgz
 kubeconfig

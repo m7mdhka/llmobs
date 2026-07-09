@@ -1,0 +1,11 @@
+{
+  "version": "v1alpha1",
+  "target": "spans",
+  "filters": [
+    {
+      "field": "kind",
+      "op": "eq",
+      "value": "generation"
+    }
+  ]
+}

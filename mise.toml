@@ -3,7 +3,7 @@
 # Run `mise install` to materialize this toolchain.
 
 [tools]
-go = "1.23"
+go = "1.24"
 node = "22"
 pnpm = "9"
 python = "3.12"
@@ -16,11 +16,6 @@ gitleaks = "8.21"
 # pipx backend so `mise install` resolves them.
 "pipx:pre-commit" = "4.0"
 "pipx:commitizen" = "3.29"
-
-[env]
-# The pnpm store and Go module cache are mounted as named volumes in the
-# devcontainer; keep their locations stable across environments.
-GOFLAGS = "-mod=mod"
 
 [settings]
 # Fail loudly if a tool is used that isn't pinned here.

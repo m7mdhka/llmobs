@@ -47,4 +47,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
       - name: cz check on PR title
-        run: echo "${{ github.event.pull_request.title }}" | cz check --message-length-limit 0 --commit-msg-file /dev/stdin
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: cz check --message "$PR_TITLE"

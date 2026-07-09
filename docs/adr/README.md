@@ -36,3 +36,4 @@ order). New decisions continue the numbering:
 | [ADR-0016](0016-canonical-data-model-v1alpha1.md) | Canonical data model `v1alpha1` (master; LM-1..LM-12) |
 | [ADR-0017](0017-score-model.md) | Score model (LM-3 + LM-8) |
 | [ADR-0018](0018-span-taxonomy-and-payload-shapes.md) | Span taxonomy and payload shapes (LM-1 + LM-2) |
+| [ADR-0019](0019-query-dsl.md) | Query DSL (QD-1..QD-10) |

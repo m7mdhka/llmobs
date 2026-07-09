@@ -29,6 +29,7 @@ pnpm-debug.log*
 
 # ---- Codegen build artifacts ----
 tools/codegen/.openapi-bundle.json
+tools/codegen/.deref/
 
 # ---- Deploy / local clusters ----
 deploy/**/charts/*.tgz

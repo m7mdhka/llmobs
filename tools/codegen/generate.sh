@@ -25,25 +25,35 @@ if [ ! -x "$QT" ]; then
   exit 1
 fi
 
+# Dereference schemas into self-contained documents (inline $ref, strip $id) so
+# quicktype generation is deterministic across environments (its cross-file/$id
+# resolution is node-version-sensitive). Deref output is a git-ignored artifact.
+DEREF="$CG/.deref"
+rm -rf "$DEREF"; mkdir -p "$DEREF"
+for s in span trace score score-config media-reference; do
+  node "$CG/deref_schema.mjs" "$MODEL_SCHEMA/$s.schema.json" "$DEREF/$s.schema.json"
+done
+node "$CG/deref_schema.mjs" "$DSL_SCHEMA" "$DEREF/dsl.schema.json"
+
 echo ">> codegen: Go model types (JSON Schema -> kernel/pkg/model)"
 mkdir -p "$(dirname "$GO_MODEL_OUT")"
 "$QT" -s schema --lang go --package model \
-  "$MODEL_SCHEMA/span.schema.json" \
-  "$MODEL_SCHEMA/trace.schema.json" \
-  "$MODEL_SCHEMA/score.schema.json" \
-  "$MODEL_SCHEMA/score-config.schema.json" \
-  "$MODEL_SCHEMA/media-reference.schema.json" \
+  "$DEREF/span.schema.json" \
+  "$DEREF/trace.schema.json" \
+  "$DEREF/score.schema.json" \
+  "$DEREF/score-config.schema.json" \
+  "$DEREF/media-reference.schema.json" \
   -o "$GO_MODEL_OUT"
 
 echo ">> codegen: TypeScript types (JSON Schema + DSL -> packages/query-client)"
 mkdir -p "$(dirname "$TS_TYPES_OUT")"
 "$QT" -s schema --lang ts --just-types --nice-property-names \
-  "$MODEL_SCHEMA/span.schema.json" \
-  "$MODEL_SCHEMA/trace.schema.json" \
-  "$MODEL_SCHEMA/score.schema.json" \
-  "$MODEL_SCHEMA/score-config.schema.json" \
-  "$MODEL_SCHEMA/media-reference.schema.json" \
-  "$DSL_SCHEMA" \
+  "$DEREF/span.schema.json" \
+  "$DEREF/trace.schema.json" \
+  "$DEREF/score.schema.json" \
+  "$DEREF/score-config.schema.json" \
+  "$DEREF/media-reference.schema.json" \
+  "$DEREF/dsl.schema.json" \
   -o "$TS_TYPES_OUT"
 
 echo ">> codegen: Go server interface (OpenAPI -> kernel gateway)"

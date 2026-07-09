@@ -96,8 +96,38 @@ prompts are a plugin concept (invariant 2); see [`02-span.md`](../../api/model/v
   first-class generation query dimension; resolved model identity is a derived
   attribute, not promoted.
 
+## Addendum (2026-07-09) — validation-pass resolutions
+
+The four-dialect validation pass surfaced refinements to this ADR's decisions.
+Ruled and applied:
+
+- **F1 — `CHAIN` → `span`, always (not `agent_step`).** LM-1 originally left
+  `CHAIN → agent_step or span`. The "orchestrates sub-steps" predicate is not
+  evaluable from a span alone (children may not have arrived), and `kind` is
+  frozen, so a stateful guess raises a `frozen_field_conflict` for a structural
+  reason. Ruling: `CHAIN → span` deterministically; `raw_kind: chain` keeps it
+  queryable. **The foreign-type mapping MUST be a pure function of the span's own
+  data** (`02-span.md` §2.2–2.3). The "or" is removed from the mapping guidance.
+- **F7 — promoted-set amendment: add `provider`; redefine `model` as the
+  resolved/served model.** `provider` and the served model are the inputs cost
+  derivation most needs; leaving them in the attribute map (as originally drafted)
+  made the enrichment contract depend on string keys. `provider` joins the
+  promoted set on `generation_shaped` spans, and `model` is now the served model
+  (e.g. `gen_ai.response.model`) with the requested model preserved under
+  `llmobs.raw.model_requested` (`02-span.md` §5). This is a deliberate promoted-set
+  growth, recorded here per the "promotion requires an ADR" rule.
+- **Q1 — span events are first-class (generic `(name, timestamp, attributes)`).**
+  A span MAY carry OTel-native span events, preserving per-event timestamps and
+  ordering that opaque `input`/`output` would lose. No typed message/chat model in
+  `v1alpha1` (deferred to a later maturity version). When both flattened attribute
+  arrays and span events encode the same content, the attribute arrays are
+  authoritative for composing `input`/`output` and the events are preserved
+  (`02-span.md` §4.4, §4.3).
+- **Q3 — evaluators are spans; normalizers MUST NOT synthesize Scores** (recorded
+  in ADR-0017 and `04-score.md` §1.1).
+
 ## Links
 
 - Spec: [`02-span.md`](../../api/model/v1alpha1/02-span.md), [`span.schema.json`](../../api/model/v1alpha1/schema/span.schema.json).
 - Parent: ADR-0016. Sibling: ADR-0017.
-- Evidence: study Ch. 05, Ch. 06, Ch. 08; `findings-for-data-model.md` §1, §2.
+- Evidence: study Ch. 05, Ch. 06, Ch. 08; `findings-for-data-model.md` §1, §2; validation pass ([`validation/README.md`](../../api/model/v1alpha1/validation/README.md)).

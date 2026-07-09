@@ -22,6 +22,26 @@ A **reference** is a `(type, id)` pair, OPTIONALLY carrying a **label snapshot**
 - There are **no foreign keys** across the entity/plugin boundary. A reference is
   a soft pointer; the referent MAY not exist (§3).
 
+### 1.1 References are queryable (Normative) — Q6
+
+References stored on an entity MUST be **filterable in the Query DSL by equality**
+on `(ref_type, ref_id, ref_label)`. This is a **generic** mechanism: it applies to
+every reference field (`prompt_ref`, `pricing_snapshot_ref`, `config_ref`, and any
+future plugin-owned reference) uniformly, with no per-reference promotion.
+
+This recovers, generically, the query power a promoted column would give — e.g.
+"all generations whose `prompt_ref` has `ref_id = X`" or "… `ref_label =
+greeting@v3`" — so Langfuse's filter-/group-by-prompt capability is available
+without promoting prompt fields (which would make prompts a kernel concept,
+violating invariant 2). Every plugin-owned reference type gets the same filtering
+for free.
+
+> Rationale: Q6 keeps prompts (and all cross-boundary referents) plugin-owned while
+> restoring the queryability that motivated promoting them. The Query DSL contract
+> (a separate document) MUST expose reference-equality filters; this section is the
+> data-model obligation that makes references first-class *query targets* without
+> making them promoted *storage columns*.
+
 > Evidence: Langfuse makes every cross-store/cross-entity pointer a plain string
 > with no FK — eval job inputs, dataset item source ids, run-item pointers, media
 > links, observation→prompt — and explicitly dropped the Postgres FKs between

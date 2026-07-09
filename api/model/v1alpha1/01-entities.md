@@ -33,6 +33,7 @@ Organization            (control plane, not an entity)
 └── Project             (control plane, not an entity; project_id scopes all below)
     └── Trace
         └── Span            (parent_span_id forms an in-trace tree; a span MAY be a point event)
+            └── SpanEvent   (nested (name, timestamp, attributes) records; NOT an entity — 02-span.md §4.4)
     └── Score               (attaches to a subject: a span, a trace, a session, or a plugin type)
     └── ScoreConfig         (definition; a Score MAY reference one)
     └── MediaReference      (referenced from span input/output/attributes via a token)

@@ -60,5 +60,27 @@ OTel/OpenInference/OpenLLMetry), `prompt_ref` (only Langfuse has prompt linkage)
 and the usage keys `cache_write`/`reasoning`/`audio`/`image` (unfillable from
 plain OTel GenAI).
 
-See the design-session report for the recommended dispositions and the questions
-requiring a decision before the model is promoted past `v1alpha1`.
+## Resolutions applied (post-review, 2026-07-09)
+
+All findings above were ruled on in the design review and applied to the spec,
+schemas, and test vectors on this branch:
+
+| # | Ruling |
+|---|---|
+| F1 | `CHAIN → span` always (deterministic); mapping is a pure per-span function (`02-span.md` §2.2–2.3, ADR-0018 addendum). |
+| F2 | `model_parameters` are verbatim `map<string,string>`, not parsed at normalize time; well-known key list documented (`02-span.md` §5). |
+| F3 | Usage keys are provider-reported as-is; cache buckets are additive; no cross-provider reinterpretation; not comparable across providers (`06-usage-cost.md` §3.1). |
+| F4 | `status.code = error` iff the source signals an error; `finish_reason` never implies error; `error.type` is a well-known attribute (`02-span.md` §4.1, §6.1). |
+| F5 | Per-attribute-value size cap (configurable, default 16 KB); oversize stamped `llmobs.dq.truncated_attributes`; large payloads → media refs (`02-span.md` §6.2, `08` §3). |
+| F6 | Optional `input_content_type`/`output_content_type` rendering hints; not promoted (`02-span.md` §4.3). |
+| F7 | `provider` added to the promoted generation set; `model` = resolved/served model, requested preserved in `llmobs.raw.model_requested` (`02-span.md` §5, ADR-0018 addendum). |
+| Q1 | First-class **span events** (generic `(name, timestamp, attributes)`); `input`/`output` stay opaque; attribute arrays authoritative when both encodings appear; no typed message model in `v1alpha1` (`02-span.md` §4.4, `05` §3.1 + vector V15). |
+| Q2 | Opaque payloads kept; `llmobs.call_id` well-known convention links a generation's tool call to its `tool_call` span; per-doc retrieval relevance stays in `output`, not Scores (`02-span.md` §6.1, `04-score.md` §1.1). |
+| Q3 | `EVALUATOR → span`; normalizers MUST NOT synthesize Scores (`02-span.md` §2.4, `04-score.md` §1.1). |
+| Q4 | Tri-state status stands; `llmobs.raw.level` keeps DEBUG/WARNING filterable. |
+| Q5 | `tags` trace-only stands; span-level foreign tags land in `attributes`. |
+| Q6 | References are queryable by `(ref_type, ref_id, ref_label)` equality — generic, recovers filter-by-prompt without promoting prompts (`07-references.md` §1.1). |
+| Q7 | Provided-cost-wins stands; `cost_source = provided` is the marker; re-pricing jobs skip provided rows. |
+
+The worksheets above are preserved as the pre-resolution analysis (the fixture
+seeds); read them together with this table.

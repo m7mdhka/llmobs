@@ -1,5 +1,7 @@
 # Validation — OpenInference (Arize) OTLP Semantic Conventions
 
+> **Post-review:** the design review ruled on every finding below; the resolutions applied to the spec are tabulated in [`README.md`](README.md#resolutions-applied-post-review-2026-07-09). This worksheet is preserved as the pre-resolution analysis and fixture seed.
+
 **Dialect:** OpenInference span-level semantic conventions carried over OTLP.
 **Target:** LLMObs canonical data model `v1alpha1` (`/Users/m7mdhka/Desktop/llmobs/api/model/v1alpha1/`).
 **Convention:** OpenInference emits all its semantics as **flat OTLP span attributes** (dotted keys, indexed arrays flattened as `prefix.<N>.suffix`). The OTLP envelope (`span_id`, `trace_id`, `parent_span_id`, `name`, `start/end` unix-nano, `status`) is standard OTel; the `openinference.*`/`llm.*`/`tool.*`/`retrieval.*`/`embedding.*` keys are the dialect. Where an exact key is uncertain it is flagged **[ASSUMPTION]**.

@@ -1,5 +1,7 @@
 # Validation — Langfuse OTel
 
+> **Post-review:** the design review ruled on every finding below; the resolutions applied to the spec are tabulated in [`README.md`](README.md#resolutions-applied-post-review-2026-07-09). This worksheet is preserved as the pre-resolution analysis and fixture seed.
+
 **Dialect:** the `langfuse.*` OTel attribute namespace emitted by the Langfuse Python v4 SDK (`langfuse/_client/attributes.py`) and JS v5 SDK, ingested via OTLP by the platform's `OtelIngestionProcessor` / `ObservationTypeMapper`.
 
 **Keys verified on disk** against `packages/shared/src/server/otel/attributes.ts`, `langfuse/_client/attributes.py`, `langfuse/_client/constants.py`, `ObservationType.ts` (enum: `SPAN, GENERATION, EVENT, AGENT, TOOL, CHAIN, RETRIEVER, EVALUATOR, EMBEDDING, GUARDRAIL`), and the processor's level/usage/cost parsing (lines 428–477, 1042–1049, 2341, 2665).

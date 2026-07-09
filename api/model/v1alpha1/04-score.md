@@ -20,6 +20,21 @@ types (§2); there is no `TEXT` or `CORRECTION` score type.
 > Ch. 07 §3, §4, §8). LM-3 rejects the overload: a score is a measurement; corrected
 > outputs and free text are a different concept owned by a plugin. See ADR-0017.
 
+### 1.1 Scores enter only through the score write path (Normative) — Q3
+
+A **normalizer MUST NOT synthesize Score entities** from span attributes. A
+normalizer cannot verify a score's `source` (§4) or its subject (§5), so
+fabricating scores from, say, an `EVALUATOR` span or an OpenInference
+`retrieval.documents.N.document.score` would invent provenance the model
+guarantees. An evaluator's *execution* is a span; its *result* is a Score written
+by whoever ran it, through the score write path, with a verified `source` and
+subject (`02-span.md` §2.4).
+
+**Per-document retrieval relevance is not a Score.** A retriever's per-document
+scores are payload details of that retrieval (they live in the span's `output`),
+not project-level measurements attached to a subject. They MUST NOT be promoted to
+Score entities (design finding Q2).
+
 ## 2. Value model (Normative) — LM-3
 
 A score has a `data_type` and **two** nullable value fields; `data_type` selects

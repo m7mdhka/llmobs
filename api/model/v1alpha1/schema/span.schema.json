@@ -27,10 +27,19 @@
     "user_id": { "type": ["string", "null"] },
     "input": { "description": "Opaque payload; MAY contain media tokens (02-span.md §4.3, §7)." },
     "output": { "description": "Opaque payload." },
+    "input_content_type": { "type": ["string", "null"], "description": "MIME-style rendering hint for input; NOT queryable/promoted (02-span.md §4.3, F6)." },
+    "output_content_type": { "type": ["string", "null"], "description": "Rendering hint for output; not promoted." },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/spanEvent" },
+      "default": [],
+      "description": "Span events (02-span.md §4.4); union-merged; present on all shapes; not promoted."
+    },
     "attributes": { "$ref": "common.schema.json#/$defs/attributeMap" },
 
-    "model": { "type": ["string", "null"], "description": "Generation field: provided model name (06-usage-cost.md)." },
-    "model_parameters": { "type": ["object", "null"], "description": "Generation field: opaque request parameters." },
+    "model": { "type": ["string", "null"], "description": "Generation field: the resolved/served model (e.g. gen_ai.response.model); requested model preserved under llmobs.raw.model_requested (02-span.md §5, F7)." },
+    "provider": { "type": ["string", "null"], "description": "Generation field: model provider (openai, anthropic, bedrock, …); promoted (F7)." },
+    "model_parameters": { "type": ["object", "null"], "additionalProperties": { "type": "string" }, "description": "Generation field: request parameters as verbatim strings, keyed by name; not parsed at normalize time (F2)." },
     "completion_start_time": { "oneOf": [ { "$ref": "common.schema.json#/$defs/timestamp" }, { "type": "null" } ], "description": "Generation field: time to first token." },
     "provided_usage_details": { "$ref": "common.schema.json#/$defs/usageMap" },
     "usage_details": { "$ref": "common.schema.json#/$defs/usageMap" },

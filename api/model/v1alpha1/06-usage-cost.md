@@ -55,16 +55,26 @@ SHOULD map onto them so that cross-provider aggregation works:
 | `image` | Image tokens/units. |
 
 Additional keys are permitted (the map is open); adding a well-known key is
-additive. A normalizer MUST map provider-specific names onto these where the
-mapping is unambiguous (e.g. OTel `gen_ai.usage.input_tokens` → `input`,
+additive. A normalizer MUST map a provider's name onto a well-known key only where
+the rename is a pure alias (e.g. OTel `gen_ai.usage.input_tokens` → `input`,
 `output_tokens` → `output`).
 
-> Evidence: Langfuse normalizes `prompt_tokens`/`input_tokens`/`prompt` → `input`,
-> `completion_tokens`/`output_tokens` → `output`, `total_tokens` → `total`, and pulls
-> cache variants into `input_cached_tokens`/`input_cache_creation`, subtracting cached
-> tokens from input to avoid double counting (study Ch. 05 §5, Ch. 06 §5.1). This
-> model standardizes an explicit well-known key set including `cache_read`/`cache_write`
-> so cache accounting is first-class rather than heuristic.
+**Provider-reported semantics, as-is (Normative, F3).** Usage values are recorded
+with the **provider's own semantics** — `input` is whatever that provider calls
+input, and cache buckets (`cache_read`/`cache_write`) are **additive detail keys**.
+A normalizer MUST NOT reinterpret across providers: it MUST NOT subtract cached
+tokens from `input`, MUST NOT synthesize provider-specific fictions, and MUST NOT
+assume `input` is net-of-cache or inclusive-of-cache — it stores what the provider
+reported. **Cache accounting is not comparable across providers**, and consumers
+MUST NOT assume it is. Recording honest provider semantics is preferred over
+silently normalizing to a cross-provider fiction.
+
+> Evidence: Langfuse normalizes token names but also **subtracts** cached tokens from
+> the input total to avoid double counting (study Ch. 05 §5, Ch. 06 §5.1) — a
+> cross-provider reinterpretation that bakes in an assumption about whether `input`
+> includes cache. F3 rejects that: the model keeps `cache_read`/`cache_write` as
+> first-class additive keys and records provider values verbatim, leaving
+> interpretation to the (provider-aware) consumer rather than a lossy normalize step.
 
 ### 3.2 Resolution precedence for `usage_details` (Normative)
 
@@ -93,10 +103,12 @@ The kernel enrichment stage computes `cost_details`, `total_cost`, and
    `provided_cost_details` is non-empty, then `cost_details` = a copy of it,
    `cost_source = "provided"`, and the kernel MUST NOT derive any additional cost
    point. `pricing_snapshot_ref` is null.
-2. Otherwise, if a model and a price entry resolve, the kernel derives
-   `cost_details` by multiplying each `usage_details[k]` by the matching unit
-   price, sets `cost_source = "derived"`, and sets `pricing_snapshot_ref` to the
-   price entry used (§5).
+2. Otherwise, if a price entry resolves, the kernel derives `cost_details` by
+   multiplying each `usage_details[k]` by the matching unit price, sets
+   `cost_source = "derived"`, and sets `pricing_snapshot_ref` to the price entry
+   used (§5). Price lookup keys on the promoted `provider` and `model` fields
+   (`02-span.md` §5, F7) — the served model, not the requested one — so the
+   derivation inputs are typed fields rather than attribute-map lookups.
 3. Otherwise `cost_details = {}`, `total_cost = null`, `cost_source = null`.
 
 ### 4.1 `total_cost` (Normative)

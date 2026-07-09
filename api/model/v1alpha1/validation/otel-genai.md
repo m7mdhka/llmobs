@@ -1,5 +1,7 @@
 # Validation — OpenTelemetry GenAI
 
+> **Post-review:** the design review ruled on every finding below; the resolutions applied to the spec are tabulated in [`README.md`](README.md#resolutions-applied-post-review-2026-07-09). This worksheet is preserved as the pre-resolution analysis and fixture seed.
+
 **Dialect:** Official OpenTelemetry GenAI semantic conventions (`gen_ai.*`) carried on OTLP spans.
 **Target:** LLMObs canonical model `v1alpha1` (`api/model/v1alpha1/02-span.md`, `03-trace.md`, `04-score.md`, `06-usage-cost.md`, `08-data-quality.md`).
 **Purpose:** Seed normalizer fixtures + surface unclean landings. Assumptions are marked **[A]**.

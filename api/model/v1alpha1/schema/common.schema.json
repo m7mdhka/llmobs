@@ -52,10 +52,21 @@
       "required": ["type", "id"],
       "description": "A (type, id) soft pointer with an optional label snapshot (07-references.md). No FK; MAY dangle."
     },
+    "spanEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "timestamp": { "$ref": "#/$defs/timestamp" },
+        "attributes": { "$ref": "#/$defs/attributeMap" }
+      },
+      "required": ["name", "timestamp"],
+      "description": "A generic (name, timestamp, attributes) record attached to a span (02-span.md §4.4). Not an entity; union-merged on update."
+    },
     "usageMap": {
       "type": "object",
       "additionalProperties": { "type": "integer", "minimum": 0 },
-      "description": "Usage counts (non-negative integers). Well-known keys: input, output, total, cache_read, cache_write, reasoning, audio, image (06-usage-cost.md §3)."
+      "description": "Usage counts (non-negative integers). Well-known keys: input, output, total, cache_read, cache_write, reasoning, audio, image (06-usage-cost.md §3). Provider-reported semantics; not comparable across providers."
     },
     "costMap": {
       "type": "object",

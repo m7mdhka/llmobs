@@ -65,6 +65,7 @@ Coercion and normalization MUST NOT be silent:
 | Signal (`llmobs.dq.*`) | Raised when | Per-entity marker | Preserved under `llmobs.raw.*` | Counter label |
 |---|---|---|---|---|
 | `truncated` | An adapter truncates an oversized `input`/`output` (`02-span.md` §7.2). | `llmobs.dq.truncated = true` | — (truncated content is lost by definition; the media path avoids this) | `field` (`input`/`output`) |
+| `truncated_attributes` | An adapter truncates an oversized `attributes` value beyond the per-value size cap (`02-span.md` §6.2; default 16 KB, configurable). | `llmobs.dq.truncated_attributes = true` | — (large payloads SHOULD use media references instead) | `key` (the attribute key) |
 | `frozen_field_conflict` | A later event offers a different value for a frozen field (`05-update-semantics.md` §5). | `llmobs.dq.frozen_field_conflict.<field> = <count>` | `llmobs.raw.<field>` = offered value | `field` |
 | `dimension_coerced` | A dimension value was normalized/coerced (§2). | `llmobs.dq.dimension_coerced.<field> = true` | `llmobs.raw.<field>` = offered value | `field` |
 | `start_time_normalized` | An update offered a `start_time` differing from the frozen original (`05` §5; a specialization of `frozen_field_conflict` for the timing anchor, LM-6). | recorded as `frozen_field_conflict.start_time` | `llmobs.raw.start_time` | `field=start_time` |

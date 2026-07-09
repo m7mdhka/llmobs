@@ -1,5 +1,7 @@
 # Validation — OpenLLMetry (Traceloop)
 
+> **Post-review:** the design review ruled on every finding below; the resolutions applied to the spec are tabulated in [`README.md`](README.md#resolutions-applied-post-review-2026-07-09). This worksheet is preserved as the pre-resolution analysis and fixture seed.
+
 **Dialect:** OpenLLMetry / Traceloop OTLP export conventions
 **Target model:** LLMObs canonical `v1alpha1` (`02-span.md`, `03-trace.md`, `06-usage-cost.md`, `08-data-quality.md`)
 **Date:** 2026-07-09

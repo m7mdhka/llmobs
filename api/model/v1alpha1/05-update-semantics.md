@@ -39,6 +39,8 @@ State is computed **per field-group**. A field-group is the unit of merge:
   `usage_details`, `cost_details`, `metadata`, …) is its own field-group,
   recursively for nested objects (deep merge). The unit is the leaf key path.
 - `tags` is a single field-group with **union** semantics (§3).
+- `events` (span events, `02-span.md` §4.4) is a single field-group with
+  **union** semantics (§3.1).
 - `is_deleted` is a field-group (§4).
 
 For every field-group **g**, define the set `S(g)` = events whose `op = upsert`
@@ -69,6 +71,16 @@ MUST NOT overwrite a previously-set value. Clearing a value is not expressible i
 `tags` (trace-level, `03-trace.md` §2) is the set union of the `tags` arrays over
 all `upsert` events in `S(tags)`. Order is not significant; duplicates are not
 observable. Tags are never removed by an update in `v1alpha1`.
+
+### 3.1 Span events union (Normative) — Q1
+
+`events` (span events, `02-span.md` §4.4) is the set union of the `events` arrays
+over all `upsert` events in `S(events)`. Two span events are the **same** (and
+deduplicated) when their `name`, `timestamp`, and `attributes` are all equal; the
+observable order is by `timestamp` (ties broken deterministically by `name`).
+Because identical span events collapse, re-delivery of an event carrying the same
+span events is idempotent (§2). Span events are never removed by an update in
+`v1alpha1`.
 
 ## 4. Deletion and tombstones (Normative)
 
@@ -234,6 +246,18 @@ Z: { id:sc1, data_type:categorical, value_string:"good", value_numeric:1 }
    # both value fields nullable; value_numeric now the config-mapped number. No sentinel.
 ```
 
-An implementation that reproduces V1–V14 for both the Postgres and ClickHouse
+### V15 — span events union with dedup (see 02-span.md §4.4)
+```
+X: { id:s1, events:[ {name:"gen_ai.user.message", timestamp:t1, attributes:{content:"hi"}} ] }
+Y: { op:upsert, event_ts:t2, payload:{ events:[
+      {name:"gen_ai.user.message", timestamp:t1, attributes:{content:"hi"}},   # identical → dedup
+      {name:"gen_ai.choice",       timestamp:t2, attributes:{finish_reason:"stop"}} ] } }
+Z: { id:s1, events:[
+      {name:"gen_ai.user.message", timestamp:t1, attributes:{content:"hi"}},
+      {name:"gen_ai.choice",       timestamp:t2, attributes:{finish_reason:"stop"}} ] }
+   # union by (name,timestamp,attributes); the re-sent identical event collapses; order by timestamp.
+```
+
+An implementation that reproduces V1–V15 for both the Postgres and ClickHouse
 adapters satisfies the update-semantics conformance bar. Additional vectors MAY
 be added additively.

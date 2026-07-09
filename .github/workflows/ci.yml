@@ -48,6 +48,8 @@ jobs:
         run: |
           python3 -m pip install --quiet jsonschema referencing
           python3 scripts/validate_schemas.py
+      - name: Merge vectors in the spec stay machine-parseable
+        run: python3 scripts/check_merge_vectors.py
 
   commit-lint:
     runs-on: ubuntu-latest

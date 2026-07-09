@@ -135,141 +135,641 @@ MUST:
 
 ## 6. Normative test vectors (Normative)
 
-The following vectors define required merge behavior. Each is: an existing entity
-state **X** (the fold so far), an incoming event **Y**, and the required
-resulting state **Z**. An implementation MUST reproduce **Z** exactly. These
-become conformance tests (`tools/conformance`). Timestamps are abbreviated
-(`t1 < t2 < t3`); `event_id` shown only where it breaks a tie.
+The following vectors define required merge behavior as **executable data**:
+each is a JSON object `{ name, entity, note, events, expect }`. `events` is the
+ordered set of ingested events to fold (each `{op, event_ts, event_id?, payload}`);
+`expect` is the required observable state (with `is_deleted`). An implementation
+MUST reproduce `expect` exactly. `event_ts` and `event_id` follow §2; the fold is
+order-independent, so a vector's `events` MAY be applied in any order. Frozen-field
+conflicts surface `expect.attributes["llmobs.raw.<field>"]` and
+`expect.dq["frozen_field_conflict.<field>"]` (§5, `08-data-quality.md`). `tags` and
+`events` compare as sets/dedup-ordered. The conformance suite (`tools/conformance`)
+parses these blocks and runs them against every storage adapter.
 
-Notation: fields not shown are unchanged/absent. `attrs` = `attributes`.
+### V1 — empty never clobbers a scalar (null offered leaves value; new field set)
 
-### V1 — empty never clobbers a scalar
-```
-X: { id:s1, kind:span, name:"plan", start_time:t1, status:{code:ok} }
-Y: { op:upsert, event_ts:t2, payload:{ name:null, status:{code:null}, output:"done" } }
-Z: { id:s1, kind:span, name:"plan", start_time:t1, status:{code:ok}, output:"done" }
-   # name and status unchanged (null offered); output set.
+```json
+{
+  "name": "V1",
+  "entity": "span",
+  "note": "empty never clobbers a scalar (null offered leaves value; new field set)",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "kind": "span",
+        "name": "plan",
+        "start_time": 1,
+        "status": {
+          "code": "ok"
+        }
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "name": null,
+        "status": {
+          "code": null
+        },
+        "output": "done"
+      }
+    }
+  ],
+  "expect": {
+    "kind": "span",
+    "name": "plan",
+    "start_time": 1,
+    "status": {
+      "code": "ok"
+    },
+    "output": "done",
+    "is_deleted": false
+  }
+}
 ```
 
 ### V2 — later non-empty scalar wins
-```
-X: { id:s1, name:"plan", status:{code:unset}, event_ts_of(name)=t1 }
-Y: { op:upsert, event_ts:t2, payload:{ name:"replan", status:{code:ok} } }
-Z: { id:s1, name:"replan", status:{code:ok} }
+
+```json
+{
+  "name": "V2",
+  "entity": "span",
+  "note": "later non-empty scalar wins",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "name": "plan",
+        "status": {
+          "code": "unset"
+        }
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "name": "replan",
+        "status": {
+          "code": "ok"
+        }
+      }
+    }
+  ],
+  "expect": {
+    "name": "replan",
+    "status": {
+      "code": "ok"
+    },
+    "is_deleted": false
+  }
+}
 ```
 
 ### V3 — out-of-order event loses per field-group
-```
-X: { id:s1, name:"replan" }   # name last set at t2
-Y: { op:upsert, event_ts:t1, payload:{ name:"plan", output:"x" } }   # t1 < t2
-Z: { id:s1, name:"replan", output:"x" }
-   # name keeps the t2 value (greater event_ts); output had no prior value, so t1 sets it.
+
+```json
+{
+  "name": "V3",
+  "entity": "span",
+  "note": "out-of-order event loses per field-group",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "name": "replan"
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "name": "plan",
+        "output": "x"
+      }
+    }
+  ],
+  "expect": {
+    "name": "replan",
+    "output": "x",
+    "is_deleted": false
+  }
+}
 ```
 
 ### V4 — attributes deep-merge, per-key latest wins
-```
-X: { id:s1, attrs:{ a:1, nested:{ p:true, q:1 } } }   # a,nested.p,nested.q set at t1
-Y: { op:upsert, event_ts:t2, payload:{ attrs:{ b:2, nested:{ q:9 } } } }
-Z: { id:s1, attrs:{ a:1, b:2, nested:{ p:true, q:9 } } }
-   # a and nested.p untouched; b added; nested.q overwritten (t2 > t1).
+
+```json
+{
+  "name": "V4",
+  "entity": "span",
+  "note": "attributes deep-merge, per-key latest wins",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "attributes": {
+          "a": 1,
+          "nested": {
+            "p": true,
+            "q": 1
+          }
+        }
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "attributes": {
+          "b": 2,
+          "nested": {
+            "q": 9
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "attributes": {
+      "a": 1,
+      "b": 2,
+      "nested": {
+        "p": true,
+        "q": 9
+      }
+    },
+    "is_deleted": false
+  }
+}
 ```
 
-### V5 — tags union
-```
-X: { id:trace1, tags:["prod","eu"] }
-Y: { op:upsert, event_ts:t2, payload:{ tags:["eu","canary"] } }
-Z: { id:trace1, tags:["prod","eu","canary"] }   # set union; order not significant.
+### V5 — tags union (order not significant; compared as a set)
+
+```json
+{
+  "name": "V5",
+  "entity": "trace",
+  "note": "tags union (order not significant; compared as a set)",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "tags": [
+          "prod",
+          "eu"
+        ]
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "tags": [
+          "eu",
+          "canary"
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "tags": [
+      "canary",
+      "eu",
+      "prod"
+    ],
+    "is_deleted": false
+  }
+}
 ```
 
-### V6 — frozen field conflict (start_time) is absorbed, not applied
-```
-X: { id:s1, kind:span, start_time:t1, environment:"prod" }
-Y: { op:upsert, event_ts:t2, payload:{ start_time:t5, name:"n" } }
-Z: { id:s1, kind:span, start_time:t1, name:"n",
-     attrs:{ "llmobs.raw.start_time": t5 },
-     dq:{ frozen_field_conflict:{ start_time: 1 } } }
-   # start_time keeps t1; offered t5 preserved; counter incremented; name still applied.
+### V6 — frozen field conflict (start_time) absorbed, not applied
+
+```json
+{
+  "name": "V6",
+  "entity": "span",
+  "note": "frozen field conflict (start_time) absorbed, not applied",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "id": "s1",
+        "kind": "span",
+        "start_time": 1,
+        "environment": "prod"
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "start_time": 5,
+        "name": "n"
+      }
+    }
+  ],
+  "expect": {
+    "id": "s1",
+    "kind": "span",
+    "start_time": 1,
+    "environment": "prod",
+    "name": "n",
+    "attributes": {
+      "llmobs.raw.start_time": 5
+    },
+    "dq": {
+      "frozen_field_conflict.start_time": 1
+    },
+    "is_deleted": false
+  }
+}
 ```
 
-### V7 — frozen field conflict (kind) absorbed
-```
-X: { id:s1, kind:generation, start_time:t1 }
-Y: { op:upsert, event_ts:t2, payload:{ kind:"tool_call", model:"gpt-x" } }
-Z: { id:s1, kind:generation, start_time:t1, model:"gpt-x",
-     attrs:{ "llmobs.raw.kind":"tool_call" },
-     dq:{ frozen_field_conflict:{ kind:1 } } }
-   # kind frozen at generation; model (a generation field) still applied.
+### V7 — frozen field conflict (kind) absorbed; non-frozen field still applied
+
+```json
+{
+  "name": "V7",
+  "entity": "span",
+  "note": "frozen field conflict (kind) absorbed; non-frozen field still applied",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "id": "s1",
+        "kind": "generation",
+        "start_time": 1
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "kind": "tool_call",
+        "model": "gpt-x"
+      }
+    }
+  ],
+  "expect": {
+    "id": "s1",
+    "kind": "generation",
+    "start_time": 1,
+    "model": "gpt-x",
+    "attributes": {
+      "llmobs.raw.kind": "tool_call"
+    },
+    "dq": {
+      "frozen_field_conflict.kind": 1
+    },
+    "is_deleted": false
+  }
+}
 ```
 
 ### V8 — tombstone hides the entity
-```
-X: { id:s1, name:"plan", is_deleted:false }   # upsert at t1
-Y: { op:delete, event_ts:t2 }
-Z: { id:s1, name:"plan", is_deleted:true }    # not returned by default reads.
+
+```json
+{
+  "name": "V8",
+  "entity": "span",
+  "note": "tombstone hides the entity",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "name": "plan"
+      }
+    },
+    {
+      "op": "delete",
+      "event_ts": 2
+    }
+  ],
+  "expect": {
+    "name": "plan",
+    "is_deleted": true
+  }
+}
 ```
 
 ### V9 — resurrection: upsert after delete wins by event_ts
-```
-X: { id:s1, name:"plan", is_deleted:true }    # delete at t2
-Y: { op:upsert, event_ts:t3, payload:{ output:"done" } }
-Z: { id:s1, name:"plan", output:"done", is_deleted:false }
+
+```json
+{
+  "name": "V9",
+  "entity": "span",
+  "note": "resurrection: upsert after delete wins by event_ts",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "name": "plan"
+      }
+    },
+    {
+      "op": "delete",
+      "event_ts": 2
+    },
+    {
+      "op": "upsert",
+      "event_ts": 3,
+      "payload": {
+        "output": "done"
+      }
+    }
+  ],
+  "expect": {
+    "name": "plan",
+    "output": "done",
+    "is_deleted": false
+  }
+}
 ```
 
 ### V10 — stale delete loses to newer upsert
-```
-X: { id:s1, output:"done", is_deleted:false }  # upsert at t3
-Y: { op:delete, event_ts:t2 }                  # t2 < t3
-Z: { id:s1, output:"done", is_deleted:false }  # delete is older; entity stays live.
+
+```json
+{
+  "name": "V10",
+  "entity": "span",
+  "note": "stale delete loses to newer upsert",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 3,
+      "payload": {
+        "output": "done"
+      }
+    },
+    {
+      "op": "delete",
+      "event_ts": 2
+    }
+  ],
+  "expect": {
+    "output": "done",
+    "is_deleted": false
+  }
+}
 ```
 
-### V11 — idempotent re-delivery
-```
-X: { id:s1, name:"replan" }                    # from event E (event_id:e9, t2)
-Y: { op:upsert, event_ts:t2, event_id:e9, payload:{ name:"replan" } }  # same event again
-Z: { id:s1, name:"replan" }                    # unchanged; applying E twice == once.
+### V11 — idempotent re-delivery (same event twice == once)
+
+```json
+{
+  "name": "V11",
+  "entity": "span",
+  "note": "idempotent re-delivery (same event twice == once)",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "event_id": "e9",
+      "payload": {
+        "name": "replan"
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "event_id": "e9",
+      "payload": {
+        "name": "replan"
+      }
+    }
+  ],
+  "expect": {
+    "name": "replan",
+    "is_deleted": false
+  }
+}
 ```
 
-### V12 — exact event_ts tie broken by event_id
-```
-X: { id:s1, name:"a" }                          # set by event_id:e1 at t2
-Y: { op:upsert, event_ts:t2, event_id:e2, payload:{ name:"b" } }   # same event_ts, e2 > e1
-Z: { id:s1, name:"b" }                          # greater event_id wins the tie.
+### V12 — exact event_ts tie broken by event_id (greater wins)
+
+```json
+{
+  "name": "V12",
+  "entity": "span",
+  "note": "exact event_ts tie broken by event_id (greater wins)",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "event_id": "e1",
+      "payload": {
+        "name": "a"
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "event_id": "e2",
+      "payload": {
+        "name": "b"
+      }
+    }
+  ],
+  "expect": {
+    "name": "b",
+    "is_deleted": false
+  }
+}
 ```
 
-### V13 — usage/cost maps merge per key (see 06-usage-cost.md)
-```
-X: { id:g1, kind:generation, provided_usage_details:{ input:100 } }   # at t1
-Y: { op:upsert, event_ts:t2, payload:{ provided_usage_details:{ output:20, total:120 } } }
-Z: { id:g1, kind:generation, provided_usage_details:{ input:100, output:20, total:120 } }
-   # per-key merge; input retained, output/total added.
+### V13 — usage map merges per key
+
+```json
+{
+  "name": "V13",
+  "entity": "span",
+  "note": "usage map merges per key",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "kind": "generation",
+        "provided_usage_details": {
+          "input": 100
+        }
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "provided_usage_details": {
+          "output": 20,
+          "total": 120
+        }
+      }
+    }
+  ],
+  "expect": {
+    "kind": "generation",
+    "provided_usage_details": {
+      "input": 100,
+      "output": 20,
+      "total": 120
+    },
+    "is_deleted": false
+  }
+}
 ```
 
-### V14 — score value fields, data_type authoritative (see 04-score.md)
-```
-X: { id:sc1, data_type:categorical, value_string:"good", value_numeric:null }
-Y: { op:upsert, event_ts:t2, payload:{ value_numeric:1 } }
-Z: { id:sc1, data_type:categorical, value_string:"good", value_numeric:1 }
-   # both value fields nullable; value_numeric now the config-mapped number. No sentinel.
+### V14 — score value fields, data_type authoritative; both nullable, no sentinel
+
+```json
+{
+  "name": "V14",
+  "entity": "score",
+  "note": "score value fields, data_type authoritative; both nullable, no sentinel",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "data_type": "categorical",
+        "value_string": "good",
+        "value_numeric": null
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "value_numeric": 1
+      }
+    }
+  ],
+  "expect": {
+    "data_type": "categorical",
+    "value_string": "good",
+    "value_numeric": 1,
+    "is_deleted": false
+  }
+}
 ```
 
-### V15 — span events union with dedup (see 02-span.md §4.4)
-```
-X: { id:s1, events:[ {name:"gen_ai.user.message", timestamp:t1, attributes:{content:"hi"}} ] }
-Y: { op:upsert, event_ts:t2, payload:{ events:[
-      {name:"gen_ai.user.message", timestamp:t1, attributes:{content:"hi"}},   # identical → dedup
-      {name:"gen_ai.choice",       timestamp:t2, attributes:{finish_reason:"stop"}} ] } }
-Z: { id:s1, events:[
-      {name:"gen_ai.user.message", timestamp:t1, attributes:{content:"hi"}},
-      {name:"gen_ai.choice",       timestamp:t2, attributes:{finish_reason:"stop"}} ] }
-   # union by (name,timestamp,attributes); the re-sent identical event collapses; order by timestamp.
+### V15 — span events union with dedup by (name,timestamp,attributes), ordered by timestamp
+
+```json
+{
+  "name": "V15",
+  "entity": "span",
+  "note": "span events union with dedup by (name,timestamp,attributes), ordered by timestamp",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "events": [
+          {
+            "name": "gen_ai.user.message",
+            "timestamp": 1,
+            "attributes": {
+              "content": "hi"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "events": [
+          {
+            "name": "gen_ai.user.message",
+            "timestamp": 1,
+            "attributes": {
+              "content": "hi"
+            }
+          },
+          {
+            "name": "gen_ai.choice",
+            "timestamp": 2,
+            "attributes": {
+              "finish_reason": "stop"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "events": [
+      {
+        "name": "gen_ai.user.message",
+        "timestamp": 1,
+        "attributes": {
+          "content": "hi"
+        }
+      },
+      {
+        "name": "gen_ai.choice",
+        "timestamp": 2,
+        "attributes": {
+          "finish_reason": "stop"
+        }
+      }
+    ],
+    "is_deleted": false
+  }
+}
 ```
 
-### V16 — composite with no set leaves never clobbers (see §2.1)
-```
-X: { id:s1, status:{ code:ok, message:"done" } }   # status set at t1
-Y: { op:upsert, event_ts:t2, payload:{ status:{ code:null }, name:"n" } }
-Z: { id:s1, status:{ code:ok, message:"done" }, name:"n" }
-   # status:{code:null} has no set leaves -> not-set -> status unchanged; name applied.
+### V16 — composite with no set leaves never clobbers (status:{code:null})
+
+```json
+{
+  "name": "V16",
+  "entity": "span",
+  "note": "composite with no set leaves never clobbers (status:{code:null})",
+  "events": [
+    {
+      "op": "upsert",
+      "event_ts": 1,
+      "payload": {
+        "status": {
+          "code": "ok",
+          "message": "done"
+        }
+      }
+    },
+    {
+      "op": "upsert",
+      "event_ts": 2,
+      "payload": {
+        "status": {
+          "code": null
+        },
+        "name": "n"
+      }
+    }
+  ],
+  "expect": {
+    "status": {
+      "code": "ok",
+      "message": "done"
+    },
+    "name": "n",
+    "is_deleted": false
+  }
+}
 ```
 
 An implementation that reproduces V1–V16 for both the Postgres and ClickHouse

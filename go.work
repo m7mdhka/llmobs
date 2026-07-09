@@ -5,11 +5,12 @@
 go 1.24.0
 
 use (
-	./kernel
 	./cli
-	// ./plugins/tracing/backend
-	// ./plugins/evals/backend
-	// ./plugins/prompt-management/backend
-	// ./plugins/langfuse-compat/backend
-	// ./runtimes/shared
+	./examples/otel-genai-demo
+	./kernel
+// ./plugins/tracing/backend
+// ./plugins/evals/backend
+// ./plugins/prompt-management/backend
+// ./plugins/langfuse-compat/backend
+// ./runtimes/shared
 )

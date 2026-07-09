@@ -60,7 +60,9 @@ build: ## Build kernel, cli, web, and packages
 
 .PHONY: test
 test: ## Run unit tests (Go + TS)
-	@echo ">> test: go test ./... ; turbo run test"
+	@echo ">> test: kernel go test (incl. spec-parsed merge vectors + fixture conformance)"
+	@cd kernel && go test ./...
+	@echo ">> test: (TS) turbo run test — wired as packages land"
 
 .PHONY: lint
 lint: ## Run all linters (Go + TS + boundary/import checks)
@@ -75,8 +77,11 @@ dev: ## Run the lite profile locally (compose up + web shell)
 	@echo ">> dev: docker compose (lite profile) + web shell"
 
 .PHONY: e2e
-e2e: ## Run end-to-end tests (lite compose profile)
-	@echo ">> e2e: compose up, loadgen smoke, trace visible end-to-end"
+e2e: e2e-lite ## Run end-to-end tests (lite compose profile)
+
+.PHONY: e2e-lite
+e2e-lite: ## Lite e2e: up -> emit agent trace -> query spans back through the DSL
+	@bash scripts/e2e-lite.sh
 
 .PHONY: e2e-k8s
 e2e-k8s: ## Run Kubernetes e2e (kind + Helm + operator)
@@ -87,8 +92,9 @@ e2e-k8s: ## Run Kubernetes e2e (kind + Helm + operator)
 # ---------------------------------------------------------------------------
 
 .PHONY: conformance
-conformance: ## Replay SDK dialect fixtures through the pipeline
-	@echo ">> conformance: tools/conformance replays kernel/testdata/fixtures"
+conformance: ## Replay SDK dialect fixtures through the normalizer
+	@echo ">> conformance: replay kernel/testdata/fixtures through the normalizer"
+	@cd kernel && go test ./internal/dataplane/normalize/ -run Fixture
 
 .PHONY: perf
 perf: ## Run loadgen against the performance targets (D13)

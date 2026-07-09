@@ -21,11 +21,16 @@ const (
 
 // Defines values for ErrorCode.
 const (
-	ErrorCodeInvalidQuery      ErrorCode = "invalid_query"
-	ErrorCodeNotFound          ErrorCode = "not_found"
-	ErrorCodeOverLimit         ErrorCode = "over_limit"
-	ErrorCodeUnauthorized      ErrorCode = "unauthorized"
-	ErrorCodeUnauthorizedField ErrorCode = "unauthorized_field"
+	ErrorCodeCeilingExceeded        ErrorCode = "ceiling_exceeded"
+	ErrorCodeConditionLimitExceeded ErrorCode = "condition_limit_exceeded"
+	ErrorCodeNotFound               ErrorCode = "not_found"
+	ErrorCodeNotGroupable           ErrorCode = "not_groupable"
+	ErrorCodeNotOrderable           ErrorCode = "not_orderable"
+	ErrorCodeOperatorNotAllowed     ErrorCode = "operator_not_allowed"
+	ErrorCodeSchemaInvalid          ErrorCode = "schema_invalid"
+	ErrorCodeScoreTypeMismatch      ErrorCode = "score_type_mismatch"
+	ErrorCodeUnauthorized           ErrorCode = "unauthorized"
+	ErrorCodeUnknownField           ErrorCode = "unknown_field"
 )
 
 // Error defines model for Error.

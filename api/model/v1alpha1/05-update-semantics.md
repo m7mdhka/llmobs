@@ -57,10 +57,14 @@ Re-delivery is therefore a no-op, satisfying idempotency (`01-entities.md` §3.2
 ### 2.1 Empty never clobbers (Normative)
 
 An event does **not** set field-group g (does not join `S(g)`) when its payload
-value for g is any of: absent, JSON `null`, the empty string `""`, or (for a map)
-a key that is absent. Therefore a later event carrying a null/empty/absent value
-MUST NOT overwrite a previously-set value. Clearing a value is not expressible in
-`v1alpha1` (it would be a future explicit-tombstone-per-field capability).
+value for g is any of: absent, JSON `null`, the empty string `""`, an empty array
+`[]`, or (for a map) a key that is absent. A **composite/object** value is
+likewise empty when **every one of its leaves is unset** by this same rule,
+applied recursively — e.g. `status: {code: null}` does not set the `status`
+field-group, because its only leaf is null. Therefore a later event carrying a
+null/empty/absent value, or a composite with no set leaves, MUST NOT overwrite a
+previously-set value. Clearing a value is not expressible in `v1alpha1` (it would
+be a future explicit-tombstone-per-field capability).
 
 > Evidence: Langfuse's `overwriteObject` merge rule is "empty/undefined never
 > clobbers a set value; metadata deep-merges; tags union" (study Ch. 04 §6; Ch. 06
@@ -96,8 +100,10 @@ span events is idempotent (§2). Span events are never removed by an update in
 
 ## 5. Frozen fields (Normative) — LM-5, LM-6
 
-The following fields are **frozen**: their value is fixed by the first event that
-sets them and never changes.
+The following fields are **frozen**: their value is fixed by the **first** event
+that sets them and never changes. "First" means the event with the **earliest
+`(event_ts, event_id)`** (lexicographic, §2) among the events that set the field —
+so the frozen value is well-defined regardless of arrival order.
 
 | Entity | Frozen fields |
 |---|---|
@@ -258,6 +264,14 @@ Z: { id:s1, events:[
    # union by (name,timestamp,attributes); the re-sent identical event collapses; order by timestamp.
 ```
 
-An implementation that reproduces V1–V15 for both the Postgres and ClickHouse
+### V16 — composite with no set leaves never clobbers (see §2.1)
+```
+X: { id:s1, status:{ code:ok, message:"done" } }   # status set at t1
+Y: { op:upsert, event_ts:t2, payload:{ status:{ code:null }, name:"n" } }
+Z: { id:s1, status:{ code:ok, message:"done" }, name:"n" }
+   # status:{code:null} has no set leaves -> not-set -> status unchanged; name applied.
+```
+
+An implementation that reproduces V1–V16 for both the Postgres and ClickHouse
 adapters satisfies the update-semantics conformance bar. Additional vectors MAY
 be added additively.

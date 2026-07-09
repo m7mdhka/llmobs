@@ -467,11 +467,11 @@ export enum Dir {
 }
 
 export interface Score {
-    dataType?: DataType;
-    name:      string;
-    op:        ScoreOp;
-    source?:   Source;
-    value:     any;
+    dataType: DataType;
+    name:     string;
+    op:       ScoreOp;
+    source?:  Source;
+    value:    any;
 }
 
 export enum ScoreOp {
@@ -482,7 +482,6 @@ export enum ScoreOp {
     LTE = "lte",
     Lt = "lt",
     Neq = "neq",
-    NotIn = "not_in",
 }
 
 export enum Target {

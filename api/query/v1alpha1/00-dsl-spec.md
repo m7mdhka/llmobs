@@ -37,13 +37,13 @@ A query is a single JSON object:
   **aggregation query** (has `aggregations`, optionally `groupBy`). `orderBy`,
   `limit`, and `cursor` apply to row queries; `groupBy`/`aggregations` define
   aggregation queries. A query MUST NOT combine `cursor` with `aggregations`.
-- Unknown top-level keys MUST be rejected (`invalid_query`, §11).
+- Unknown top-level keys MUST be rejected (`schema_invalid`, §11).
 
 ## 2. Field classes and operators (Normative) — QD-2
 
 Every queryable field belongs to a **class** (declared in `fields.json`).
 Operators are defined **per class**, never per field. A condition naming a field
-MUST use an operator allowed for that field's class; otherwise `invalid_query`.
+MUST use an operator allowed for that field's class; otherwise `operator_not_allowed` (§11).
 
 | Class | Allowed operators | Value shape |
 |---|---|---|
@@ -82,7 +82,7 @@ A **map condition** (class `attr_map` — the `attributes` map, and the
   `provided_cost_details`: values are **numeric**; ops: `eq, neq, gt, gte, lt,
   lte, exists`.
 - `contains` is string-only; the numeric comparison ops are numeric-map-only.
-  Using a disallowed op for the map's value type is `invalid_query`.
+  Using a disallowed op for the map's value type is `operator_not_allowed` (§11).
 
 A **reference condition** (class `reference` — e.g. `prompt_ref`,
 `pricing_snapshot_ref`, and `config_ref` on scores) is equality on the reference
@@ -117,7 +117,7 @@ The queryable fields per target are the promoted/first-class fields of the
 corresponding entity, enumerated in `fields.json` (which MUST match
 `api/model/v1alpha1/02-span.md`, `03-trace.md`, `04-score.md`). Only fields
 listed there are queryable; a condition, `groupBy`, `orderBy`, or aggregation
-naming any other field MUST be rejected `unauthorized_field` (§11).
+naming any other field MUST be rejected `unknown_field` (§11).
 
 - `attributes` (all targets), `usage_details`/`cost_details` and their
   `provided_*` twins (target `spans`) are `attr_map` fields, queryable only via
@@ -147,7 +147,7 @@ An aggregation query carries `aggregations` and optionally `groupBy`.
     target's time anchor (`start_time` for spans, `start_time`/`timestamp` for
     traces, `timestamp` for scores).
   - Grouping by a high-cardinality field (`id`, `trace_id`) is rejected
-    `invalid_query`.
+    `not_groupable` (§11).
 - An aggregation query returns group rows; `orderBy`/`cursor` MUST NOT be
   present (results are bounded by the group cardinality and `timeRange`).
 
@@ -162,7 +162,7 @@ Every query MUST carry `timeRange`:
 - `from` < `to`; both REQUIRED.
 - The window `to − from` MUST NOT exceed the per-project maximum,
   `LLMOBS_QUERY_MAX_WINDOW` (kernel configuration). A larger window is rejected
-  `over_limit` (§11).
+  `ceiling_exceeded` (§11).
 - `timeRange` filters on the target's time anchor (`start_time` for spans and
   traces, `timestamp` for scores). This is a spec-level requirement, not an
   adapter detail: it bounds every scan and makes query cost predictable.
@@ -178,7 +178,8 @@ Every query MUST carry `timeRange`:
   ever. `cursor` is an **opaque base64** token encoding the ordering key of the
   last returned row. A client passes back the `cursor` from the previous
   response (§9) to fetch the next page; the query (target, filters, timeRange,
-  orderBy) MUST be identical across a cursor sequence, else `invalid_query`.
+  orderBy) MUST be identical across a cursor sequence, else `schema_invalid`
+  (§11); a cursor that does not decode is likewise `schema_invalid`.
 - `limit` bounds page size; default and maximum = `MAX_LIMIT` (= 1000).
 
 ## 8. Score semi-join on `traces` (Normative) — QD-9
@@ -193,19 +194,28 @@ one query, not two.
               "op": "lt", "value": 0.5, "source": "llm_judge" } ]
 ```
 
-- Each score condition: `{ "name" (required), "data_type"?, "op", "value",
-  "source"? }`.
-- Matching is against the **authoritative value column per `data_type`** (LM-3):
-  `numeric`/`boolean` → `value_numeric`; `categorical` → `value_string`. Numeric
-  ops (`gt/gte/lt/lte/eq/neq`) apply to `value_numeric`; string ops (`eq/neq/in/
-  not_in`) to `value_string`. `data_type` SHOULD be given to disambiguate; if
-  omitted it is inferred from the value/op.
+- Each score condition: `{ "name" (required), "data_type" (**required**), "op",
+  "value", "source"? }`. `data_type` is REQUIRED — there is **no inference and no
+  coercion, ever**.
+- **`data_type` fully determines the allowed operators, the matched column, and
+  the JSON type of `value`:**
+
+  | `data_type` | allowed `op` | matched column | `value` JSON type |
+  |---|---|---|---|
+  | `numeric` | `eq, neq, gt, gte, lt, lte` | `value_numeric` (LM-3) | number |
+  | `categorical` | `eq, neq, in` | `value_string` | string (for `in`: array of strings, ≤ `MAX_IN_LIST`) |
+  | `boolean` | `eq` | `value_numeric` (`0`/`1`) | boolean (`true`→1, `false`→0) |
+
+  Any mismatch — an operator not allowed for the `data_type`, or a `value` whose
+  JSON type is wrong for the `data_type` — is a **`score_type_mismatch`** error
+  (422, §11). The kernel MUST NOT coerce (e.g. a string `"0.5"` for a `numeric`
+  score is rejected, not parsed).
 - `source` (optional) restricts to scores of that `source` (§`04-score.md` §4).
 - Multiple entries in `scores` are ANDed at the **trace** level: a trace
   qualifies if, for **each** entry, it has ≥1 matching score (the matches need
   not be the same score).
 - The `scores` block is valid **only** on `target=traces`; present on any other
-  target ⇒ `invalid_query`.
+  target ⇒ `schema_invalid` (400, §11).
 
 ## 9. Response envelope (Normative) — QD-8
 
@@ -266,24 +276,47 @@ trusts a plugin-supplied identity.
 
 ## 11. Error taxonomy (Normative)
 
-Errors are returned with a stable `code` (HTTP status in parentheses):
+Errors carry a machine-readable **`error.code`** (a closed enum, mirrored in the
+OpenAPI) and an HTTP status. The split is sharp:
 
-| `code` | When | HTTP |
+- **400 `schema_invalid`** — the document fails `dsl.schema.json`: malformed,
+  unknown key, wrong operator token for a class, nesting > `MAX_NESTING_DEPTH`,
+  `scores` on a non-traces target, `cursor` with `aggregations`, an `in`-list or
+  array over its schema `maxItems`, `limit` over its schema `maximum`, etc.
+  These are the errors the schema alone catches.
+- **422 (structurally valid, semantically rejected)** — the document passes
+  `dsl.schema.json` but violates a rule the schema cannot express. These require
+  the field registry (`fields.json`), the true condition count, or per-project
+  config.
+- **403 `unauthorized`**, **404 `not_found`** — permission / existence.
+
+**`dsl.schema.json` is necessary but not sufficient:** passing it means the
+document is well-formed; the 422 checks below still apply. The full `error.code`
+enum:
+
+| `error.code` | When | HTTP |
 |---|---|---|
-| `invalid_query` | Malformed document, unknown key, wrong operator for a field class, nesting > `MAX_NESTING_DEPTH`, `scores` on a non-traces target, `cursor` with `aggregations`, mismatched cursor query. | 400 |
-| `unauthorized_field` | A condition/order/group/aggregation names a field not in `fields.json` for the target. | 400 |
-| `over_limit` | A contract ceiling exceeded: `> MAX_CONDITIONS`, `> MAX_LIMIT`, `in`-list `> MAX_IN_LIST`, `> MAX_GROUPBY`, `> MAX_AGGREGATIONS`, or `timeRange` window `> LLMOBS_QUERY_MAX_WINDOW`. | 422 |
+| `schema_invalid` | Fails `dsl.schema.json` (§1–§7 structure and schema-expressible ceilings). | 400 |
+| `unknown_field` | A condition/order/group/aggregation names a field not in `fields.json` for the target. | 422 |
+| `operator_not_allowed` | An operator not permitted for the named field's class (§2), or a map op wrong for the map's value type. | 422 |
+| `condition_limit_exceeded` | The **true** total condition count (each OR-group member + each `scores` entry) exceeds `MAX_CONDITIONS` — the schema's `maxItems` on `filters` is only an upper bound. | 422 |
+| `ceiling_exceeded` | A non-schema ceiling: `timeRange` window > `LLMOBS_QUERY_MAX_WINDOW` (per-project config the schema cannot know). | 422 |
+| `score_type_mismatch` | A `scoreCondition`'s `op` or `value` JSON type is wrong for its `data_type` (§8). No coercion. | 422 |
+| `not_orderable` / `not_groupable` | `orderBy`/`groupBy` names a field not marked orderable/groupable in `fields.json`. | 422 |
 | `unauthorized` | The caller's effective permission does not grant the `target`. | 403 |
+| `not_found` | Single-entity fetch: no such entity in the caller's project scope. | 404 |
 
-An adapter MUST reject an over-limit or invalid query **before** scanning. Error
-responses carry `{ code, message, detail? }`; `detail` names the offending
+An adapter MUST reject an invalid or over-ceiling query **before** scanning.
+Error responses carry `{ code, message, detail? }`; `detail` names the offending
 field/constant.
 
 ## 12. Contract constants (Normative) — QD-7
 
 These are **versioned contract constants**: plugins may rely on them, and the
 gateway/Query API enforces them uniformly (they also feed per-plugin quotas). A
-query violating any of these is rejected (`over_limit`, §11) before execution.
+query violating any of these is rejected before execution (§11: `schema_invalid`
+for the schema-expressible ceilings, `condition_limit_exceeded` for the true
+condition count, `ceiling_exceeded` for the time-window).
 
 | Constant | Value | Meaning |
 |---|---|---|

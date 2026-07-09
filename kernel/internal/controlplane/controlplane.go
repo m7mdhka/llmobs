@@ -1,13 +1,13 @@
 // Package controlplane is the minimal control plane ingestion + query need:
 // organizations, projects, and API keys, plus a lite-profile bootstrap. Users,
 // sessions, OIDC, and RBAC are deliberately later; this package is structured so
-// they slot in. (B1 hashes keys with SHA-256; B2 upgrades to argon2id.)
+// they slot in. API-key secrets are hashed with argon2id keyed by a deterministic
+// SHA-256 selector for lookup (see keys.go).
 package controlplane
 
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -35,26 +35,26 @@ func (id Identity) HasScope(s string) bool {
 	return false
 }
 
-// hashSecret is the B1 key hash (SHA-256 hex). B2 replaces this with argon2id.
-func hashSecret(secret string) string {
-	sum := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(sum[:])
-}
-
-// Authenticate resolves a bearer secret to an Identity.
+// Authenticate resolves a bearer secret to an Identity: look up the row by the
+// deterministic selector, then verify the secret against its argon2id hash.
 func Authenticate(ctx context.Context, pool *pgxpool.Pool, bearer string) (Identity, error) {
 	if bearer == "" {
 		return Identity{}, ErrUnauthorized
 	}
 	var id Identity
+	var hashed string
 	err := pool.QueryRow(ctx,
-		`SELECT project_id, scopes FROM api_keys WHERE hashed_secret=$1`,
-		hashSecret(bearer)).Scan(&id.ProjectID, &id.Scopes)
+		`SELECT project_id, scopes, hashed_secret FROM api_keys WHERE lookup_hash=$1`,
+		selector(bearer)).Scan(&id.ProjectID, &id.Scopes, &hashed)
 	if err == pgx.ErrNoRows {
 		return Identity{}, ErrUnauthorized
 	}
 	if err != nil {
 		return Identity{}, err
+	}
+	ok, verr := verifyArgon2id(bearer, hashed)
+	if verr != nil || !ok {
+		return Identity{}, ErrUnauthorized
 	}
 	return id, nil
 }
@@ -91,10 +91,15 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, projectName, apiKey stri
 		}
 		apiKey = "sk-" + hex.EncodeToString(buf)
 	}
-	pub := "pk-" + hashSecret(apiKey)[:16]
+	lookup := selector(apiKey)
+	hashed, herr := hashArgon2id(apiKey)
+	if herr != nil {
+		return "", "", false, fmt.Errorf("hash api key: %w", herr)
+	}
+	pub := "pk-" + lookup[:16]
 	if _, err = pool.Exec(ctx,
-		`INSERT INTO api_keys (public_key, project_id, hashed_secret, scopes) VALUES ($1,$2,$3,$4)`,
-		pub, projectID, hashSecret(apiKey), []string{"ingest", "query"}); err != nil {
+		`INSERT INTO api_keys (public_key, project_id, lookup_hash, hashed_secret, scopes) VALUES ($1,$2,$3,$4,$5)`,
+		pub, projectID, lookup, hashed, []string{"ingest", "query"}); err != nil {
 		return "", "", false, fmt.Errorf("insert api key: %w", err)
 	}
 	return projectID, apiKey, true, nil

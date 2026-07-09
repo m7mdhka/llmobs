@@ -62,4 +62,22 @@ assert gen.get("provided_usage_details",{}).get("input")==812
 print("   assert OK: kinds="+",".join(sorted(kinds))+", generation model/usage/env verified")
 '
 
+echo ">> e2e-lite: fetching the trace tree"
+TREE="$(curl -sf -H "Authorization: Bearer $KEY" ${API}/v1alpha1/traces/${TRACE_ID}/tree || true)"
+printf '%s' "$TREE" | python3 -c '
+import sys,json
+t=json.load(sys.stdin)
+trace=t["trace"]; spans=t["spans"]
+assert trace["id"], "trace.id missing"
+assert len(spans)>=4, f"expected >=4 spans in tree, got {len(spans)}"
+# tree order: every non-root parent appears before its children
+pos={s["id"]:i for i,s in enumerate(spans)}
+for i,s in enumerate(spans):
+    p=s.get("parent_span_id") or ""
+    if p and p in pos:
+        assert pos[p] < i, f"child {s[\"id\"]} precedes parent {p}"
+assert trace.get("start_time"), "trace.start_time not synthesized"
+print(f"   assert OK: tree of {len(spans)} spans in parent-before-child order, trace synthesized")
+'
+
 echo "E2E_LITE_OK"

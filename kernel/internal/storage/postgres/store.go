@@ -115,6 +115,27 @@ func (s *Store) GetSpan(ctx context.Context, projectID, id string) (json.RawMess
 	return doc, err
 }
 
+// GetTraceSpans returns all non-deleted spans of a trace (folded docs). Ordered
+// by (start_time, id) so the tree assembler produces a deterministic preorder.
+func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([]json.RawMessage, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT doc FROM spans WHERE project_id=$1 AND trace_id=$2 AND is_deleted=false
+		 ORDER BY start_time ASC, id ASC`, projectID, traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []json.RawMessage
+	for rows.Next() {
+		var doc []byte
+		if err := rows.Scan(&doc); err != nil {
+			return nil, err
+		}
+		out = append(out, doc)
+	}
+	return out, rows.Err()
+}
+
 // QuerySpans runs a compiled spans query and returns the folded documents.
 // where is a SQL predicate (excluding project/is_deleted, added here); args are
 // its parameters starting at $1; order and limit come from the compiler.

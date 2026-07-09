@@ -66,8 +66,13 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	switch target {
 	case "spans":
 		// implemented below
-	case "traces", "scores":
-		writeErr(w, errf("not_implemented", 501, "target %q not implemented in v1alpha1/B1", target))
+	case "traces":
+		// The trace read path is GET /traces/{id}/tree and /traces/{id}; the DSL
+		// traces target (trace-level filtering/aggregation) is v-next.
+		writeErr(w, errf("not_implemented", 501, "DSL traces target is v-next; use GET /traces/{id}/tree"))
+		return
+	case "scores":
+		writeErr(w, errf("not_implemented", 501, "scores target is v-next"))
 		return
 	default:
 		writeErr(w, errf("schema_invalid", 400, "target must be one of spans|traces|scores"))
@@ -134,13 +139,7 @@ func (s *Server) GetSpan(w http.ResponseWriter, r *http.Request, id string) {
 	_, _ = w.Write(doc)
 }
 
-// v-next endpoints (B2): honest 501.
-func (s *Server) GetTraceTree(w http.ResponseWriter, r *http.Request, _ string) {
-	writeErr(w, errf("not_implemented", 501, "trace tree fetch is v-next (B2)"))
-}
-func (s *Server) GetTrace(w http.ResponseWriter, r *http.Request, _ string) {
-	writeErr(w, errf("not_implemented", 501, "traces target is v-next (B2)"))
-}
+// v-next endpoints: honest 501. (GetTraceTree/GetTrace are implemented in tree.go.)
 func (s *Server) GetScore(w http.ResponseWriter, r *http.Request, _ string) {
 	writeErr(w, errf("not_implemented", 501, "scores are v-next"))
 }

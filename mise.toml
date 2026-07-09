@@ -3,7 +3,7 @@
 # Run `mise install` to materialize this toolchain.
 
 [tools]
-go = "1.23"
+go = "1.24"
 node = "22"
 pnpm = "9"
 python = "3.12"

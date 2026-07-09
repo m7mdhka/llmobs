@@ -1,0 +1,4 @@
+{ "version":"v1alpha1", "target":"spans", "timeRange":{"from":"2026-07-01T00:00:00Z","to":"2026-07-08T00:00:00Z"},
+  "filters":[ {"field":"prompt_ref","op":"ref_eq",
+               "value":{"ref_type":"prompt","ref_id":"prompt_greeting","ref_label":"greeting@v3"}} ],
+  "limit":100 }

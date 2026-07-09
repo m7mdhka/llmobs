@@ -1,0 +1,36 @@
+# Lite profile: Postgres + the kernel daemon, one command up.
+#   docker compose -f deploy/compose/lite.yaml up -d
+# The kernel bootstraps a default org/project/api-key on first boot.
+name: llmobs-lite
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: llmobs
+      POSTGRES_PASSWORD: llmobs
+      POSTGRES_DB: llmobs
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llmobs -d llmobs"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+    # Not published to the host: the kernel reaches Postgres over the compose
+    # network. Add an override to expose 5432 for local inspection if needed.
+
+  kernel:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/kernel.Dockerfile
+    environment:
+      LLMOBS_DATABASE_URL: "postgres://llmobs:llmobs@postgres:5432/llmobs?sslmode=disable"
+      LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:-sk-e2e-demo-key}"
+      LLMOBS_LOG_FORMAT: "text"
+      LLMOBS_OTLP_HTTP_ADDR: ":4318"
+      LLMOBS_API_ADDR: ":8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${LLMOBS_OTLP_PORT:-4318}:4318"
+      - "${LLMOBS_API_PORT:-8080}:8080"

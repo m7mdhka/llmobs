@@ -1,0 +1,243 @@
+openapi: 3.1.0
+info:
+  title: LLMObs Query API
+  version: v1alpha1
+  description: >
+    The typed read path over the canonical data model, plus the tree/single-entity
+    fetches and the score write path (QD-10). The query request body is the DSL
+    document (api/query/v1alpha1/dsl.schema.json); entity shapes $ref the canonical
+    model JSON Schemas (api/model/v1alpha1/schema/) — one source of truth.
+    Ingestion (OTLP) is a different surface and is not defined here.
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: /
+
+# Double-token model (invariant 7): the gateway forwards a kernel-signed service
+# token AND a user identity assertion; the Query API computes the permission
+# intersection and never trusts a plugin-supplied identity.
+security:
+  - serviceToken: []
+    userAssertion: []
+
+tags:
+  - name: query
+  - name: entities
+  - name: scores
+
+paths:
+  /v1alpha1/query:
+    post:
+      tags: [query]
+      operationId: runQuery
+      summary: Execute a query DSL document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../../query/v1alpha1/dsl.schema.json"
+      responses:
+        "200":
+          description: Query result envelope.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueryResponse" }
+        "400": { $ref: "#/components/responses/InvalidQuery" }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/OverLimit" }
+
+  /v1alpha1/traces/{trace_id}/tree:
+    get:
+      tags: [entities]
+      operationId: getTraceTree
+      summary: >
+        Optimized full span-tree fetch (the reason for the tree-first sort key):
+        the trace, its spans in tree order, and span events, deduplicated per LM-5.
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The trace and its span tree.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TraceTree" }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1alpha1/spans/{id}:
+    get:
+      tags: [entities]
+      operationId: getSpan
+      summary: Fetch a single span by id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The span.
+          content:
+            application/json:
+              schema: { $ref: "../../model/v1alpha1/schema/span.schema.json" }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1alpha1/traces/{id}:
+    get:
+      tags: [entities]
+      operationId: getTrace
+      summary: Fetch a single trace by id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The trace.
+          content:
+            application/json:
+              schema: { $ref: "../../model/v1alpha1/schema/trace.schema.json" }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1alpha1/scores/{id}:
+    get:
+      tags: [entities]
+      operationId: getScore
+      summary: Fetch a single score by id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The score.
+          content:
+            application/json:
+              schema: { $ref: "../../model/v1alpha1/schema/score.schema.json" }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1alpha1/scores:
+    post:
+      tags: [scores]
+      operationId: writeScore
+      summary: >
+        The score write path for plugins holding the `write` capability. Enforces
+        LM-3/LM-8: measurement-only value model and (subject_type, subject_id)
+        subjects, including plugin-namespaced subject types.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "../../model/v1alpha1/schema/score.schema.json" }
+      responses:
+        "201":
+          description: The written score.
+          content:
+            application/json:
+              schema: { $ref: "../../model/v1alpha1/schema/score.schema.json" }
+        "400": { $ref: "#/components/responses/InvalidQuery" }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    serviceToken:
+      type: apiKey
+      in: header
+      name: X-LLMObs-Service-Token
+      description: Kernel-signed, short-lived service token identifying the calling plugin.
+    userAssertion:
+      type: apiKey
+      in: header
+      name: X-LLMObs-User-Assertion
+      description: >
+        Kernel-signed identity assertion for the acting user. The Query API grants
+        the intersection of the service token's capability and this assertion.
+
+  responses:
+    InvalidQuery:
+      description: Malformed query or unauthorized field.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: The effective permission does not grant the requested target/entity.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    OverLimit:
+      description: A contract ceiling (QD-7) or the timeRange window was exceeded.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such entity in the caller's project scope.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    QueryResponse:
+      type: object
+      additionalProperties: false
+      required: [version, data, stats, warnings]
+      properties:
+        version: { const: v1alpha1 }
+        data:
+          type: array
+          description: >
+            Row queries return canonical entities (span/trace/score shapes, subject
+            to field-level redaction); aggregation queries return one object per
+            group (groupBy values + aggregation aliases).
+          items: {}
+        cursor:
+          type: string
+          description: Opaque keyset cursor; present iff a next page exists (row queries only).
+        stats:
+          type: object
+          required: [elapsed_ms]
+          properties:
+            elapsed_ms: { type: integer, minimum: 0 }
+            scanned: { type: integer, minimum: 0 }
+            returned: { type: integer, minimum: 0 }
+          additionalProperties: true
+        warnings:
+          type: array
+          items: { $ref: "#/components/schemas/Warning" }
+
+    Warning:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      description: >
+        Non-fatal signal using the llmobs.dq.* conventions (08-data-quality.md),
+        e.g. a page that included truncated payloads or a partial result.
+      properties:
+        code: { type: string }
+        message: { type: string }
+        detail: { type: object, additionalProperties: true }
+
+    TraceTree:
+      type: object
+      additionalProperties: false
+      required: [trace, spans]
+      properties:
+        trace: { $ref: "../../model/v1alpha1/schema/trace.schema.json" }
+        spans:
+          type: array
+          description: The trace's spans in tree order (parent before children).
+          items: { $ref: "../../model/v1alpha1/schema/span.schema.json" }
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [invalid_query, unauthorized_field, over_limit, unauthorized, not_found]
+        message: { type: string }
+        detail:
+          type: object
+          additionalProperties: true
+          description: Names the offending field/constant where applicable.

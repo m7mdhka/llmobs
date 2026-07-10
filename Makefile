@@ -56,9 +56,12 @@ build: ## Build kernel, cli, web, and packages
 	@cd kernel && go build ./... && cd ../cli && go build ./... 2>/dev/null || true
 	@echo ">> build: design system + web shell (pnpm)"
 	@command -v pnpm >/dev/null 2>&1 && ( \
+		pnpm --filter @llmobs/query-client build && \
 		pnpm --filter @llmobs/tokens build && \
 		pnpm --filter @llmobs/ui build && \
+		pnpm --filter @llmobs/plugin-sdk build && \
 		NODE_ENV=production pnpm --filter @llmobs/shell build && \
+		NODE_ENV=production pnpm --filter @llmobs/plugin-tracing build && \
 		pnpm --filter @llmobs/shell check:singletons \
 	) || echo "   (pnpm not found; skipping web build)"
 

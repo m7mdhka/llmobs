@@ -59,6 +59,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @llmobs/shell... --filter @llmobs/plugin-tracing...
       - name: Build design system, SDK, shell (MF host), and tracing plugin (MF remote)
         run: |
+          pnpm --filter @llmobs/query-client build
           pnpm --filter @llmobs/tokens build
           pnpm --filter @llmobs/ui build
           pnpm --filter @llmobs/plugin-sdk build

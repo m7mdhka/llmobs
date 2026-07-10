@@ -1,8 +1,8 @@
-import React, { Component, Suspense, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import React, { Component, Suspense, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { LoadingState, PluginUnavailable } from "@llmobs/ui";
 import { LLMObsPluginProvider } from "@llmobs/plugin-sdk";
 import { loadPluginSurface } from "./remoteLoader.js";
-import type { RegistryPlugin, Session } from "./api.js";
+import { makeFrontendTokenProvider, type RegistryPlugin, type Session } from "./api.js";
 
 // Mounts a plugin's federated surface inside the SDK provider (which supplies the
 // project + user + data client). A failure to load the remote (network,
@@ -12,6 +12,15 @@ import type { RegistryPlugin, Session } from "./api.js";
 export function PluginRoute({ plugin, session }: { plugin: RegistryPlugin; session: Session }): React.ReactElement {
   const [surface, setSurface] = useState<ComponentType<Record<string, never>> | null>(null);
   const [failed, setFailed] = useState(false);
+
+  // J1: a per-plugin, per-session frontend token provider. Stable across renders
+  // (memoized on plugin id + session) so the SDK reuses one caching provider and
+  // re-mints only near expiry. Confines a cooperating frontend to its grant; a
+  // hostile frontend can still bypass it same-origin (documented trust model).
+  const frontendToken = useMemo(
+    () => makeFrontendTokenProvider(plugin.id, session.csrfToken, () => undefined),
+    [plugin.id, session.csrfToken],
+  );
 
   useEffect(() => {
     let alive = true;
@@ -35,7 +44,7 @@ export function PluginRoute({ plugin, session }: { plugin: RegistryPlugin; sessi
   return (
     <PluginErrorBoundary pluginName={plugin.name}>
       <Suspense fallback={<LoadingState title={`Loading ${plugin.name}…`} />}>
-        <LLMObsPluginProvider config={{ user: session.user }}>
+        <LLMObsPluginProvider config={{ user: session.user, frontendToken }}>
           <Surface />
         </LLMObsPluginProvider>
       </Suspense>

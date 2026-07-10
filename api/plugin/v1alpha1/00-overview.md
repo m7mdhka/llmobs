@@ -128,6 +128,36 @@ prefix:
 - The service token issued to the plugin is verifiable by the kernel on the return
   path; a request bearing a token for a `disabled`/unknown plugin is rejected.
 
+## 6. Frontend token (kernel → shell → plugin frontend, J1)
+
+A plugin **frontend** — code the shell loads via Module Federation (ADR-0004) — has
+no service token and no backend to proxy through, yet it too should act at
+least-privilege rather than inherit the user's whole session. The **frontend token**
+is that credential:
+
+- The shell requests one per plugin, per session, from
+  `POST /v1alpha1/plugin-frontend-token` (session-authed) with body
+  `{ "plugin": "{id}" }`. The kernel replies `{ token, expiresUnix, scopes }`.
+- The token is a kernel-signed **identity assertion** (§4 format, `aud = plugin:{id}`)
+  whose `scopes` are already the intersection **plugin-grant ∩ user-session ∩
+  project** — computed at mint, so no service token is needed to re-intersect it.
+- The SDK presents it as `X-LLMObs-Frontend-Token` on Query API calls; the kernel
+  uses the token's scopes directly. Frontend tokens carry **no capability markers**,
+  so they reach only data reads/writes within the intersected permissions.
+
+**Trust model — read this.** The frontend token is **least-privilege by default**
+for a *cooperating* SDK-using frontend. It is **NOT a security boundary against a
+hostile frontend.** A frontend plugin runs in the shell's origin and JS realm
+(ADR-0004, shared singletons), so it can ignore the SDK and call the Query API with
+the ambient **session cookie** directly, obtaining the user's full session scope.
+This is the documented v1 posture: **a frontend-only plugin is trusted-at-install**,
+the same trust class as a browser or IDE extension. A plugin that needs **hard**
+confinement runs a **backend** — the double token (§0) genuinely confines backends.
+Real frontend confinement requires **origin isolation** (sandboxed iframe on a
+distinct origin + postMessage bridge, the frontend token as the sole credential);
+that is specified as a paired follow-up (ADR-0004 amendment + ADR-0023), to be built
+when an untrusted third-party frontend plugin is a real requirement — not before.
+
 ## Token format (both tokens)
 
 Compact, dependency-free, stdlib-verifiable (no JWT library on the hot path):

@@ -28,12 +28,16 @@ what is still a gap. Written to find the gaps, not to claim the loop is done.
   plugin, reloading on save, against seeded data." An author still wires up
   compose + the loadgen by hand. This is the single biggest remaining DX gap — the
   inner loop is create-then-figure-it-out, not create-then-iterate.
-- **No frontend-plugin dev path for persistence.** A *pure-frontend* plugin cannot
-  persist config/settings without a backend, because the frontend-direct plugin
-  identity (a shell-minted, per-plugin assertion) does not exist yet — kv/secrets/
-  store are backend-double-token only (the deliberate H4 deferral). So B4/B9-style
-  frontend plugins must stand up a backend just to save a layout. See the Set-B
-  re-color.
+- **Frontend-direct plugin identity — CLOSED (J1).** A *pure-frontend* plugin now
+  has a confined-by-default identity: the shell mints a per-plugin, per-session,
+  short-TTL **frontend token** (`plugin-grant ∩ session ∩ project`) and the SDK data
+  hooks present it transparently. A frontend plugin's Query API calls run at
+  least-privilege without standing up a backend. **Honest caveat:** this is
+  least-privilege *by default*, not a boundary — a frontend shares the shell's origin
+  and can bypass the SDK with the ambient cookie, so a frontend-only plugin is
+  *trusted-at-install* (see [trust-model.md](trust-model.md)); untrusted logic still
+  belongs in a backend. This unblocks B2/B4/B9-style frontend persistence (J2 builds
+  the kv-backed settings store on top of this identity).
 - **SchemaForm is not built.** The manifest declares `settingsSchema`, but the
   `packages/schema-form` renderer that would turn it into a settings tab is still
   designed-not-built. A settings UX is therefore hand-rolled.
@@ -47,7 +51,8 @@ what is still a gap. Written to find the gaps, not to claim the loop is done.
 
 The primitives are real and a backend plugin is genuinely buildable today
 (see the Set-B re-color: B3/B6/B7/B8/B10 are first-class). The DX gap is now the
-binding constraint, not the platform — and within DX, the two highest-leverage
-items are **`make dev` hot-reload** (fixes the inner loop for everyone) and the
-**frontend-direct plugin identity** (unblocks the pure-frontend persistence
-stories B2/B4/B9). Both are post-Tier-3 roadmap, named here rather than glossed.
+binding constraint, not the platform. Of the two highest-leverage items called out
+in the original audit, **frontend-direct plugin identity is now closed (J1)** —
+pure-frontend plugins have a least-privilege identity — which unblocks the
+persistence stories B2/B4/B9. The remaining highest-leverage item is **`make dev`
+hot-reload** (J3), which fixes the inner loop for everyone.

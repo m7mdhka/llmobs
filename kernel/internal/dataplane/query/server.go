@@ -64,6 +64,21 @@ func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *Compi
 		return s.authPlugin(r, op, reqPerm, svcTok, assertion)
 	}
 
+	// Case 1b — a plugin FRONTEND token (J1). A kernel-minted identity assertion the
+	// shell handed the plugin's frontend; its scopes are ALREADY the plugin-grant ∩
+	// user-session ∩ project intersection, so they are used directly. Distinct header
+	// from the backend assertion path so a bare user-scoped assertion can never be
+	// smuggled in here for full scopes.
+	//
+	// SECURITY NOTE — least-privilege-by-default, NOT a boundary. A plugin frontend
+	// runs in the shell's origin (ADR-0004) and can bypass this token by calling with
+	// the ambient session cookie (Case 2) directly. This case CONFINES a cooperating
+	// SDK-using frontend; it does not contain a hostile one. Origin isolation is the
+	// future boundary (ADR-0004 amendment). See frontendtoken.Handler.
+	if ft := r.Header.Get("X-LLMObs-Frontend-Token"); ft != "" && svcTok == "" {
+		return s.authFrontend(op, reqPerm, ft)
+	}
+
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 
 	// Case 2 — a browser session (shell). Effective = the user's role permissions ∩
@@ -128,6 +143,28 @@ func (s *Server) authPlugin(_ *http.Request, op, reqPerm, svcTok, assertion stri
 	}
 	// Project comes from the assertion; the plugin cannot pick a different tenant.
 	return controlplane.Identity{ProjectID: ac.ProjectID, Scopes: effective}, nil
+}
+
+// authFrontend resolves a plugin frontend-token call (J1). The token is a
+// kernel-minted identity assertion whose scopes were computed at mint as
+// plugin-grant ∩ user-session ∩ project, so no further intersection is needed —
+// the token IS the intersection. We verify it is kernel-signed, unexpired, and
+// audience-bound to a plugin (expectedAud="" accepts any plugin audience: there is
+// no service token here to name a specific plugin, and the scopes already bound the
+// access). Frontend tokens carry NO capability markers, so they can only read/write
+// data within the intersected perms — never reach a capability-gated primitive.
+func (s *Server) authFrontend(op, reqPerm, token string) (controlplane.Identity, *CompileError) {
+	if s.signer == nil {
+		return controlplane.Identity{}, errf("unauthorized", 403, "plugin auth unavailable")
+	}
+	ac, err := s.signer.VerifyIdentityAssertion(token, "", time.Now())
+	if err != nil {
+		return controlplane.Identity{}, errf("unauthorized", 403, "invalid frontend token")
+	}
+	if !perm.Has(ac.Scopes, reqPerm) {
+		return controlplane.Identity{}, errf("unauthorized", 403, "outside the permission intersection for %s", reqPerm)
+	}
+	return controlplane.Identity{ProjectID: ac.ProjectID, Scopes: ac.Scopes}, nil
 }
 
 // sessionProject resolves the project a browser session operates on: the

@@ -96,3 +96,74 @@ export async function fetchRegistry(): Promise<RegistryPlugin[]> {
   const data = await json<{ plugins: RegistryPlugin[] }>(res);
   return data.plugins ?? [];
 }
+
+// --- Plugin frontend token (J1) ---------------------------------------------
+//
+// The shell mints a per-plugin, per-session, short-TTL frontend token and hands a
+// PROVIDER (not a bare token) to each plugin's SDK, so the token can transparently
+// refresh before expiry. Its scopes are plugin-grant ∩ session ∩ project, computed
+// kernel-side — least-privilege by default for a cooperating frontend.
+//
+// This is NOT a security boundary: a plugin loads in the shell's origin and can
+// bypass the SDK with the ambient session cookie. It exists so a well-behaved
+// frontend runs at least-privilege, and so pure-frontend plugins have a confined
+// identity to persist settings under (J2). See docs/plugin-authors/trust-model.
+
+interface FrontendTokenResponse {
+  token: string;
+  expiresUnix: number;
+  scopes: string[];
+}
+
+export async function mintFrontendToken(
+  pluginId: string,
+  csrfToken: string,
+  projectId?: string,
+): Promise<FrontendTokenResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json", "X-CSRF-Token": csrfToken };
+  if (projectId) headers["X-LLMObs-Project"] = projectId;
+  const res = await fetch(`${API_BASE}/v1alpha1/plugin-frontend-token`, {
+    method: "POST",
+    headers,
+    credentials: "same-origin",
+    body: JSON.stringify({ plugin: pluginId }),
+  });
+  return json<FrontendTokenResponse>(res);
+}
+
+/**
+ * makeFrontendTokenProvider returns a getter the SDK calls before each request. It
+ * caches the current token and re-mints once it is within `skewMs` of expiry, so a
+ * long-lived plugin surface never presents an expired token. On a mint failure it
+ * returns undefined — the SDK then falls back to the session cookie (unconfined),
+ * which is the documented same-origin behavior, not a hard failure.
+ */
+export function makeFrontendTokenProvider(
+  pluginId: string,
+  csrfToken: string,
+  getProjectId: () => string | undefined,
+  skewMs = 30_000,
+): () => Promise<string | undefined> {
+  let cached: FrontendTokenResponse | null = null;
+  let expiresAtMs = 0;
+  let inflight: Promise<FrontendTokenResponse> | null = null;
+
+  return async () => {
+    // now is read per-call; Date is fine in the browser (this is shell code, not a
+    // kernel normalizer). A token within skewMs of expiry is treated as stale.
+    if (cached && Date.now() < expiresAtMs - skewMs) return cached.token;
+    if (!inflight) {
+      inflight = mintFrontendToken(pluginId, csrfToken, getProjectId()).finally(() => {
+        inflight = null;
+      });
+    }
+    try {
+      cached = await inflight;
+      expiresAtMs = cached.expiresUnix * 1000;
+      return cached.token;
+    } catch {
+      cached = null;
+      return undefined;
+    }
+  };
+}

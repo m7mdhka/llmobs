@@ -11,7 +11,7 @@ export type { LLMObsContextValue, ProviderConfig } from "./context.js";
 export { useQuery, useTraces, useTrace, useWriteScore } from "./hooks.js";
 export type { AsyncState, TracesParams, MutationState } from "./hooks.js";
 export { DataClient, SdkError } from "./client.js";
-export type { QueryResponse, TraceTree, ClientConfig, QueryInput, ScoreInput } from "./client.js";
+export type { QueryResponse, TraceTree, ClientConfig, QueryInput, ScoreInput, FrontendTokenProvider } from "./client.js";
 
 // Data primitive: `kv` (per-plugin, tenant-scoped key/value; backend double-token).
 export { KvClient } from "./kv.js";

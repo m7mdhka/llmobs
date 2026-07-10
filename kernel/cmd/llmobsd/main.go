@@ -29,6 +29,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/query"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/redact"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/frontendtoken"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginapi"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginauth"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginproxy"
@@ -202,6 +203,12 @@ func run() error {
 		return controlplane.DefaultProjectID(r.Context(), pool)
 	}
 	apiMux.Handle("/api/plugins/", pluginproxy.New(sup, pluginSigner, projectResolver, log).Handler("/api/plugins/"))
+	// Frontend-token mint (J1): session-authed; the shell mints a per-plugin,
+	// short-TTL, audience-bound frontend token scoped to plugin-grant ∩ session ∩
+	// project. Least-privilege-by-default for cooperating frontends, NOT a boundary
+	// against a hostile one (same-origin — see frontendtoken.Handler).
+	apiMux.HandleFunc("/v1alpha1/plugin-frontend-token",
+		frontendtoken.New(pluginSigner, regSource, projectResolver).Mint)
 	// Plugin data primitives (H4+): a plugin backend reaches these with its double
 	// token; each is capability-gated and tenant-scoped from the assertion.
 	pluginAuthz := pluginauth.New(pluginSigner, nil)

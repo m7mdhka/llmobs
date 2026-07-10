@@ -27,12 +27,29 @@ type Plugin struct {
 	ExposedModule string     `json:"exposedModule"`
 	Integrity     string     `json:"integrity,omitempty"`
 	Nav           []NavEntry `json:"nav"`
+	// Capabilities + Permissions are the plugin's manifest grant — the plugin half
+	// of the frontend-token intersection (J1). A frontend token minted for this
+	// plugin is scoped to Permissions ∩ the calling user's session.
+	Capabilities []string `json:"capabilities,omitempty"`
+	Permissions  []string `json:"permissions,omitempty"`
 }
 
 // Source supplies the currently-available plugins. D4 implements a manifest
 // scanner; D2 uses the empty source.
 type Source interface {
 	Plugins() []Plugin
+}
+
+// GrantFor returns a plugin's declared capabilities + permissions by id, false if
+// no such plugin. Used by the frontend-token mint to compute the plugin half of
+// the intersection (J1).
+func GrantFor(src Source, id string) (caps, perms []string, ok bool) {
+	for _, p := range src.Plugins() {
+		if p.ID == id {
+			return p.Capabilities, p.Permissions, true
+		}
+	}
+	return nil, nil, false
 }
 
 // EmptySource advertises no plugins.

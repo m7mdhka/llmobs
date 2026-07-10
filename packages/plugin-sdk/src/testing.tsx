@@ -126,5 +126,7 @@ export function TestLLMObsProvider({
   );
 }
 
-// Re-export SdkError so tests can construct expected errors (e.g. new SdkError(400, ...)).
+// Re-export SdkError so tests can construct expected errors (e.g. new SdkError(400, ...)),
+// and LLMObsClient so a test can type a hand-rolled client that isn't the fake.
 export { SdkError };
+export type { LLMObsClient };

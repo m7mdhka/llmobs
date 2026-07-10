@@ -18,7 +18,7 @@ import (
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
-	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
 // Ingestion is the mutable context threaded through the chain.
@@ -32,7 +32,7 @@ type Ingestion struct {
 	// derived
 	Identity controlplane.Identity
 	Spans    []normalize.SpanInput
-	Events   []postgres.Event
+	Events   []storage.Event
 }
 
 // Stage is one step in the chain.
@@ -62,7 +62,7 @@ type Pipeline struct {
 }
 
 // New builds the default chain.
-func New(pool *pgxpool.Pool, store *postgres.Store, reg *normalize.Registry, bus EventBus, _ Config) *Pipeline {
+func New(pool *pgxpool.Pool, store storage.TelemetryStore, reg *normalize.Registry, bus EventBus, _ Config) *Pipeline {
 	return &Pipeline{stages: []Stage{
 		&authenticateStage{pool: pool},
 		&decodeStage{},

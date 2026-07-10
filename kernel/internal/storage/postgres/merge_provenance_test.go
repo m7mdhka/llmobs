@@ -67,3 +67,8 @@ func roundTripState(t *testing.T, s map[string]any) map[string]any {
 	}
 	return out
 }
+
+func canon(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}

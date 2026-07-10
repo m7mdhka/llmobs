@@ -11,12 +11,35 @@ import {
   Row,
   Table,
   useTraces,
+  useQuery,
 } from "@llmobs/plugin-sdk";
 import { fmtDuration, fmtTime } from "./format.js";
 import type { WireTrace } from "./wire.js";
 
 // The Traces list — a filterable, paginated table over the `traces` DSL target.
 // Data comes exclusively from the SDK's useTraces hook.
+// A modest dogfood of the QD-4 aggregation path: span counts by kind over the
+// window, rendered as a one-line strip (not a dashboard).
+function SummaryStrip({ from, to }: { from: string; to: string }): React.ReactElement | null {
+  const doc = useMemo(
+    () => ({ target: "spans" as const, timeRange: { from, to }, groupBy: ["kind"], aggregations: [{ op: "count" }] }),
+    [from, to],
+  );
+  const { data } = useQuery<{ g0: string; count: number }>(doc);
+  if (!data || data.data.length === 0) return null;
+  const total = data.data.reduce((n, r) => n + (r.count ?? 0), 0);
+  return (
+    <div className="tr-summary">
+      <span className="tr-summary__total llmobs-tabular">{total}</span> spans ·{" "}
+      {data.data.map((r) => (
+        <span key={r.g0} className="tr-summary__kind">
+          {r.g0} <b className="llmobs-tabular">{r.count}</b>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function TracesListPage(): React.ReactElement {
   const navigate = useNavigate();
   const [env, setEnv] = useState("");
@@ -80,6 +103,7 @@ export function TracesListPage(): React.ReactElement {
         </form>
       </div>
 
+      <SummaryStrip from={from} to={to} />
       {traces.length === 0 ? (
         <EmptyState
           title="No traces in this window"

@@ -279,3 +279,15 @@
 }
 .tr-incomplete { color: var(--llmobs-warning); background: var(--llmobs-warning-soft); }
 .tr-open { color: var(--llmobs-accent); background: var(--llmobs-accent-soft); }
+
+.tr-summary {
+  font-size: var(--llmobs-text-xs);
+  color: var(--llmobs-text-muted);
+  padding: var(--llmobs-space-2) 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--llmobs-space-3);
+  align-items: baseline;
+}
+.tr-summary__total { font-size: var(--llmobs-text-lg); font-weight: 600; color: var(--llmobs-text); }
+.tr-summary__kind { font-family: var(--llmobs-font-mono); }

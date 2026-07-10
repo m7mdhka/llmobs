@@ -32,23 +32,26 @@ with identical observable semantics.
   model; ADR-0019 query DSL), so a new engine is an adapter change, never a
   contract change.
 
-**Why the incumbent structurally can't match it.** Langfuse's v4 architecture
-doubles down on ClickHouse as *the* store — a single wide, mostly-immutable
-ClickHouse table is the centerpiece of the redesign
+**Why the incumbent structurally can't match it.** **ClickHouse acquired
+Langfuse — announced January 16, 2026**, alongside a $400M Series D led by
+Dragoneer at a ~$15B valuation; both companies committed publicly to keeping
+Langfuse MIT-licensed with self-hosting as a first-class path. Primary sources:
+[ClickHouse blog](https://clickhouse.com/blog/clickhouse-acquires-langfuse-open-source-llm-observability),
+[Langfuse blog](https://langfuse.com/blog/joining-clickhouse),
+[funding context](https://clickhouse.com/blog/clickhouse-raises-400-million-series-d-acquires-langfuse-launches-postgres).
+ClickHouse did not acquire Langfuse to move it onto a new engine — it acquired
+the application layer sitting atop the database it already powered. Langfuse's v4
+architecture independently doubles down on ClickHouse as *the* store — a single
+wide, mostly-immutable ClickHouse table is the centerpiece of the redesign
 ([#12518, deep-read](research/langfuse-discussions/deep-reads/12518-v4-architecture.md)).
-Community discussion [#11593](https://github.com/orgs/langfuse/discussions/11593)
-("ClickHouse acquires Langfuse") signals that ClickHouse is now Langfuse's
-corporate owner/backer. Take that signal at face value and the conclusion is
-structural, not competitive: **a product whose owner sells ClickHouse has no
-incentive — and arguably a disincentive — to become storage-neutral**, because
-neutrality would let customers run the platform *without* the owner's database.
-We have no such conflict. Storage neutrality is a position their cap table makes
-expensive and ours makes free.
 
-> Honesty note: #11593's ownership claim is a community discussion, not a
-> primary-source press release cited here. The pillar's argument holds on the
-> weaker, verifiable fact alone — v4 deepens (does not reduce) the ClickHouse
-> dependency (#12518) — so it does not depend on the acquisition being confirmed.
+The conclusion is **structural, not speculative**: a product whose owner sells
+ClickHouse has no incentive — and arguably a disincentive — to become
+storage-neutral, because neutrality would let customers run the platform
+*without* the owner's database. This is not a rug-pull prediction (ClickHouse's
+business model is genuinely OSS-aligned and a relicense is not being claimed
+here); it is the plain observation that storage neutrality is a position their
+cap table makes expensive and ours makes free.
 
 ---
 
@@ -130,12 +133,17 @@ roadmap line item in a monolith. A monolith serves the head of that distribution
 and drops the tail; a plugin ecosystem serves the tail by making the marginal
 integration someone else's afternoon, not the core team's quarter.
 
-> Honesty note (uncited-in-repo): the *"~40% of comparable feature asks resolve
-> as 'Not Planned' in the incumbent's tracker"* figure comes from an internal
-> issue-mining pass whose dataset is **not yet committed to this repo**. Do not
-> ship this specific number in the README/launch post until that dataset lands
-> under `docs/research/` as a citable source (mirror the discussions mine). The
-> pillar's argument stands without the number, on the committed evidence above.
+**Evidence (the "Not Planned" figure).** Of Langfuse's **25 most-upvoted closed
+issues, 10 (40%) are closed `not_planned`** — including conditional prompt
+rendering, dataset-item comments, auto-render images, `fetch_score` in the SDKs,
+and per-cloud pricing rows. The ranked dataset and query are committed at
+[`research/langfuse-issues/`](research/langfuse-issues/) (mined 2026-07-10,
+reproducible from the recorded Search API query); the analysis is in
+[`research/langfuse-issues/findings.md`](research/langfuse-issues/findings.md).
+This is monolith economics: a single roadmap cannot fund a long tail of niche
+asks, so most lose — whereas in a kernel-plus-plugins model each is a community
+plugin that never queues behind a core team. The figure is exact for that defined
+set (top-25 closed by votes), not a claim about all issues.
 
 ---
 

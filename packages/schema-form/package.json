@@ -1,7 +1,8 @@
 {
-  "name": "@llmobs/plugin-sdk",
+  "name": "@llmobs/schema-form",
   "version": "0.1.0",
-  "description": "The LLMObs plugin SDK (Tier-2 surface). A plugin frontend imports ONLY this (plus @llmobs/ui, @llmobs/tokens): the provider, data hooks over the Query API, the manifest types, and the standard degraded-state components. Semver-sacred.",
+  "private": true,
+  "description": "Render a plugin settings JSON Schema (the supported subset) as a form using @llmobs/ui. Client-side validation mirrors the kernel validator; writeOnly fields are write-only secrets that are never rendered back (J2, ADR-0024).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,10 +18,8 @@
     "react": "^18.3.0"
   },
   "dependencies": {
-    "@llmobs/query-client": "workspace:*",
-    "@llmobs/schema-form": "workspace:*",
-    "@llmobs/tokens": "workspace:*",
-    "@llmobs/ui": "workspace:*"
+    "@llmobs/ui": "workspace:*",
+    "@llmobs/tokens": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "18.3.12",

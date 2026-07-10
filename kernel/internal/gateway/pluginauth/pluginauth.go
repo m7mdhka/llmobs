@@ -70,6 +70,32 @@ func (a *Authorizer) Require(r *http.Request, capability string) (Caller, int, e
 	return Caller{PluginID: stc.PluginID, ProjectID: ac.ProjectID, Actor: ac.Actor}, http.StatusOK, nil
 }
 
+// RequireFrontend authorizes a plugin FRONTEND call (J2) using the J1 frontend
+// token — the only credential a pure-frontend plugin holds. The plugin id comes from
+// the token's audience and the project from its claims, so a frontend can only reach
+// its OWN data in its OWN tenant; the request body cannot pick either. There is no
+// capability gate here: settings is `kv` made frontend-reachable, and the token's
+// audience + tenant already bound it. (Distinct from Require, which needs the backend
+// double token; a frontend has no service token.)
+func (a *Authorizer) RequireFrontend(r *http.Request) (Caller, int, error) {
+	if a.signer == nil {
+		return Caller{}, http.StatusServiceUnavailable, errors.New("plugin auth unavailable")
+	}
+	tok := r.Header.Get(pluginproto.FrontendTokenHeader)
+	if tok == "" {
+		return Caller{}, http.StatusUnauthorized, errors.New("frontend token required")
+	}
+	ac, err := a.signer.VerifyFrontendToken(tok, a.now())
+	if err != nil {
+		return Caller{}, http.StatusUnauthorized, fmt.Errorf("invalid frontend token: %w", err)
+	}
+	pluginID, ok := pluginproto.PluginIDFromSubject(ac.Aud)
+	if !ok {
+		return Caller{}, http.StatusUnauthorized, errors.New("frontend token has no plugin audience")
+	}
+	return Caller{PluginID: pluginID, ProjectID: ac.ProjectID, Actor: ac.Actor}, http.StatusOK, nil
+}
+
 // RequirePluginToken verifies the SERVICE TOKEN ALONE (no user assertion) and the
 // capability — the auth model for PLUGIN-INITIATED operations like cold-path
 // ingest (H7 finding #3). Cold-path ingest arrives from an external source

@@ -20,6 +20,7 @@ RUN pnpm --filter @llmobs/query-client build \
  && pnpm --filter @llmobs/brand build \
  && pnpm --filter @llmobs/tokens build \
  && pnpm --filter @llmobs/ui build \
+ && pnpm --filter @llmobs/schema-form build \
  && pnpm --filter @llmobs/plugin-sdk build \
  && NODE_ENV=production pnpm --filter @llmobs/shell build \
  && pnpm --filter @llmobs/shell check:singletons \
@@ -37,9 +38,12 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/llmobsd /llmobsd
 COPY --from=web /app/web/shell/dist /webui
 # First-party tracing plugin, laid out as the dev-mode registry expects:
-# <plugin-dir>/<name>/{llmobs-plugin.yaml, dist/}.
+# <plugin-dir>/<name>/{llmobs-plugin.yaml, dist/}. The settingsSchema the manifest
+# declares (J2) must also ship at its manifest-relative path so the kernel can load
+# it — a declared-but-missing schema fails the plugin load.
 COPY --from=web /app/plugins/tracing/llmobs-plugin.yaml /plugins/tracing/llmobs-plugin.yaml
 COPY --from=web /app/plugins/tracing/frontend/dist /plugins/tracing/dist
+COPY --from=web /app/plugins/tracing/frontend/src/settings.schema.json /plugins/tracing/frontend/src/settings.schema.json
 ENV LLMOBS_WEBUI_DIR=/webui
 ENV LLMOBS_PLUGIN_DIR=/plugins
 EXPOSE 4317 4318 8080

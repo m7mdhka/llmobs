@@ -23,6 +23,7 @@ import (
 
 	"github.com/m7mdhka/llmobs/kernel/internal/jobs"
 	"github.com/m7mdhka/llmobs/kernel/internal/plugindata"
+	"github.com/m7mdhka/llmobs/kernel/internal/pluginsettings"
 	"github.com/m7mdhka/llmobs/kernel/pkg/pluginproto"
 )
 
@@ -59,9 +60,10 @@ type Manifest struct {
 		Version string `yaml:"version"`
 	} `yaml:"metadata"`
 	Spec struct {
-		Capabilities []string `yaml:"capabilities"`
-		Permissions  []string `yaml:"permissions"`
-		Frontend     *struct {
+		Capabilities   []string `yaml:"capabilities"`
+		Permissions    []string `yaml:"permissions"`
+		SettingsSchema string   `yaml:"settingsSchema"`
+		Frontend       *struct {
 			RemoteName    string `yaml:"remoteName"`
 			ExposedModule string `yaml:"exposedModule"`
 			Entry         string `yaml:"entry"`
@@ -154,6 +156,22 @@ func CheckManifest(raw []byte) (Report, *Manifest) {
 		rep.add("job:"+j.Name, ok, j.Schedule)
 	}
 	return rep, &m
+}
+
+// CheckSettingsSchema verifies a plugin's settings JSON Schema (J2) is within the
+// supported subset the kernel + SchemaForm both validate — so a settings tab renders
+// and writes validate identically. Called by conformance when the manifest declares
+// a settingsSchema; the caller supplies the loaded schema bytes.
+func CheckSettingsSchema(raw []byte) Report {
+	var rep Report
+	if !json.Valid(raw) {
+		rep.add("settings-schema-json", false, "not valid JSON")
+		return rep
+	}
+	rep.add("settings-schema-json", true, "")
+	_, err := pluginsettings.ParseSchema(raw)
+	rep.add("settings-schema-subset", err == nil, detailErr(err))
+	return rep
 }
 
 // CheckLive runs the backend conformance checks (handshake + health +

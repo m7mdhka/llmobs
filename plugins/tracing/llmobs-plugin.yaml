@@ -14,6 +14,10 @@ spec:
   permissions:
     - traces:read.metadata
     - traces:read.payloads
+  # A pure-frontend plugin persisting its own settings with no backend (J2, B9):
+  # the schema is rendered by @llmobs/schema-form and the values are stored via the
+  # frontend-token-scoped settings store. exportApiKey is a write-only secret.
+  settingsSchema: frontend/src/settings.schema.json
   frontend:
     remoteName: tracing
     exposedModule: ./plugin

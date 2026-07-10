@@ -1,7 +1,14 @@
 import * as React from "react";
 import type { LLMObsCanonicalTraceV1Alpha1 as Trace } from "@llmobs/query-client";
 import { useLLMObs } from "./context.js";
-import { SdkError, type QueryInput, type QueryResponse, type ScoreInput, type TraceTree } from "./client.js";
+import {
+  SdkError,
+  type QueryInput,
+  type QueryResponse,
+  type ScoreInput,
+  type SettingsView,
+  type TraceTree,
+} from "./client.js";
 
 // Every hook returns the same async shape so surfaces render the standard
 // loading/error/empty states uniformly. `refetch` re-runs the request.
@@ -89,6 +96,50 @@ export interface MutationState<TArg, TResult> {
   mutate: (arg: TArg) => Promise<TResult>;
   loading: boolean;
   error: SdkError | null;
+}
+
+// SettingsState is what useSettings returns: the loaded view (values + which
+// secrets are set), a save function, and the standard loading/error flags. Pass the
+// rendered view straight to <SchemaForm values={data.values} secretsSet={data.secrets} />.
+export interface SettingsState {
+  data: SettingsView | null;
+  loading: boolean;
+  error: SdkError | null;
+  /** Persist changed values; secrets left out are preserved. Refetches on success. */
+  save: (values: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
+  saveError: SdkError | null;
+  refetch: () => void;
+}
+
+/**
+ * useSettings loads and persists the plugin's settings (J2) through the frontend
+ * token. Secret (writeOnly) fields never come back — `data.secrets[name]` only tells
+ * you whether one is set. Pair with <SchemaForm> from @llmobs/schema-form.
+ */
+export function useSettings(): SettingsState {
+  const { client } = useLLMObs();
+  const { data, loading, error, refetch } = useAsync((signal) => client.getSettings(signal), []);
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<SdkError | null>(null);
+  const save = React.useCallback(
+    async (values: Record<string, unknown>) => {
+      setSaving(true);
+      setSaveError(null);
+      try {
+        await client.setSettings(values);
+        refetch();
+      } catch (e: unknown) {
+        const err = e instanceof SdkError ? e : new SdkError(0, "network", (e as Error)?.message ?? "save failed");
+        setSaveError(err);
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [client, refetch],
+  );
+  return { data, loading, error, save, saving, saveError, refetch };
 }
 
 /** Write a score (the `write` primitive). Requires the scores:write scope. */

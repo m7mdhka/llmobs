@@ -86,6 +86,15 @@ func RoleScopes(role string) []string {
 	return []string{TracesReadMetadata, ScoresRead}
 }
 
+// HasWriteAuthority reports whether a permission set carries ANY write scope —
+// the coarse "may this role mutate, not just read?" question. Used to gate
+// configuration writes (plugin settings, J2) the same way the supervisor gates
+// enable/disable: admins today, refined by the #21 RBAC seam. Derived from the
+// scopes, never a hardcoded role string.
+func HasWriteAuthority(scopes []string) bool {
+	return Has(scopes, TracesWrite) || Has(scopes, ScoresWrite) || Has(scopes, TracesDelete)
+}
+
 // --- capability markers ---
 //
 // A plugin's service token carries BOTH data permissions (canonical nouns) and

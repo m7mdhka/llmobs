@@ -59,7 +59,45 @@ func TestFirstPartyPluginsConform(t *testing.T) {
 			if m == nil {
 				t.Fatalf("%s: manifest did not parse", name)
 			}
+			// If the plugin declares a settings schema (J2), it must be within the
+			// supported subset — load it relative to the manifest and check.
+			if m.Spec.SettingsSchema != "" {
+				schemaPath := filepath.Join(filepath.Dir(path), filepath.Clean("/"+m.Spec.SettingsSchema))
+				schemaRaw, err := os.ReadFile(schemaPath)
+				if err != nil {
+					t.Fatalf("%s: settingsSchema %q unreadable: %v", name, m.Spec.SettingsSchema, err)
+				}
+				for _, r := range CheckSettingsSchema(schemaRaw).Results {
+					if !r.Pass {
+						t.Errorf("%s: settings schema check %q failed: %s", name, r.Check, r.Detail)
+					}
+				}
+			}
 		})
+	}
+}
+
+// TestSettingsSchemaConformance: a schema within the supported subset passes; one
+// using an unsupported field type fails the subset check (J2).
+func TestSettingsSchemaConformance(t *testing.T) {
+	good := []byte(`{"type":"object","required":["k"],"properties":{"k":{"type":"string","writeOnly":true},"n":{"type":"integer","minimum":1}}}`)
+	if rep := CheckSettingsSchema(good); !rep.OK() {
+		t.Fatalf("supported schema should pass: %+v", rep.Results)
+	}
+	// A nested-object field is outside the flat subset → must fail.
+	bad := []byte(`{"type":"object","properties":{"nested":{"type":"object"}}}`)
+	rep := CheckSettingsSchema(bad)
+	if rep.OK() {
+		t.Fatal("unsupported schema must fail conformance")
+	}
+	var found bool
+	for _, r := range rep.Results {
+		if r.Check == "settings-schema-subset" && !r.Pass {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected settings-schema-subset to fail: %+v", rep.Results)
 	}
 }
 

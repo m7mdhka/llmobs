@@ -32,6 +32,11 @@ type Plugin struct {
 	// plugin is scoped to Permissions ∩ the calling user's session.
 	Capabilities []string `json:"capabilities,omitempty"`
 	Permissions  []string `json:"permissions,omitempty"`
+	// SettingsSchema is the raw JSON Schema for the plugin's settings (J2), loaded
+	// from the manifest's settingsSchema path. Present only when the plugin declares
+	// one; the shell renders it as a settings tab and the kernel validates writes
+	// against it. Served to the shell in the registry list.
+	SettingsSchema json.RawMessage `json:"settingsSchema,omitempty"`
 }
 
 // Source supplies the currently-available plugins. D4 implements a manifest
@@ -50,6 +55,18 @@ func GrantFor(src Source, id string) (caps, perms []string, ok bool) {
 		}
 	}
 	return nil, nil, false
+}
+
+// SchemaFor returns a plugin's raw settings JSON Schema by id, false if the plugin
+// is unknown or declares no settingsSchema. Used by the settings store (J2) to find
+// the secret (writeOnly) fields and validate a settings write.
+func SchemaFor(src Source, id string) (schema json.RawMessage, ok bool) {
+	for _, p := range src.Plugins() {
+		if p.ID == id {
+			return p.SettingsSchema, len(p.SettingsSchema) > 0
+		}
+	}
+	return nil, false
 }
 
 // EmptySource advertises no plugins.

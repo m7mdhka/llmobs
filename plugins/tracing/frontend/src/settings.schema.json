@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tracing settings",
+  "type": "object",
+  "required": ["pageSize"],
+  "properties": {
+    "defaultTimeRange": {
+      "type": "string",
+      "title": "Default time range",
+      "description": "The time window the trace list opens on.",
+      "enum": ["1h", "24h", "7d"],
+      "default": "24h"
+    },
+    "pageSize": {
+      "type": "integer",
+      "title": "Rows per page",
+      "description": "How many traces to load per page (10–200).",
+      "minimum": 10,
+      "maximum": 200,
+      "default": 50
+    },
+    "showSpanEvents": {
+      "type": "boolean",
+      "title": "Show span events",
+      "description": "Expand span events by default in the trace tree."
+    },
+    "exportApiKey": {
+      "type": "string",
+      "title": "Export API key",
+      "description": "A secret token used when exporting traces to an external sink. Write-only — it is stored encrypted and never shown again.",
+      "writeOnly": true
+    }
+  }
+}

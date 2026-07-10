@@ -134,6 +134,29 @@ export class DataClient {
   writeScore(score: ScoreInput, signal?: AbortSignal): Promise<{ id: string }> {
     return this.request<{ id: string }>("POST", "/v1alpha1/scores", score, signal);
   }
+
+  /**
+   * Read the plugin's settings (J2). Authed by the frontend token — the plugin id +
+   * project come from the token. Secret (writeOnly) fields are NEVER returned; the
+   * `secrets` map only reports whether each secret is set.
+   */
+  getSettings(signal?: AbortSignal): Promise<SettingsView> {
+    return this.request<SettingsView>("POST", "/v1alpha1/plugin/settings/get", {}, signal);
+  }
+
+  /**
+   * Persist the plugin's settings (J2). Secret fields left out (or blank) are
+   * preserved by the kernel. A validation failure surfaces as an SdkError (400).
+   */
+  setSettings(values: Record<string, unknown>, signal?: AbortSignal): Promise<void> {
+    return this.request<void>("POST", "/v1alpha1/plugin/settings/set", { values }, signal);
+  }
+}
+
+/** The settings `get` response: non-secret values + per-secret "is set" markers. */
+export interface SettingsView {
+  values: Record<string, unknown>;
+  secrets: Record<string, boolean>;
 }
 
 // ScoreInput is the wire shape of a score write (LM-3/LM-8): exactly one value_*

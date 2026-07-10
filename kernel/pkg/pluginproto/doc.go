@@ -68,3 +68,13 @@ func ProtocolSupported(v string) bool {
 
 // PluginSubject renders the `plugin:{id}` subject/audience form.
 func PluginSubject(pluginID string) string { return "plugin:" + pluginID }
+
+// PluginIDFromSubject is the inverse of PluginSubject: it extracts the plugin id
+// from a `plugin:{id}` subject/audience, reporting false if the form is wrong.
+func PluginIDFromSubject(subject string) (string, bool) {
+	const prefix = "plugin:"
+	if len(subject) <= len(prefix) || subject[:len(prefix)] != prefix {
+		return "", false
+	}
+	return subject[len(prefix):], true
+}

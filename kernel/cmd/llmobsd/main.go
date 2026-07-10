@@ -20,6 +20,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/bus"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/supervisor"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingest"
@@ -39,6 +40,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/platform"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/secretbox"
+	"github.com/m7mdhka/llmobs/kernel/internal/pluginsettings"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 	"github.com/m7mdhka/llmobs/kernel/pkg/brand"
 )
@@ -229,6 +231,21 @@ func run() error {
 	pluginStore := postgres.NewPluginStore(pool)
 	sup.SetProvisioner(pluginStore)
 	pluginapi.NewStore(pluginAuthz, pluginStore).Register(apiMux, "/v1alpha1/plugin/store")
+	// Settings (J2, ADR-0024): `kv` made frontend-reachable + schema-aware. Authed by
+	// the J1 frontend token (a pure-frontend plugin's only credential); writeOnly
+	// (secret) fields are envelope-encrypted with the same box as secrets and never
+	// returned. The schema comes from the registry (loaded from the manifest).
+	settingsStore := pluginsettings.NewStore(postgres.NewPluginKV(pool), secretBox)
+	settingsSchema := func(pluginID string) (json.RawMessage, bool) { return registry.SchemaFor(regSource, pluginID) }
+	// Settings WRITES require configuration authority (admins today, #21 seam): the
+	// session role must carry a write scope. The frontend token already bounded the
+	// plugin + tenant; this is the "who may administer" half so a viewer cannot
+	// overwrite project-shared config/secrets.
+	canWriteSettings := func(r *http.Request) bool {
+		sess, ok := authhttp.SessionFrom(r.Context())
+		return ok && perm.HasWriteAuthority(perm.RoleScopes(sess.User.Role))
+	}
+	pluginapi.NewSettings(pluginAuthz, settingsStore, settingsSchema, canWriteSettings).Register(apiMux, "/v1alpha1/plugin/settings")
 	// Events: durable subscribe (poll/ack) over the Postgres event bus.
 	pluginapi.NewEvents(pluginAuthz, eventBus).Register(apiMux, "/v1alpha1/plugin/events")
 	// Ingest: a compat plugin (cap:ingest) pushes OTLP spans through the SAME

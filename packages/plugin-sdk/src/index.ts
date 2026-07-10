@@ -8,10 +8,10 @@ export { LLMObsPluginProvider, useLLMObs } from "./context.js";
 export type { LLMObsContextValue, ProviderConfig } from "./context.js";
 
 // Data primitives: `query` + `write` (score writes).
-export { useQuery, useTraces, useTrace, useWriteScore } from "./hooks.js";
-export type { AsyncState, TracesParams, MutationState } from "./hooks.js";
+export { useQuery, useTraces, useTrace, useWriteScore, useSettings } from "./hooks.js";
+export type { AsyncState, TracesParams, MutationState, SettingsState } from "./hooks.js";
 export { DataClient, SdkError } from "./client.js";
-export type { QueryResponse, TraceTree, ClientConfig, QueryInput, ScoreInput, FrontendTokenProvider } from "./client.js";
+export type { QueryResponse, TraceTree, ClientConfig, QueryInput, ScoreInput, SettingsView, FrontendTokenProvider } from "./client.js";
 
 // Data primitive: `kv` (per-plugin, tenant-scoped key/value; backend double-token).
 export { KvClient } from "./kv.js";
@@ -51,3 +51,7 @@ export type {
 // Re-export the design system so a plugin has a single import surface.
 export * from "@llmobs/ui";
 export * from "@llmobs/tokens";
+// SchemaForm (J2) — re-exported selectively (a blanket re-export would collide with
+// @llmobs/ui's `Field`). Pair with useSettings above for a settings tab.
+export { SchemaForm } from "@llmobs/schema-form";
+export type { SchemaFormProps } from "@llmobs/schema-form";

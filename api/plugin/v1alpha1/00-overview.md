@@ -167,6 +167,38 @@ distinct origin + postMessage bridge, the frontend token as the sole credential)
 that is specified as a paired follow-up (ADR-0004 amendment + ADR-0023), to be built
 when an untrusted third-party frontend plugin is a real requirement — not before.
 
+## 7. Settings store (frontend-reachable, schema-aware, J2 / ADR-0024)
+
+A plugin that declares `spec.settingsSchema` (a manifest-relative path to a JSON
+Schema) gets a settings tab with **no settings-specific backend code**. Settings is
+the `kv` primitive made frontend-reachable and schema-aware — not a new primitive.
+
+- **Endpoints:** `POST /v1alpha1/plugin/settings/get` and `/set`, POST-only, capped
+  body. Authed by the **J1 frontend token** (§6): the plugin id + project come from
+  the token, never the body — a frontend reaches only its own settings in its own
+  tenant.
+- **Reads are open; writes require configuration authority.** Settings are
+  **project-shared** plugin config, so `set` additionally requires the caller's
+  **session role** to carry a write scope (admins today, #21 RBAC seam) — a read-only
+  viewer with a valid frontend token gets `403` on `set` but may `get`. This keeps a
+  viewer from overwriting shared config or a stored secret.
+- **`get`** returns `{ "values": {…non-secret fields…}, "secrets": { "<field>":
+  true|false } }` — for each secret field, only whether a value is stored.
+- **`set`** takes `{ "values": { "<field>": <value>, … } }`, validated server-side
+  against the schema; on success `204`. A validation failure is `400` with
+  `{ error, field }`.
+- **Schema subset (the same client + kernel validate):** root `type: object`; field
+  types `string | number | integer | boolean`; `enum` (string), `required`,
+  `minLength`, `minimum`/`maximum`, `title`, `description`, `default`. Settings are
+  **flat** (one level). Anything outside the subset is a conformance failure, caught
+  before install.
+- **Secrets — `writeOnly: true`.** A field marked `writeOnly` is a secret: on `set`
+  it is **envelope-encrypted** (the same box as the `secrets` primitive) before
+  storage; on `get` it is **never** returned — only the boolean "set" marker. A `set`
+  that omits the field or sends `""` **preserves** the stored secret (re-saving a form
+  never wipes a secret the user did not retype). This is the settings analogue of the
+  `secrets` never-return guarantee.
+
 ## Token format (both tokens)
 
 Compact, dependency-free, stdlib-verifiable (no JWT library on the hot path):

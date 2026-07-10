@@ -63,6 +63,7 @@ jobs:
           pnpm --filter @llmobs/brand build
           pnpm --filter @llmobs/tokens build
           pnpm --filter @llmobs/ui build
+          pnpm --filter @llmobs/schema-form build
           pnpm --filter @llmobs/plugin-sdk build
           NODE_ENV=production pnpm --filter @llmobs/shell build
           NODE_ENV=production pnpm --filter @llmobs/plugin-tracing build

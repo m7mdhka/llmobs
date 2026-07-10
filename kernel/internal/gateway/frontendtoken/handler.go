@@ -76,7 +76,7 @@ func (h *Handler) Mint(w http.ResponseWriter, r *http.Request) {
 	userPerms := perm.RoleScopes(sess.User.Role)
 	effective := pluginproto.Intersect(pluginPerms, userPerms)
 
-	tok, claims, err := h.signer.MintIdentityAssertion(
+	tok, claims, err := h.signer.MintFrontendToken(
 		req.Plugin, sess.User.Email, projectID, "frontend:"+sess.User.Email, effective, time.Now(), tokenTTL)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "mint failed"})

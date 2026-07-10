@@ -22,7 +22,17 @@ var (
 	ErrExpired        = errors.New("pluginproto: token expired")
 	ErrBadAudience    = errors.New("pluginproto: wrong audience")
 	ErrBadIssuer      = errors.New("pluginproto: wrong issuer")
+	ErrBadPurpose     = errors.New("pluginproto: wrong token purpose")
 )
+
+// PurposeFrontend marks an identity assertion minted as a plugin FRONTEND token
+// (J1): its scopes were already intersected (plugin-grant ∩ user ∩ project) at
+// mint, so the Query API frontend-token case may use them directly. This marker is
+// SIGNED — it distinguishes a frontend token from a proxy/jobs-minted identity
+// assertion, which carry un-intersected (full role) scopes and MUST NOT be usable
+// on the frontend seam. Proxy/jobs mints leave Purpose empty; only MintFrontendToken
+// sets this, and only VerifyFrontendToken accepts it.
+const PurposeFrontend = "frontend"
 
 // ServiceTokenClaims proves which plugin is calling and what it may do
 // (api/plugin/v1alpha1/service-token.schema.json). The plugin half of the
@@ -51,6 +61,13 @@ type IdentityAssertionClaims struct {
 	ProjectID string   `json:"projectId"`
 	Actor     string   `json:"actor,omitempty"`
 	Scopes    []string `json:"scopes"`
+	// Purpose distinguishes token classes that share this claim shape. Empty for the
+	// per-request proxy assertion and the jobs system assertion (both carry
+	// un-intersected user/plugin scopes, confined downstream by the service-token
+	// intersection). Set to PurposeFrontend ONLY for J1 frontend tokens, whose scopes
+	// are pre-intersected — so the frontend seam can accept them and reject the
+	// others. Additive/optional (v1alpha1).
+	Purpose string `json:"purpose,omitempty"`
 }
 
 var b64 = base64.RawURLEncoding
@@ -149,6 +166,48 @@ func VerifyIdentityAssertion(pub ed25519.PublicKey, token, expectedAud string, n
 	}
 	if expectedAud != "" && c.Aud != expectedAud {
 		return c, ErrBadAudience
+	}
+	// A frontend token (pre-intersected scopes) is a distinct class and must not be
+	// accepted on the proxy/backend identity path — keep the classes cleanly split.
+	if c.Purpose == PurposeFrontend {
+		return c, ErrBadPurpose
+	}
+	if now.Unix() >= c.Exp {
+		return c, ErrExpired
+	}
+	return c, nil
+}
+
+// MintFrontendToken issues a J1 frontend token: an identity assertion whose scopes
+// are ALREADY the plugin-grant ∩ user ∩ project intersection, stamped with a signed
+// PurposeFrontend marker. Only this mint sets the marker, and only
+// VerifyFrontendToken accepts it — so a proxy/jobs-minted assertion (un-intersected
+// full scopes, no purpose) can never be replayed onto the frontend seam. jti must
+// be unique.
+func MintFrontendToken(priv ed25519.PrivateKey, pluginID, subject, projectID, actor string, scopes []string, iat time.Time, ttl time.Duration, jti string) (string, IdentityAssertionClaims, error) {
+	c := IdentityAssertionClaims{
+		Iss: IssuerKernel, Sub: subject, Aud: PluginSubject(pluginID),
+		Iat: iat.Unix(), Exp: iat.Add(ttl).Unix(), Jti: jti,
+		ProjectID: projectID, Actor: actor, Scopes: scopes, Purpose: PurposeFrontend,
+	}
+	t, err := Sign(priv, c)
+	return t, c, err
+}
+
+// VerifyFrontendToken checks a J1 frontend token: signature, issuer, the signed
+// PurposeFrontend marker (this is what rejects proxy/jobs assertions), and expiry.
+// There is no per-plugin audience check — the frontend seam has no service token to
+// name a specific plugin, and the scopes were already bounded at mint.
+func VerifyFrontendToken(pub ed25519.PublicKey, token string, now time.Time) (IdentityAssertionClaims, error) {
+	var c IdentityAssertionClaims
+	if err := verify(pub, token, &c); err != nil {
+		return c, err
+	}
+	if c.Iss != IssuerKernel {
+		return c, ErrBadIssuer
+	}
+	if c.Purpose != PurposeFrontend {
+		return c, ErrBadPurpose
 	}
 	if now.Unix() >= c.Exp {
 		return c, ErrExpired

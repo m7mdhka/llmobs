@@ -30,6 +30,10 @@ const (
 	// gateway injects on proxied calls to a plugin backend.
 	IdentityAssertionHeader = "X-LLMObs-Identity-Assertion"
 
+	// FrontendTokenHeader carries a J1 plugin frontend token (a purpose-marked,
+	// pre-intersected identity assertion) on a plugin frontend's Query API calls.
+	FrontendTokenHeader = "X-LLMObs-Frontend-Token"
+
 	// DefaultInfoPath / DefaultHealthPath are the well-known plugin endpoints the
 	// supervisor calls when the manifest does not override them.
 	DefaultInfoPath   = "/plugin/v1/info"

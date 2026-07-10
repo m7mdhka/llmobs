@@ -267,9 +267,22 @@ and cannot do.
 - **Mechanism.** `POST /v1alpha1/plugin-frontend-token` (session-authed) mints a
   per-plugin, per-session, short-TTL, audience-bound (`plugin:{id}`) identity
   assertion whose scopes are **plugin-grant ∩ user-session ∩ project**, computed at
-  mint. The SDK presents it as `X-LLMObs-Frontend-Token`; the Query API adds a
-  frontend-token case that uses those (already-intersected) scopes directly, ahead
-  of the session case. Frontend tokens carry **no capability markers**.
+  mint, and stamped with a signed **`purpose: "frontend"`** marker. The SDK presents
+  it as `X-LLMObs-Frontend-Token`; the Query API adds a frontend-token case that uses
+  those (already-intersected) scopes directly, ahead of the session case. Frontend
+  tokens carry **no capability markers**.
+
+- **Token-class separation (security-review fix).** The proxy per-request assertion
+  and the jobs system assertion share the identity-assertion claim shape but carry
+  *un-intersected* scopes (confined later by the service-token intersection at
+  `authPlugin`). Without a distinguishing marker, a backend plugin could replay the
+  full-scope assertion the proxy injects into it onto the frontend seam (no service
+  token ⇒ no intersection) and escalate to the user's full scopes — reading payloads
+  and reaching erasure. The signed `purpose` marker closes this: `MintFrontendToken`
+  is the only producer that sets it and `VerifyFrontendToken` is the only verifier
+  that accepts it; the generic `VerifyIdentityAssertion` now *rejects* it. Proven in
+  `pluginproto.TestFrontendTokenClassSeparation` +
+  `query.TestProxyAssertionCannotBeReplayedAsFrontendToken`.
 
 - **What it is: least-privilege by default.** For a *cooperating* SDK-using
   frontend, its Query API access is now confined to the plugin's grant intersected

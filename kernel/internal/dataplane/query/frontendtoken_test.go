@@ -18,7 +18,7 @@ import (
 // (plugin-grant ∩ user-session), which is exactly what frontendtoken.Handler emits.
 func frontendReq(t *testing.T, signer *plugintoken.Signer, pluginID string, scopes []string, projectID string, age, ttl time.Duration) *http.Request {
 	t.Helper()
-	tok, _, err := signer.MintIdentityAssertion(pluginID, "u@x", projectID, "frontend:u@x", scopes, time.Now().Add(-age), ttl)
+	tok, _, err := signer.MintFrontendToken(pluginID, "u@x", projectID, "frontend:u@x", scopes, time.Now().Add(-age), ttl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +106,43 @@ func TestFrontendTokenLeastPrivilege(t *testing.T) {
 			t.Fatal("a read-scoped frontend token must not authorize erasure")
 		}
 	})
+}
+
+// TestProxyAssertionCannotBeReplayedAsFrontendToken is the regression for the
+// token-class-confusion escalation the J1 security review caught: the gateway proxy
+// (and the jobs runner) mint an identity assertion of the SAME claim shape but with
+// UN-INTERSECTED scopes (the user's full role scopes) — deliberately, because the
+// double-token intersection confines them later at authPlugin. A malicious BACKEND
+// plugin holds such an assertion (the proxy injects it). It must NOT be able to
+// replay that assertion onto the frontend seam (no service token, so no
+// intersection) to obtain full scopes. The signed PurposeFrontend marker is what
+// makes the two classes distinguishable; only MintFrontendToken sets it.
+func TestProxyAssertionCannotBeReplayedAsFrontendToken(t *testing.T) {
+	signer, err := plugintoken.NewSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{signer: signer}
+
+	// A proxy-style assertion: full admin scopes, aud=plugin:{id}, NO purpose marker
+	// (exactly what pluginproxy.MintIdentityAssertion injects into a backend plugin).
+	proxyTok, _, err := signer.MintIdentityAssertion("evil/plug", "admin@x", "projA", "session:admin@x", perm.All(), time.Now(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/v1alpha1/query", nil)
+	r.Header.Set("X-LLMObs-Frontend-Token", proxyTok)
+
+	// The replay must be denied — a bare user-scoped (un-intersected) assertion has no
+	// PurposeFrontend marker, so VerifyFrontendToken rejects it.
+	if _, aerr := s.auth(r, "query"); aerr == nil {
+		t.Fatal("a proxy/jobs identity assertion (full scopes, no purpose) MUST be rejected on the frontend seam")
+	}
+	// And the same for the erasure path the capability gate otherwise forbids to all
+	// plugins — the replay must not reach delete either.
+	if _, aerr := s.auth(r, "delete"); aerr == nil {
+		t.Fatal("the replayed assertion must not reach erasure via the frontend seam")
+	}
 }
 
 // TestFrontendTokenIsNotABoundary is the HONEST NEGATIVE the J1 ruling demands:

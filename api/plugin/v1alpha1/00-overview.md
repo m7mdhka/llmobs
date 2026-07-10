@@ -140,10 +140,19 @@ is that credential:
   `{ "plugin": "{id}" }`. The kernel replies `{ token, expiresUnix, scopes }`.
 - The token is a kernel-signed **identity assertion** (§4 format, `aud = plugin:{id}`)
   whose `scopes` are already the intersection **plugin-grant ∩ user-session ∩
-  project** — computed at mint, so no service token is needed to re-intersect it.
+  project** — computed at mint, so no service token is needed to re-intersect it. It
+  carries a signed **`purpose: "frontend"`** marker (set *only* by the frontend
+  mint).
 - The SDK presents it as `X-LLMObs-Frontend-Token` on Query API calls; the kernel
   uses the token's scopes directly. Frontend tokens carry **no capability markers**,
   so they reach only data reads/writes within the intersected permissions.
+- **Token-class separation (why the marker exists).** The per-request proxy
+  assertion (§4) and the jobs system assertion share this exact claim shape but carry
+  *un-intersected* scopes (they are confined downstream by the service-token
+  intersection). The frontend seam therefore accepts **only** tokens bearing the
+  signed `purpose: "frontend"` marker, so a backend plugin cannot replay the
+  full-scope assertion the proxy injected into it onto the frontend path. The marker
+  is signed; it cannot be added to an existing assertion.
 
 **Trust model — read this.** The frontend token is **least-privilege by default**
 for a *cooperating* SDK-using frontend. It is **NOT a security boundary against a

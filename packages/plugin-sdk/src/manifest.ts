@@ -39,6 +39,14 @@ export interface PluginStore {
   collections: PluginCollection[];
 }
 
+// Scheduled/on-demand jobs (the `jobs` primitive, H6b). Absent schedule => on-demand.
+export interface PluginJob {
+  name: string;
+  schedule?: string; // 5-field cron or "@every <duration>"
+  path: string; // plugin backend endpoint
+  maxAttempts?: number;
+}
+
 export interface PluginManifest {
   apiVersion: "llmobs.dev/v1alpha1";
   kind: "Plugin";
@@ -55,5 +63,6 @@ export interface PluginManifest {
     settingsSchema?: string;
     backend?: PluginBackend;
     store?: PluginStore;
+    jobs?: PluginJob[];
   };
 }

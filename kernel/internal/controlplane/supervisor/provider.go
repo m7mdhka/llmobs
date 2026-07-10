@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
+	"github.com/m7mdhka/llmobs/kernel/internal/jobs"
 	"github.com/m7mdhka/llmobs/kernel/internal/plugindata"
 )
 
@@ -23,6 +24,7 @@ type PluginSpec struct {
 	Backend             executors.Backend
 	WatermarkBudget     time.Duration
 	Collections         []plugindata.CollectionSpec // store collections to provision (H5)
+	Jobs                []jobs.JobSpec              // declared jobs to schedule (H6b)
 }
 
 // Provider supplies the currently-installed backend plugins to supervise.
@@ -72,7 +74,22 @@ type manifestDoc struct {
 				} `yaml:"fields"`
 			} `yaml:"collections"`
 		} `yaml:"store"`
+		Jobs []struct {
+			Name        string `yaml:"name"`
+			Schedule    string `yaml:"schedule"`
+			Path        string `yaml:"path"`
+			MaxAttempts int    `yaml:"maxAttempts"`
+		} `yaml:"jobs"`
 	} `yaml:"spec"`
+}
+
+// jobSpecs converts the parsed manifest jobs block into scheduler JobSpecs.
+func (m manifestDoc) jobSpecs() []jobs.JobSpec {
+	out := make([]jobs.JobSpec, 0, len(m.Spec.Jobs))
+	for _, j := range m.Spec.Jobs {
+		out = append(out, jobs.JobSpec{Name: j.Name, Schedule: j.Schedule, Path: j.Path, MaxAttempts: j.MaxAttempts})
+	}
+	return out
 }
 
 // collections converts the parsed manifest store block into CollectionSpecs.
@@ -131,6 +148,7 @@ func (d *DirProvider) Plugins() []PluginSpec {
 			},
 			WatermarkBudget: budget,
 			Collections:     m.collections(),
+			Jobs:            m.jobSpecs(),
 		})
 	}
 	return out

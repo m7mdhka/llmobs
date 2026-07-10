@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { LLMObsCanonicalTraceV1Alpha1 as Trace } from "@llmobs/query-client";
 import { useLLMObs } from "./context.js";
-import { SdkError, type QueryInput, type QueryResponse, type TraceTree } from "./client.js";
+import { SdkError, type QueryInput, type QueryResponse, type ScoreInput, type TraceTree } from "./client.js";
 
 // Every hook returns the same async shape so surfaces render the standard
 // loading/error/empty states uniformly. `refetch` re-runs the request.
@@ -81,4 +81,36 @@ export function useTrace(traceId: string | null): AsyncState<TraceTree> {
     (signal) => (traceId ? client.traceTree(traceId, signal) : Promise.reject(new SdkError(0, "no_id", "no trace id"))),
     [traceId],
   );
+}
+
+// MutationState is the shape imperative writes return (no auto-run): call
+// `mutate`, watch loading/error, read the result. The `write` primitive.
+export interface MutationState<TArg, TResult> {
+  mutate: (arg: TArg) => Promise<TResult>;
+  loading: boolean;
+  error: SdkError | null;
+}
+
+/** Write a score (the `write` primitive). Requires the scores:write scope. */
+export function useWriteScore(): MutationState<ScoreInput, { id: string }> {
+  const { client } = useLLMObs();
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<SdkError | null>(null);
+  const mutate = React.useCallback(
+    async (score: ScoreInput) => {
+      setLoading(true);
+      setError(null);
+      try {
+        return await client.writeScore(score);
+      } catch (e: unknown) {
+        const err = e instanceof SdkError ? e : new SdkError(0, "network", (e as Error)?.message ?? "write failed");
+        setError(err);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client],
+  );
+  return { mutate, loading, error };
 }

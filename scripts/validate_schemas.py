@@ -80,6 +80,12 @@ target_schema = {
 for target, spec in fields["targets"].items():
     props = set(target_schema[target]["properties"].keys())
     for field in spec["fields"]:
+        # Computed fields (DSL §4.2, e.g. duration/ttft) are derived query-time
+        # expressions, not model properties — they are defined by the DSL spec,
+        # not the entity schema, so they are exempt from this consistency check.
+        if field.get("computed"):
+            print(f"  [ok ] {target}.{field['name']}  (computed; DSL §4.2)")
+            continue
         base = field["name"].split(".")[0]
         ok = base in props
         print(f"  [{'ok ' if ok else 'FAIL'}] {target}.{field['name']}" + ("" if ok else f"  (no '{base}' in {target} schema)"))

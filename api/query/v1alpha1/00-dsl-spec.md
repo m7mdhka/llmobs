@@ -178,6 +178,26 @@ it incrementally, but the observable result MUST be:
 > (query-time synthesis vs a maintained row) is an adapter choice; the field
 > definitions above are not.
 
+### 4.2 Computed fields (Normative)
+
+A small, **closed** set of derived numeric fields is queryable and orderable on
+`spans`, defined as pure functions of promoted fields. They carry no storage of
+their own; an adapter computes them at query time. The set is closed — a new
+computed field is an additive contract change, never an ad-hoc expression.
+
+| Field | Class | Definition | Null when |
+|---|---|---|---|
+| `duration` | `numeric` | `end_time − start_time`, in **seconds** | `end_time` is null (span still open) |
+| `ttft` | `numeric` | `completion_start_time − start_time`, in **seconds** (time to first token) | `completion_start_time` is null |
+
+- Both are ordinary `numeric` fields for filtering (`gt`/`lt`/…) and `orderBy`;
+  the NULL policy (§2.2) applies — an open span has null `duration`, so
+  `duration > 5` excludes it and `duration` negations match it.
+- `completion_start_time` (the underlying promoted field, `02-span.md` §5) is
+  itself queryable as a `timestamp`.
+- Adapters MUST compute these consistently with the promoted timestamps; the unit
+  is seconds (fractional allowed).
+
 ## 5. Aggregations and grouping (Normative) — QD-4
 
 An aggregation query carries `aggregations` and optionally `groupBy`.

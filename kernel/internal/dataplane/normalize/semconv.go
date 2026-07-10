@@ -115,6 +115,11 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 		if usage := providedUsage(in.Attributes); len(usage) > 0 {
 			out["provided_usage_details"] = usage
 		}
+		// completion_start_time — time to first token (02-span.md §5), when the
+		// source provides it. Enables the DSL `ttft` computed field (§4.2).
+		if cst, present := firstAttr(in, "gen_ai.response.completion_start_time"); present {
+			out["completion_start_time"] = cst
+		}
 	}
 
 	// span events

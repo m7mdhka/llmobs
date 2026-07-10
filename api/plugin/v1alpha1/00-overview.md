@@ -73,10 +73,20 @@ short-TTL credential scoped to the plugin's approved capabilities/permissions. T
 plugin presents it on every call back to the kernel (ingest, kv, secrets, store,
 events, jobs, score-write) in `Authorization: Bearer <service-token>`.
 
-- **TTL** — short (minutes, `exp`). The plugin refreshes before expiry via
-  `POST /plugin-tokens/refresh` (kernel endpoint) presenting its current token;
-  the kernel returns a fresh one while the plugin is `running`. A `disabled`
-  plugin's refresh is refused and its token is considered revoked.
+- **Delivery is kernel-initiated PUSH (H7c).** At handshake completion the kernel
+  **POSTs** the token to the plugin's own registered URL —
+  `POST {backend.url}/plugin/v1/token` with body
+  `{ "serviceToken": "…", "expiresUnix": … }` — over the same operator-trusted
+  channel as the health probes. There is **no plugin-pull endpoint**: a plugin
+  cannot request a token, so "obtain a token for a different plugin id/project" is
+  not an expressible operation — each plugin only ever receives, at its own URL,
+  the token the kernel scoped to it.
+- **Delivery is part of readiness, not a side channel.** A plugin that cannot
+  receive its token (the POST fails) goes `degraded` and does **not** reach
+  `running` — the token does not fail open.
+- **TTL + refresh** — short (minutes, `exp`). Before expiry, while the plugin is
+  `running`, the kernel mints a fresh token and re-delivers it by the same push; a
+  `disabled` plugin's token is revoked and not re-delivered.
 - **Scope** — `scopes` is the intersection of the plugin's manifest capabilities
   and permissions with what the operator approved at install. It is authoritative
   for the *plugin* half of the double-token intersection.

@@ -26,11 +26,29 @@ from translate import batch_to_otlp
 PLUGIN_ID = "llmobs/langfuse-compat"
 app = FastAPI()
 
-_last_progress = {"unix": 0}
+import time as _time
+
+# Seed the watermark to startup so it is informative rather than a misleading 0.
+# NOTE: langfuse-compat is idle-until-triggered (it makes no progress until a
+# Langfuse client sends traffic), so its manifest declares NO watermarkBudget — an
+# event-driven ingest plugin must not be degraded for being idle (the B3 lesson).
+_last_progress = {"unix": int(_time.time())}
+# The service token is DELIVERED by the kernel (H7c) — the plugin does not fetch
+# it. Seed from env only as a fallback for local dev.
+_token = {"value": os.environ.get("LLMOBS_SERVICE_TOKEN", "")}
+
+
+@app.post("/plugin/v1/token")
+async def receive_token(request: Request):
+    """Kernel-initiated service-token delivery (H7c). The kernel PUSHES the token
+    to this endpoint at handshake completion + on refresh; there is no pull path."""
+    body = await request.json()
+    _token["value"] = body.get("serviceToken", "")
+    return Response(status_code=200)
 
 
 def _kernel() -> KernelClient:
-    return KernelClient(os.environ["LLMOBS_KERNEL_URL"], os.environ.get("LLMOBS_SERVICE_TOKEN", ""))
+    return KernelClient(os.environ["LLMOBS_KERNEL_URL"], _token["value"])
 
 
 @app.get("/plugin/v1/info")
@@ -40,7 +58,9 @@ def info():
         "id": PLUGIN_ID,
         "version": "0.1.0",
         "pluginApiVersion": "v1alpha1",
-        "capabilities": ["ingest", "surface"],
+        # MUST be a subset of the manifest's granted capabilities (the supervisor
+        # rejects over-reach). langfuse-compat is backend-only: ingest only.
+        "capabilities": ["ingest"],
         "displayName": "Langfuse compatibility",
     }
 

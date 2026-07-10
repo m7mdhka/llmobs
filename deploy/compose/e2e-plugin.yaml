@@ -1,0 +1,28 @@
+# Overlay for the fully-live plugin e2e (H7c): brings up the langfuse-compat Python
+# backend alongside the lite stack and points the kernel's plugin dir at it, so the
+# supervisor completes a real handshake -> token delivery -> running, and an
+# unmodified Langfuse-wire client can migrate a trace end-to-end.
+#   docker compose -f deploy/compose/lite.yaml -f deploy/compose/e2e-plugin.yaml up -d
+name: llmobs-lite
+
+services:
+  langfuse-compat:
+    build:
+      context: ../../plugins/langfuse-compat/backend
+      dockerfile: Dockerfile
+    environment:
+      LLMOBS_KERNEL_URL: "http://kernel:8080"
+    ports:
+      - "${LLMOBS_LFC_PORT:-18899}:8080"
+
+  kernel:
+    environment:
+      # Supervise the langfuse-compat backend from the mounted plugin dir, and
+      # reconcile fast so the e2e doesn't wait long for handshake + token delivery.
+      LLMOBS_PLUGIN_DIR: "/plugins"
+      LLMOBS_PLUGIN_RECONCILE_INTERVAL: "3s"
+    volumes:
+      - ../../plugins/langfuse-compat:/plugins/langfuse-compat:ro
+    depends_on:
+      langfuse-compat:
+        condition: service_started

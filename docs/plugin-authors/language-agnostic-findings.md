@@ -25,12 +25,14 @@ real Python author hits, each caught at the cheapest possible moment.
 | **1** | **Token segments are UNPADDED base64url** (Go `RawURLEncoding`). Python's `urlsafe_b64decode` raises `Incorrect padding` — a naive Python verifier fails outright. | **Documented + helper.** The token format is now stated as unpadded base64url in `api/plugin/v1alpha1/00-overview.md`; the Python lib ships a re-pad `_b64url_decode`. Not a Go bug (compact is fine) — it was implicitly Go-shaped. |
 | **2** | **No way for a plugin to obtain the kernel public key.** The handshake is kernel→plugin, so a plugin can't verify kernel-signed assertions — a Go plugin hid this by receiving the key in-process. | **Fixed (contract change).** Added `GET /v1alpha1/plugin/kernel-key` publishing the Ed25519 key (hex + base64). Minimal single-key form; JWKS + rotation stays deferred. |
 | **3** | **Cold-path ingest can't present the double token.** A Langfuse client hits the plugin *directly* (not through the kernel proxy), so there is **no user assertion** — but `ingest` required service token **+** assertion. | **Fixed (contract change).** Ingest is now **service-token-only** (`pluginauth.RequirePluginToken`): the plugin writes telemetry into its own project, no user to intersect. Project is kernel-resolved, so "can't write outside its project" is *strengthened* (not header-controllable). |
-| **4** | **Service-token delivery to the plugin is unspecified.** The supervisor *mints* the token at handshake, but nothing delivers it to the plugin — again hidden in-process for a Go plugin. | **Surfaced (fix proposed, deferred).** The plugin currently reads its token from config (operator-provided). Proposed fix: after handshake+health, the supervisor **pushes** the token to a plugin `POST /plugin/v1/token` endpoint over the operator-trusted backend URL. This blocks the fully-live `LANGFUSE_HOST`→us e2e; the language-agnostic core above does not depend on it. Tracked as an issue. |
+| **4** | **Service-token delivery to the plugin is unspecified.** The supervisor *mints* the token at handshake, but nothing delivers it to the plugin — again hidden in-process for a Go plugin. | **Fixed in H7c (contract change).** The kernel PUSHES the token to the plugin's own registered URL (`POST /plugin/v1/token`) at handshake completion + on refresh; delivery is part of readiness (no token → degraded, never `running`); **no plugin-pull path** (obtaining another plugin's token isn't expressible). The Python backend receives its token and the fully-live handshake is closed. |
 
-**Two of four were real contract changes** made in this PR (#2, #3); one is a
-documented format caveat (#1); one is a surfaced gap with a proposed fix (#4).
-That is the expected shape of a first cross-language integration — not zero
-friction.
+| **5** | **The functional-watermark *budget* degrades an idle plugin.** The fully-live e2e (H7c) auto-disabled langfuse-compat with "watermark stale past budget": handshake + token delivery *succeeded*, but the plugin is idle until a Langfuse client sends traffic, so a staleness budget faulted a perfectly healthy plugin (the B3 lesson, hit live). | **Fixed + documented (H7c).** An **idle-until-triggered** plugin declares **no `watermarkBudget`** (the watermark is then informational, not a degrade signal); a budget is only for *continuously-progressing* plugins (a poller/stream). The plugin seeds its watermark to startup so it's not a misleading `0`. |
+
+**Real contract changes:** #2, #3 (H7b) and #4, #5 (H7c). #1 is a documented
+format caveat. That is the expected shape of a first cross-language integration —
+not zero friction. Notably #5 was surfaced only by the *fully-live* e2e, not by
+any unit test — the whole reason to run both services together.
 
 ## Migration fidelity — Langfuse wire → canonical model
 

@@ -23,9 +23,13 @@ type Backend struct {
 	HealthPath string // health path; defaults to pluginproto.DefaultHealthPath
 }
 
-// Executor reaches a plugin backend to handshake and probe health.
+// Executor reaches a plugin backend to handshake, probe health, and deliver the
+// service token (kernel-initiated push, H7c).
 type Executor interface {
 	Name() string
 	Handshake(ctx context.Context, b Backend) (pluginproto.Info, error)
 	Health(ctx context.Context, b Backend) (pluginproto.Health, error)
+	// DeliverToken pushes the short-TTL service token to the plugin's registered
+	// URL. Kernel-initiated only — there is no plugin-pull counterpart.
+	DeliverToken(ctx context.Context, b Backend, token string, expiresUnix int64) error
 }

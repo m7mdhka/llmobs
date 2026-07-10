@@ -18,14 +18,16 @@ import (
 // /plugin/v1/health, and can be flipped down (unreachable), unhealthy, or given a
 // stale watermark to exercise the supervisor state machine.
 type FakeBackend struct {
-	server     *httptest.Server
-	mu         sync.Mutex
-	info       pluginproto.Info
-	health     pluginproto.Health
-	down       bool
-	jobFail    bool   // when true, /job returns 500 (to exercise retries/failure)
-	jobCalls   int    // count of /job invocations
-	lastJobAsr string // the identity assertion the last /job call carried
+	server       *httptest.Server
+	mu           sync.Mutex
+	info         pluginproto.Info
+	health       pluginproto.Health
+	down         bool
+	jobFail      bool   // when true, /job returns 500 (to exercise retries/failure)
+	jobCalls     int    // count of /job invocations
+	lastJobAsr   string // the identity assertion the last /job call carried
+	tokenFail    bool   // when true, /plugin/v1/token returns 500 (delivery failure)
+	deliveredTok string // the last service token delivered by the kernel (H7c)
 }
 
 // NewFakeBackend starts a healthy fake backend advertising info.
@@ -40,6 +42,7 @@ func NewFakeBackend(info pluginproto.Info) *FakeBackend {
 	// Catch-all echo: returns the path + received headers, so proxy tests can assert
 	// the cookie was stripped and the identity assertion injected.
 	mux.HandleFunc("/job", f.handleJob)
+	mux.HandleFunc(pluginproto.DefaultTokenPath, f.handleToken)
 	mux.HandleFunc("/", f.handleEcho)
 	f.server = httptest.NewServer(mux)
 	return f
@@ -109,6 +112,39 @@ func (f *FakeBackend) LastJobAssertion() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastJobAsr
+}
+
+// SetTokenFail toggles whether /plugin/v1/token returns 500 (delivery failure).
+func (f *FakeBackend) SetTokenFail(fail bool) {
+	f.mu.Lock()
+	f.tokenFail = fail
+	f.mu.Unlock()
+}
+
+// DeliveredToken returns the last service token the kernel delivered (H7c).
+func (f *FakeBackend) DeliveredToken() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.deliveredTok
+}
+
+func (f *FakeBackend) handleToken(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	fail := f.tokenFail
+	f.mu.Unlock()
+	if fail {
+		http.Error(w, "token refused", http.StatusInternalServerError)
+		return
+	}
+	var d pluginproto.TokenDelivery
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		http.Error(w, "bad token body", http.StatusBadRequest)
+		return
+	}
+	f.mu.Lock()
+	f.deliveredTok = d.ServiceToken
+	f.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
 }
 
 func (f *FakeBackend) handleJob(w http.ResponseWriter, r *http.Request) {

@@ -244,9 +244,16 @@ two of which are contract changes made here:
   plugin directly, so there is no user assertion; `ingest` no longer requires the
   double token, and the target project is kernel-resolved (strengthening tenant
   isolation). Also: token segments are documented as **unpadded** base64url (a
-  naive non-Go decoder fails). One gap remains surfaced-not-fixed: **service-token
-  delivery to the plugin** (the supervisor mints it but nothing pushes it to the
-  plugin) — tracked, with a proposed kernel→plugin token push.
+  naive non-Go decoder fails).
+- **Service-token delivery (H7c) — the last seam, now closed.** The kernel PUSHES
+  the short-TTL service token to the plugin's own registered URL
+  (`POST /plugin/v1/token`) at handshake completion and on refresh. Delivery is
+  part of **readiness** — a plugin that cannot receive its token degrades and never
+  reaches `running` (it does not fail open). There is **no plugin-pull path**, so
+  "obtain another plugin's token" is not expressible (stronger than denied): each
+  plugin only ever receives, at its own URL, the token the kernel scoped to it. The
+  fully-live handshake is closed — a real Python `langfuse-compat` backend receives
+  its token and operates end-to-end.
 
 ## Consequences
 

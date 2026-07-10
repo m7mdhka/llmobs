@@ -115,4 +115,21 @@ assert trace.get("start_time"), "trace.start_time not synthesized"
 print(f"   assert OK: tree of {len(spans)} spans in parent-before-child order, trace synthesized")
 '
 
+echo ">> e2e-lite: querying the traces DSL target (derived from spans)"
+TQUERY="{\"target\":\"traces\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"filters\":[{\"field\":\"environment\",\"op\":\"eq\",\"value\":\"production\"}],\"limit\":10}"
+TRESP="$(curl -sf -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d "$TQUERY" ${API}/v1alpha1/query || true)"
+printf '%s' "$TRESP" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)['data']
+assert len(d)>=1, f'expected >=1 trace, got {len(d)}'
+tr=[t for t in d if t['id']=='$TRACE_ID']
+assert tr, 'emitted trace not found in traces target'
+t=tr[0]
+assert t.get('environment')=='production', t.get('environment')
+assert t.get('span_count',0)>=4, t.get('span_count')
+assert t.get('start_time'), 'trace start_time not synthesized'
+assert isinstance(t.get('status'),dict), 'trace status shape'
+print('   assert OK: traces target returned synthesized trace, span_count=%d, env=%s'%(t['span_count'],t['environment']))
+" || { echo "FAIL: traces target"; echo "$TRESP"; exit 1; }
+
 echo "E2E_LITE_OK"

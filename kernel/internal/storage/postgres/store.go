@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -113,6 +114,109 @@ func (s *Store) GetSpan(ctx context.Context, projectID, id string) (json.RawMess
 		return nil, nil
 	}
 	return doc, err
+}
+
+// traceProjection synthesizes one row per trace from its spans (DSL §4.1): times
+// span earliest start to latest end, dimensions come from the root span (parent
+// empty, tie-broken by earliest (start_time,id); else the earliest span), and
+// status is `error` if any span errored. Exposes the columns the trace compiler
+// targets. This is the query-time materialization — traces have no write path.
+const traceProjection = `
+WITH span_base AS (
+	SELECT * FROM spans WHERE is_deleted = false
+),
+roots AS (
+	SELECT DISTINCT ON (trace_id)
+		trace_id, name, environment, release, version, session_id, user_id, status_code, attributes
+	FROM span_base
+	ORDER BY trace_id,
+		(parent_span_id IS NOT NULL AND parent_span_id <> '') ASC,
+		start_time ASC, id ASC
+),
+agg AS (
+	SELECT trace_id, project_id,
+		MIN(start_time) AS start_time,
+		MAX(end_time)   AS end_time,
+		bool_or(status_code = 'error') AS any_error,
+		count(*) AS span_count
+	FROM span_base
+	GROUP BY trace_id, project_id
+)
+SELECT
+	a.trace_id AS id, a.project_id, a.start_time, a.end_time,
+	CASE WHEN a.any_error THEN 'error' ELSE r.status_code END AS status_code,
+	r.name, r.environment, r.release, r.version, r.session_id, r.user_id,
+	r.attributes, a.span_count
+FROM agg a JOIN roots r ON r.trace_id = a.trace_id`
+
+// QueryTraces runs a compiled traces query against the synthesized projection and
+// returns the trace documents. where/order/limit come from CompileTraces and
+// reference the projection's columns.
+func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error) {
+	// COALESCE nullable dimension columns to '' so scanning is simple; the
+	// filter/order predicate still sees the real values (it runs on trace_proj,
+	// where NULLs are preserved for NULL-policy semantics).
+	sql := "WITH trace_proj AS (" + traceProjection + ") SELECT " +
+		"id, project_id, start_time, end_time, " +
+		"COALESCE(status_code,''), COALESCE(name,''), COALESCE(environment,''), " +
+		"COALESCE(release,''), COALESCE(version,''), COALESCE(session_id,''), COALESCE(user_id,''), " +
+		"attributes, span_count " +
+		"FROM trace_proj"
+	if where != "" {
+		sql += " WHERE " + where
+	}
+	if order != "" {
+		sql += " ORDER BY " + order
+	}
+	sql += " LIMIT " + itoa(limit)
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []json.RawMessage
+	for rows.Next() {
+		var (
+			id, projectID, statusCode, name, environment, release, version, sessionID, userID string
+			startTime                                                                         time.Time
+			endTime                                                                           *time.Time
+			attributes                                                                        []byte
+			spanCount                                                                         int64
+		)
+		if err := rows.Scan(&id, &projectID, &startTime, &endTime, &statusCode, &name,
+			&environment, &release, &version, &sessionID, &userID, &attributes, &spanCount); err != nil {
+			return nil, err
+		}
+		doc := map[string]any{
+			"id":          id,
+			"project_id":  projectID,
+			"name":        name,
+			"start_time":  startTime.UTC().Format(time.RFC3339Nano),
+			"status":      map[string]any{"code": statusCode},
+			"environment": environment,
+			"release":     release,
+			"version":     version,
+			"session_id":  sessionID,
+			"user_id":     userID,
+			"tags":        []any{},
+			"span_count":  spanCount,
+		}
+		if endTime != nil {
+			doc["end_time"] = endTime.UTC().Format(time.RFC3339Nano)
+		}
+		if len(attributes) > 0 {
+			var attrs map[string]any
+			if json.Unmarshal(attributes, &attrs) == nil {
+				doc["attributes"] = attrs
+			}
+		}
+		b, err := json.Marshal(doc)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
 }
 
 // GetTraceSpans returns all non-deleted spans of a trace (folded docs). Ordered

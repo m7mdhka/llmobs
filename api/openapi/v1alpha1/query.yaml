@@ -32,6 +32,12 @@ paths:
       tags: [query]
       operationId: runQuery
       summary: Execute a query DSL document.
+      description: >
+        Row queries for target `spans` and `traces` are implemented. Traces are
+        derived from spans at query time (00-dsl-spec.md §4.1). The `scores`
+        target, aggregation queries, and the `traces` score semi-join (QD-9, §8)
+        return `not_implemented` (501) in this maturity — the score write path is
+        a later arc.
       requestBody:
         required: true
         content:

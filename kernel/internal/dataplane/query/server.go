@@ -87,14 +87,18 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target, _ := doc["target"].(string)
+	if _, hasAgg := doc["aggregations"]; hasAgg {
+		writeErr(w, errf("not_implemented", 501, "aggregations not implemented in v1alpha1/B1"))
+		return
+	}
+
+	var c *Compiled
+	var cerr error
 	switch target {
 	case "spans":
-		// implemented below
+		c, cerr = CompileSpans(doc, id.ProjectID, s.maxWindow)
 	case "traces":
-		// The trace read path is GET /traces/{id}/tree and /traces/{id}; the DSL
-		// traces target (trace-level filtering/aggregation) is v-next.
-		writeErr(w, errf("not_implemented", 501, "DSL traces target is v-next; use GET /traces/{id}/tree"))
-		return
+		c, cerr = CompileTraces(doc, id.ProjectID, s.maxWindow)
 	case "scores":
 		writeErr(w, errf("not_implemented", 501, "scores target is v-next"))
 		return
@@ -102,18 +106,18 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errf("schema_invalid", 400, "target must be one of spans|traces|scores"))
 		return
 	}
-	if _, hasAgg := doc["aggregations"]; hasAgg {
-		writeErr(w, errf("not_implemented", 501, "aggregations not implemented in v1alpha1/B1"))
-		return
-	}
-
-	c, cerr := CompileSpans(doc, id.ProjectID, s.maxWindow)
 	if cerr != nil {
 		writeErr(w, cerr.(*CompileError))
 		return
 	}
+
 	started := time.Now()
-	rows, err := s.store.QuerySpans(r.Context(), c.Where, c.Args, c.Order, c.Limit+1)
+	var rows []json.RawMessage
+	if target == "traces" {
+		rows, err = s.store.QueryTraces(r.Context(), c.Where, c.Args, c.Order, c.Limit+1)
+	} else {
+		rows, err = s.store.QuerySpans(r.Context(), c.Where, c.Args, c.Order, c.Limit+1)
+	}
 	if err != nil {
 		s.log.Error("query execution", "err", err.Error())
 		writeErr(w, errf("internal", 500, "query failed"))

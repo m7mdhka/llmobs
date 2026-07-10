@@ -141,6 +141,43 @@ naming any other field MUST be rejected `unknown_field` (§11).
   `input_content_type`, …) are **not** queryable (they are not in the promoted
   set); they are returned in row results subject to redaction (§10).
 
+### 4.1 Trace materialization and freshness (Normative)
+
+A **trace** is a derived entity: it has no independent write path and no
+merge/provenance of its own. A trace row is **materialized from the current set
+of spans sharing its `trace_id`**, and its queryable fields are defined as
+functions of those spans. An adapter MAY compute this at query time or maintain
+it incrementally, but the observable result MUST be:
+
+| Trace field | Value |
+|---|---|
+| `id` | the shared `trace_id`. |
+| `start_time` | the **minimum** `start_time` across the trace's spans (the time anchor). |
+| `end_time` | the **maximum** `end_time` across the trace's spans; NULL while any span is still open. |
+| `name`, `environment`, `release`, `version`, `session_id`, `user_id` | taken from the trace's **root span** — the span whose `parent_span_id` is empty, tie-broken by earliest `(start_time, id)`; if no rooted span exists, the earliest span by `(start_time, id)`. |
+| `status.code` | `error` if **any** span in the trace has `status.code = error`; otherwise the root span's `status.code`. |
+| `tags` | the set-union of the spans' `tags`. |
+| `attributes` | the root span's `attributes` (kernel-reserved `llmobs.*` keys included). |
+
+- **Freshness.** A trace is exactly as fresh as its spans: it reflects whatever
+  spans are stored at query time and is eventually consistent with ingestion.
+  There is no moment at which a trace is "closed"; a late span updates the
+  derived row on the next read. Deleted spans (`is_deleted`) do not contribute.
+- **Time anchor.** `timeRange` and default ordering use `start_time` (the
+  minimum), consistent with `fields.json`.
+- **NULL/ceiling/422 semantics are identical to `spans`** (§2.2, §6, §11): the
+  only difference is the field set (`fields.json` `traces`) and that the fields
+  are derived per this section.
+- **Score semi-join (§8) is `not_implemented` (501) in this maturity** until the
+  scores write path lands; a `traces` query MUST NOT be rejected for omitting
+  `scores`, and a query that includes `scores` receives `not_implemented`.
+
+> Rationale: spans already carry per-field provenance and merge under the row
+> lock; deriving traces from them keeps a single source of truth and avoids a
+> second entity with its own update semantics. The materialization strategy
+> (query-time synthesis vs a maintained row) is an adapter choice; the field
+> definitions above are not.
+
 ## 5. Aggregations and grouping (Normative) — QD-4
 
 An aggregation query carries `aggregations` and optionally `groupBy`.

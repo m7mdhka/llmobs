@@ -18,6 +18,9 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/supervisor"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingest"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingesthealth"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
@@ -132,6 +135,17 @@ func run() error {
 	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
 	qsrv := query.NewServer(store, pool, log, maxWindow, mreg)
 
+	// Plugin supervisor (H2): discovers backend plugins (spec.backend) from the
+	// plugin dir, handshakes + health-probes them via the external-URL executor,
+	// and issues service tokens. Only the leader replica supervises (advisory lock,
+	// below). The kernel's Ed25519 signing key is in-memory for lite (ADR-0023).
+	pluginSigner, err := plugintoken.NewSigner()
+	if err != nil {
+		return err
+	}
+	sup := supervisor.New(supervisor.NewDirProvider(cfg.PluginDir, log),
+		executors.NewExternalURL(5*time.Second), pluginSigner, mreg, log, supervisor.Config{}, nil)
+
 	// API server: auth + query + health, all behind the session middleware so a
 	// resolved session is available to every downstream handler.
 	auth := authhttp.New(pool, log, cfg.CookieSecure)
@@ -144,6 +158,13 @@ func run() error {
 		regSource = registry.NewDirSource(cfg.PluginDir, "/v1alpha1/registry/plugins", log)
 	}
 	registry.NewHandler(regSource).Register(apiMux)
+	// Supervisor ops API: snapshot readable by any authenticated caller; disable/
+	// enable gated to sessions (admin today; RBAC beyond admin is issue #21). The
+	// more-specific prefix wins over the /v1alpha1/ query catch-all below.
+	apiMux.Handle("/v1alpha1/supervisor/", sup.Handler("/v1alpha1/supervisor", func(r *http.Request) bool {
+		_, ok := authhttp.SessionFrom(r.Context())
+		return ok
+	}))
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is
@@ -188,6 +209,45 @@ func run() error {
 		log.Info("otlp-grpc listening", "addr", cfg.OTLPGRPCAddr)
 		if err := grpcServer.Serve(grpcLis); err != nil {
 			errCh <- err
+		}
+	}()
+
+	// Plugin supervisor loop, gated by leadership so only one replica supervises
+	// (the pg advisory-lock pattern the migration runner proves). A dedicated conn
+	// holds the lock for the process lifetime; releasing on shutdown frees it.
+	reconcileEvery, _ := time.ParseDuration(cfg.PluginReconcileInterval)
+	if reconcileEvery <= 0 {
+		reconcileEvery = 15 * time.Second
+	}
+	go func() {
+		const supervisorLockKey int64 = 0x6c6c6d6f627332 // "llmobs2"
+		conn, err := pool.Acquire(rootCtx)
+		if err != nil {
+			log.Warn("supervisor: cannot acquire leader connection; not supervising", "err", err.Error())
+			return
+		}
+		defer conn.Release()
+		var leader bool
+		if err := conn.QueryRow(rootCtx, "SELECT pg_try_advisory_lock($1)", supervisorLockKey).Scan(&leader); err != nil {
+			log.Warn("supervisor: leader election failed; not supervising", "err", err.Error())
+			return
+		}
+		if !leader {
+			log.Info("supervisor: another replica is leader; standing by")
+			return
+		}
+		log.Info("supervisor: acquired leadership", "interval", reconcileEvery.String())
+		defer func() { _, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", supervisorLockKey) }()
+		t := time.NewTicker(reconcileEvery)
+		defer t.Stop()
+		sup.Reconcile(rootCtx)
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case <-t.C:
+				sup.Reconcile(rootCtx)
+			}
 		}
 	}()
 

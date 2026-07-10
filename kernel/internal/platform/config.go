@@ -47,6 +47,10 @@ type Config struct {
 	// ErasureSuppressionTTL: how long a GDPR-erasure tombstone blocks re-delivery
 	// of an erased span (G3). Need only outlast plausible redelivery, not forever.
 	ErasureSuppressionTTL string `json:"erasure_suppression_ttl"` // e.g. "720h"
+	// PluginReconcileInterval: how often the plugin supervisor reconciles backend
+	// plugins toward running (handshake + health probe). Only the leader replica
+	// supervises (pg advisory lock).
+	PluginReconcileInterval string `json:"plugin_reconcile_interval"` // e.g. "15s"
 }
 
 func defaults() Config {
@@ -68,6 +72,7 @@ func defaults() Config {
 		ShutdownDrainTimeout:      "20s",
 		PersistUnhealthyThreshold: 5,
 		ErasureSuppressionTTL:     "720h",
+		PluginReconcileInterval:   "15s",
 	}
 }
 
@@ -105,6 +110,7 @@ func LoadConfig() (Config, error) {
 	envInt(brand.Env("INGEST_QUEUE_SIZE"), &c.IngestQueueSize)
 	envInt(brand.Env("PERSIST_UNHEALTHY_THRESHOLD"), &c.PersistUnhealthyThreshold)
 	envStr(brand.Env("ERASURE_SUPPRESSION_TTL"), &c.ErasureSuppressionTTL)
+	envStr(brand.Env("PLUGIN_RECONCILE_INTERVAL"), &c.PluginReconcileInterval)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)

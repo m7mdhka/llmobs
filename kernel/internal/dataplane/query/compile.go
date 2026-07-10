@@ -73,6 +73,7 @@ type fieldDef struct {
 type queryFields struct {
 	fields    map[string]fieldDef
 	orderable map[string]bool
+	groupable map[string]bool
 	// timeAnchor is the column the mandatory timeRange, keyset cursor, and default
 	// order key are anchored on (spans/traces: start_time; scores: timestamp).
 	timeAnchor string
@@ -112,6 +113,11 @@ var spanFields = queryFields{
 		"id": true, "trace_id": true, "name": true, "start_time": true, "end_time": true,
 		"completion_start_time": true, "duration": true, "ttft": true, "total_cost": true,
 	},
+	groupable: map[string]bool{
+		"kind": true, "raw_kind": true, "name": true, "start_time": true, "status.code": true,
+		"environment": true, "release": true, "version": true, "session_id": true, "user_id": true,
+		"model": true, "provider": true,
+	},
 	timeAnchor: "start_time",
 }
 
@@ -140,6 +146,10 @@ var traceFields = queryFields{
 	orderable: map[string]bool{
 		"id": true, "name": true, "start_time": true, "end_time": true, "last_activity": true,
 	},
+	groupable: map[string]bool{
+		"name": true, "start_time": true, "status.code": true, "environment": true, "release": true,
+		"version": true, "session_id": true, "user_id": true, "is_open": true, "incomplete_trace": true,
+	},
 	timeAnchor: "start_time",
 }
 
@@ -163,6 +173,10 @@ var scoreFields = queryFields{
 	},
 	orderable: map[string]bool{
 		"id": true, "name": true, "value_numeric": true, "timestamp": true,
+	},
+	groupable: map[string]bool{
+		"subject_type": true, "name": true, "data_type": true, "value_string": true,
+		"source": true, "timestamp": true, "environment": true,
 	},
 	timeAnchor: "timestamp",
 }

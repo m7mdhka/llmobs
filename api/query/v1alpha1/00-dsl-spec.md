@@ -228,6 +228,27 @@ An aggregation query carries `aggregations` and optionally `groupBy`.
     `not_groupable` (§11).
 - An aggregation query returns group rows; `orderBy`/`cursor` MUST NOT be
   present (results are bounded by the group cardinality and `timeRange`).
+- **Bad data never errors an aggregate.** A numeric-map-key aggregate casts only
+  JSON numbers (`jsonb_typeof(...) = 'number'`); other values are excluded, not
+  errored (consistent with §9.1).
+
+Example — **cost by model by day** (finally executes):
+
+```json
+{
+  "target": "spans",
+  "timeRange": { "from": "2026-07-01T00:00:00Z", "to": "2026-07-08T00:00:00Z" },
+  "groupBy": [ "model", { "field": "start_time", "interval": "1d" } ],
+  "aggregations": [
+    { "op": "count" },
+    { "op": "sum", "field": "total_cost", "alias": "cost" },
+    { "op": "p95", "field": "duration" }
+  ]
+}
+```
+
+Each group row carries the group columns (`g0`=model, `g1`=day bucket) and the
+named aggregates (`count`, `cost`, `p95_duration`).
 
 ## 6. Bounded scans — `timeRange` is mandatory (Normative) — QD-5
 

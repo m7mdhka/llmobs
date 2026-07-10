@@ -157,6 +157,18 @@ assert isinstance(t.get('status'),dict), 'trace status shape'
 print('   assert OK: traces target returned synthesized trace, span_count=%d, env=%s'%(t['span_count'],t['environment']))
 " || { echo "FAIL: traces target"; echo "$TRESP"; exit 1; }
 
+echo ">> e2e-lite: QD-4 aggregation (count by kind — golden result)"
+AGGQ="{\"target\":\"spans\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"filters\":[{\"field\":\"trace_id\",\"op\":\"eq\",\"value\":\"$TRACE_ID\"}],\"groupBy\":[\"kind\"],\"aggregations\":[{\"op\":\"count\"}]}"
+AGGRESP="$(curl -sf -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d "$AGGQ" ${API}/v1alpha1/query || true)"
+printf '%s' "$AGGRESP" | python3 -c "
+import sys,json
+rows=json.load(sys.stdin)['data']
+by={r['g0']:r['count'] for r in rows}
+# golden: the seeded agent trace has exactly these four kinds, one span each
+assert by=={'generation':1,'agent_step':1,'tool_call':1,'span':1}, by
+print('   assert OK: count-by-kind golden = %s'%by)
+" || { echo "FAIL: aggregation golden"; echo "$AGGRESP"; exit 1; }
+
 echo ">> e2e-lite: payload-scope enforcement (metadata key never receives payloads)"
 PCK="$(mktemp)"
 PLGN="$(curl -sf -c "$PCK" -H "Content-Type: application/json" \

@@ -68,6 +68,11 @@ type TelemetryStore interface {
 	// EraseSpans hard-deletes spans for (projectID, userID) within [from, to) and
 	// records an erasure audit row; returns the count erased and the audit id.
 	EraseSpans(ctx context.Context, projectID, userID, actor string, from, to time.Time) (int, string, error)
+
+	// QueryAggregation runs a compiled aggregation (QD-4) for a target and returns
+	// group rows as column-name -> value maps. sel/where/groupBy come from the
+	// aggregation compiler; the adapter supplies the FROM source per target.
+	QueryAggregation(ctx context.Context, target, sel, where, groupBy string, args []any) ([]map[string]any, error)
 }
 
 // MergeConformer is the normative-merge surface an adapter exposes to the

@@ -90,7 +90,7 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	target, _ := doc["target"].(string)
 	if _, hasAgg := doc["aggregations"]; hasAgg {
-		writeErr(w, errf("not_implemented", 501, "aggregations not implemented in v1alpha1/B1"))
+		s.runAggregation(w, r, doc, target, id)
 		return
 	}
 
@@ -164,6 +164,45 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 		s.metrics.Observe("llmobs_query_duration_seconds", "Query latency by target (seconds).", lbl, time.Since(started).Seconds())
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// runAggregation handles an aggregation query (QD-4). Group rows carry only
+// promoted/aggregated values — never payloads — so payload scope does not apply.
+func (s *Server) runAggregation(w http.ResponseWriter, r *http.Request, doc map[string]any, target string, id controlplane.Identity) {
+	if target != "spans" && target != "traces" && target != "scores" {
+		writeErr(w, errf("schema_invalid", 400, "target must be one of spans|traces|scores"))
+		return
+	}
+	ca, cerr := CompileAggregation(doc, id.ProjectID, s.maxWindow, target)
+	if cerr != nil {
+		writeErr(w, cerr.(*CompileError))
+		return
+	}
+	started := time.Now()
+	groups, err := s.store.QueryAggregation(r.Context(), target, ca.Select, ca.Where, ca.GroupBy, ca.Args)
+	if err != nil {
+		s.log.Error("aggregation execution", "err", err.Error())
+		writeErr(w, errf("internal", 500, "aggregation failed"))
+		return
+	}
+	if groups == nil {
+		groups = []map[string]any{}
+	}
+	if s.metrics != nil {
+		s.metrics.CounterAdd("llmobs_query_requests_total", "Query requests by target.", map[string]string{"target": target + "/agg"}, 1)
+		s.metrics.Observe("llmobs_query_duration_seconds", "Query latency by target (seconds).", map[string]string{"target": target + "/agg"}, time.Since(started).Seconds())
+	}
+	data := make([]json.RawMessage, len(groups))
+	for i, g := range groups {
+		b, _ := json.Marshal(g)
+		data[i] = b
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":  "v1alpha1",
+		"data":     data,
+		"stats":    map[string]any{"elapsed_ms": time.Since(started).Milliseconds(), "returned": len(groups)},
+		"warnings": []any{},
+	})
 }
 
 // GetSpan: GET /v1alpha1/spans/{id}

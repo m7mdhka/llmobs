@@ -34,9 +34,11 @@ paths:
       summary: Execute a query DSL document.
       description: >
         Row queries for `spans`, `traces`, and `scores` are implemented, as is the
-        `traces` score semi-join (QD-9, §8). Traces are derived from spans at query
-        time (00-dsl-spec.md §4.1). Aggregation queries (`aggregations`) remain
-        `not_implemented` (501) in this maturity.
+        `traces` score semi-join (QD-9, §8) and aggregation queries (QD-4:
+        count/count_distinct/sum/avg/min/max/p50-p99 over promoted numeric fields
+        and usage/cost map keys, groupBy over enum/string fields plus one time
+        bucket). Traces are derived from spans at query time (00-dsl-spec.md §4.1).
+        Field-level payload redaction (§10) is enforced on every read path.
       requestBody:
         required: true
         content:

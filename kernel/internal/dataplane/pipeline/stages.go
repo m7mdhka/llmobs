@@ -72,6 +72,7 @@ func (s *normalizeStage) Process(_ context.Context, ing *Ingestion) error {
 		canonical := s.reg.Normalize(in, ctx)
 		et := eventTS(in)
 		stampClockSkew(canonical, et, ing.ReceivedAt, s.skewThreshold)
+		stampSource(canonical, ing.Source) // kernel-authoritative source (plugin ingest, H7)
 		ing.Events = append(ing.Events, storage.Event{
 			Op:      storage.OpUpsert,
 			EventTS: et,
@@ -102,6 +103,22 @@ func stampClockSkew(canonical map[string]any, eventTS, receivedAt time.Time, thr
 		canonical["attributes"] = attrs
 	}
 	attrs["llmobs.dq.clock_skew"] = eventTS.Sub(receivedAt).Seconds()
+}
+
+// stampSource sets llmobs.source authoritatively (kernel-controlled). For plugin
+// ingest the kernel passes "plugin:{id}"; it OVERWRITES any source the body
+// carried, so a plugin cannot forge a different source. Empty source is a no-op
+// (OTLP path unchanged).
+func stampSource(canonical map[string]any, source string) {
+	if source == "" {
+		return
+	}
+	attrs, ok := canonical["attributes"].(map[string]any)
+	if !ok {
+		attrs = map[string]any{}
+		canonical["attributes"] = attrs
+	}
+	attrs["llmobs.source"] = source
 }
 
 func eventTS(in normalize.SpanInput) time.Time {

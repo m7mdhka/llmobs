@@ -8,6 +8,7 @@ use (
 	./cli
 	./examples/otel-genai-demo
 	./kernel
+	./tools/mcp-server
 // ./plugins/tracing/backend
 // ./plugins/evals/backend
 // ./plugins/prompt-management/backend

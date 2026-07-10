@@ -114,6 +114,7 @@ func run() error {
 		regSource = registry.NewDirSource(cfg.PluginDir, "/v1alpha1/registry/plugins", log)
 	}
 	registry.NewHandler(regSource).Register(apiMux)
+	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is
 	// run headless (LLMOBS_SERVE_SHELL=false) — then / is API-only, for Kenji's

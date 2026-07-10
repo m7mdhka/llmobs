@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 )
@@ -263,19 +264,39 @@ func (s *Supervisor) backoffFor(faults int) time.Duration {
 	return d
 }
 
-// scopesFor is the plugin's approved token scopes: its capabilities plus its
-// fine-grained permissions (de-duplicated). H3 intersects these with the user's.
+// scopesFor is the plugin's approved token scopes: capability MARKERS (cap:<name>,
+// which primitive it may call) plus its fine-grained data permissions (canonical
+// nouns). The two axes are prefix-separated so H3's intersection compares data
+// permissions while capabilities gate the endpoint (ADR-0023/R3).
 func (s *Supervisor) scopesFor(spec PluginSpec) []string {
 	seen := map[string]struct{}{}
 	var out []string
-	for _, x := range append(append([]string{}, spec.GrantedCapabilities...), spec.GrantedScopes...) {
+	add := func(x string) {
 		if _, ok := seen[x]; ok {
-			continue
+			return
 		}
 		seen[x] = struct{}{}
 		out = append(out, x)
 	}
+	for _, c := range spec.GrantedCapabilities {
+		add(perm.CapMarker(c))
+	}
+	for _, p := range spec.GrantedScopes {
+		add(p)
+	}
 	return out
+}
+
+// BackendFor returns a plugin's backend URL and whether it is currently running
+// (used by the gateway proxy to route only to running plugins).
+func (s *Supervisor) BackendFor(id string) (url string, running bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rt := s.plugins[id]
+	if rt == nil {
+		return "", false
+	}
+	return rt.spec.Backend.URL, rt.state == StateRunning
 }
 
 // Disable operator-disables a plugin: supervision stops and its token is revoked;

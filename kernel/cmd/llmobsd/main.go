@@ -28,6 +28,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/query"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/redact"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginproxy"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/registry"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/webui"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform"
@@ -132,17 +133,21 @@ func run() error {
 	mreg.SampledGauge("llmobs_ingest_queue_capacity", "In-process ingest queue capacity.",
 		func() float64 { return float64(receiver.QueueCap()) })
 
-	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
-	qsrv := query.NewServer(store, pool, log, maxWindow, mreg)
-
-	// Plugin supervisor (H2): discovers backend plugins (spec.backend) from the
-	// plugin dir, handshakes + health-probes them via the external-URL executor,
-	// and issues service tokens. Only the leader replica supervises (advisory lock,
-	// below). The kernel's Ed25519 signing key is in-memory for lite (ADR-0023).
+	// The kernel's Ed25519 plugin signing key (in-memory for lite, ADR-0023): mints
+	// + verifies service tokens (supervisor) and identity assertions (proxy), and
+	// verifies both when a plugin calls the Query API (the computed intersection).
 	pluginSigner, err := plugintoken.NewSigner()
 	if err != nil {
 		return err
 	}
+
+	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
+	qsrv := query.NewServer(store, pool, log, maxWindow, mreg, pluginSigner)
+
+	// Plugin supervisor (H2): discovers backend plugins (spec.backend) from the
+	// plugin dir, handshakes + health-probes them via the external-URL executor,
+	// and issues service tokens. Only the leader replica supervises (advisory lock,
+	// below).
 	sup := supervisor.New(supervisor.NewDirProvider(cfg.PluginDir, log),
 		executors.NewExternalURL(5*time.Second), pluginSigner, mreg, log, supervisor.Config{}, nil)
 
@@ -165,6 +170,15 @@ func run() error {
 		_, ok := authhttp.SessionFrom(r.Context())
 		return ok
 	}))
+	// Plugin backend proxy (H3): /api/plugins/{id}/* → the running plugin backend,
+	// cookie stripped + identity assertion injected. Only running plugins proxy.
+	projectResolver := func(r *http.Request) (string, error) {
+		if p := r.Header.Get("X-LLMObs-Project"); p != "" {
+			return p, nil
+		}
+		return controlplane.DefaultProjectID(r.Context(), pool)
+	}
+	apiMux.Handle("/api/plugins/", pluginproxy.New(sup, pluginSigner, projectResolver, log).Handler("/api/plugins/"))
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is

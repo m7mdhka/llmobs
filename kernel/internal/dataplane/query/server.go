@@ -52,7 +52,7 @@ func (s *Server) auth(r *http.Request, scope string) (controlplane.Identity, *Co
 				return controlplane.Identity{}, errf("unauthorized", 403, "no project available")
 			}
 			_ = sess
-			return controlplane.Identity{ProjectID: projectID, Scopes: []string{"ingest", "query", "scores:write", "delete"}}, nil
+			return controlplane.Identity{ProjectID: projectID, Scopes: []string{"ingest", "query", "query:payloads", "scores:write", "delete"}}, nil
 		}
 	}
 	id, err := controlplane.Authenticate(r.Context(), s.pool, bearer)
@@ -138,6 +138,15 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Field-level redaction (DSL §10): project payloads out unless the caller holds
+	// the payload scope. Cursor keying happened above from promoted anchors, so it
+	// never leaks payloads and paging is unaffected.
+	strip := payloadFields
+	if target == "scores" {
+		strip = scorePayloadFields
+	}
+	rows = projectRows(rows, strip, id.HasScope("query:payloads"))
+
 	data := make([]json.RawMessage, len(rows))
 	copy(data, rows)
 	resp := map[string]any{
@@ -172,6 +181,9 @@ func (s *Server) GetSpan(w http.ResponseWriter, r *http.Request, id string) {
 	if doc == nil {
 		writeErr(w, errf("not_found", 404, "no such span"))
 		return
+	}
+	if !ident.HasScope("query:payloads") {
+		doc = stripPayloadFields(doc, payloadFields)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -223,6 +235,9 @@ func (s *Server) GetScore(w http.ResponseWriter, r *http.Request, id string) {
 	if doc == nil {
 		writeErr(w, errf("not_found", 404, "no such score"))
 		return
+	}
+	if !ident.HasScope("query:payloads") {
+		doc = stripPayloadFields(doc, scorePayloadFields)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

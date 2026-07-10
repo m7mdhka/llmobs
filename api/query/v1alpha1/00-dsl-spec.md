@@ -366,7 +366,15 @@ trusts a plugin-supplied identity.
   error); a query that filters on a payload field is not possible because payload
   fields are not queryable (§4).
 - Field-level redaction is part of **this contract**, not an adapter concern, so
-  it is uniform across lite and scale.
+  it is uniform across lite and scale. It is enforced by the Query API on **every**
+  read path — row queries, the trace tree, and single-entity fetches — never by
+  the client. The concrete grant is the **`query:payloads`** scope (an API key
+  without it, or a session below admin, is metadata-scoped); the payload fields
+  projected out are exactly `input`, `output`, `events`, `attributes`, and
+  `model_parameters` (and a score's `comment`). Top-level kernel signals
+  (`llmobs.dq.*`) are metadata and survive; kernel-owned keys that live *inside*
+  `attributes` (`llmobs.raw.*`) are stripped with it (see the F2 report note).
+  A future `payload_search` capability MUST require `query:payloads`.
 
 ## 11. Error taxonomy (Normative)
 

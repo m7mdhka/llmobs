@@ -157,6 +157,36 @@ assert isinstance(t.get('status'),dict), 'trace status shape'
 print('   assert OK: traces target returned synthesized trace, span_count=%d, env=%s'%(t['span_count'],t['environment']))
 " || { echo "FAIL: traces target"; echo "$TRESP"; exit 1; }
 
+echo ">> e2e-lite: payload-scope enforcement (metadata key never receives payloads)"
+PCK="$(mktemp)"
+PLGN="$(curl -sf -c "$PCK" -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"admin-dev-password"}' ${API}/auth/login)"
+PXC="$(printf '%s' "$PLGN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["csrf_token"])')"
+METAKEY="$(curl -sf -b "$PCK" -X POST -H "X-CSRF-Token: $PXC" -H "Content-Type: application/json" \
+  -d '{"scopes":["query"]}' ${API}/v1alpha1/api-keys | python3 -c 'import sys,json;print(json.load(sys.stdin)["secret"])')"
+PAYKEY="$(curl -sf -b "$PCK" -X POST -H "X-CSRF-Token: $PXC" -H "Content-Type: application/json" \
+  -d '{"scopes":["query","query:payloads"]}' ${API}/v1alpha1/api-keys | python3 -c 'import sys,json;print(json.load(sys.stdin)["secret"])')"
+SPANQ="{\"target\":\"spans\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"filters\":[{\"field\":\"trace_id\",\"op\":\"eq\",\"value\":\"$TRACE_ID\"}]}"
+# metadata-scoped: NO span may carry attributes/input/output/events/model_parameters.
+curl -sf -H "Authorization: Bearer $METAKEY" -H "Content-Type: application/json" -d "$SPANQ" ${API}/v1alpha1/query \
+  | python3 -c "
+import sys,json
+for s in json.load(sys.stdin)['data']:
+    for f in ('attributes','input','output','events','model_parameters'):
+        assert f not in s, 'metadata scope leaked '+f
+print('   metadata scope: no payload fields present')
+" || { echo "FAIL: metadata scope leaked payloads"; exit 1; }
+# payloads-scoped: attributes present (proves the gate is a real distinction).
+curl -sf -H "Authorization: Bearer $PAYKEY" -H "Content-Type: application/json" -d "$SPANQ" ${API}/v1alpha1/query \
+  | python3 -c "
+import sys,json
+d=json.load(sys.stdin)['data']
+assert any('attributes' in s for s in d), 'payloads scope should include attributes'
+print('   payloads scope: attributes present')
+" || { echo "FAIL: payloads scope missing attributes"; exit 1; }
+rm -f "$PCK"
+echo "   assert OK: payload-scope enforced on the query path"
+
 echo ">> e2e-lite: machine API-key issuance + score write + scores target + QD-9 semi-join"
 NOW="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
 CK="$(mktemp)"

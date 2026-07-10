@@ -3,6 +3,7 @@ package registry
 import (
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -49,6 +50,10 @@ type manifestDoc struct {
 				Section string `yaml:"section"`
 			} `yaml:"nav"`
 		} `yaml:"frontend"`
+		// SettingsSchema is a path (relative to the plugin dir) to the JSON Schema for
+		// the plugin's settings (J2). Loaded at scan time so the kernel knows the
+		// secret (writeOnly) fields and can validate a settings write.
+		SettingsSchema string `yaml:"settingsSchema"`
 	} `yaml:"spec"`
 }
 
@@ -125,6 +130,23 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 		Nav:           nav,
 		Capabilities:  m.Spec.Capabilities,
 		Permissions:   m.Spec.Permissions,
+	}
+	// Load the settings JSON Schema (J2) if declared. The path is manifest-relative
+	// and must stay inside the plugin dir (no traversal). A missing/invalid schema
+	// fails the plugin load — a declared-but-unreadable schema is a manifest error.
+	if sp := m.Spec.SettingsSchema; sp != "" {
+		schemaPath := filepath.Join(dir, filepath.Clean("/"+sp))
+		if !strings.HasPrefix(schemaPath, filepath.Clean(dir)+string(filepath.Separator)) {
+			return Plugin{}, "", fmt.Errorf("settingsSchema path escapes plugin dir: %s", sp)
+		}
+		schemaRaw, err := os.ReadFile(schemaPath)
+		if err != nil {
+			return Plugin{}, "", fmt.Errorf("read settingsSchema %s: %w", sp, err)
+		}
+		if !json.Valid(schemaRaw) {
+			return Plugin{}, "", fmt.Errorf("settingsSchema %s is not valid JSON", sp)
+		}
+		p.SettingsSchema = json.RawMessage(schemaRaw)
 	}
 	return p, distRoot, nil
 }

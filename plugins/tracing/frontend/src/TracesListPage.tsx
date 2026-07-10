@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Button,
   EmptyState,
@@ -71,6 +71,7 @@ export function TracesListPage(): React.ReactElement {
     <div className="tr-page">
       <div className="tr-header">
         <h1 className="tr-title">Traces</h1>
+        <Link className="tr-settings-link" to="settings">Settings</Link>
         <form
           className="tr-filters"
           onSubmit={(e) => {

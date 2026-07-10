@@ -102,6 +102,25 @@
   color: var(--llmobs-text-muted);
 }
 
+/* ---- Form (SchemaForm, J2) ---- */
+.llm-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--llmobs-space-5);
+  max-width: 32rem;
+}
+.llm-field__hint {
+  margin: 0;
+  font-size: var(--llmobs-text-xs);
+  color: var(--llmobs-text-subtle);
+}
+.llm-field__error,
+.llm-form__error {
+  margin: 0;
+  font-size: var(--llmobs-text-xs);
+  color: var(--llmobs-danger);
+}
+
 /* ---- Table ---- */
 .llm-table-wrap {
   width: 100%;

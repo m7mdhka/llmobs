@@ -23,6 +23,31 @@
   align-items: center;
   gap: var(--llmobs-space-2);
 }
+.tr-settings-link {
+  font-size: var(--llmobs-text-sm);
+  color: var(--llmobs-text-muted);
+  text-decoration: none;
+}
+.tr-settings-link:hover {
+  color: var(--llmobs-text);
+}
+.tracing-settings__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--llmobs-space-4);
+  margin-bottom: var(--llmobs-space-5);
+}
+.tracing-settings__head h1 {
+  margin: 0;
+  font-size: var(--llmobs-text-xl);
+  font-weight: var(--llmobs-weight-semibold);
+}
+.tracing-settings__head a {
+  font-size: var(--llmobs-text-sm);
+  color: var(--llmobs-text-muted);
+  text-decoration: none;
+}
 .tr-muted {
   color: var(--llmobs-text-subtle);
 }

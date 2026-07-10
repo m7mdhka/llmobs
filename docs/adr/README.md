@@ -41,3 +41,4 @@ order). New decisions continue the numbering:
 | [ADR-0021](0021-explicit-clear-sentinel.md) | Explicit-clear sentinel — one merge algorithm survives (audit) |
 | [ADR-0022](0022-time-authority-policy.md) | Time authority policy — producer vs receive time (audit) |
 | [ADR-0023](0023-plugin-protocol.md) | Plugin protocol (Tier-3 backend): handshake, tokens, R1–R4 (Arc H) |
+| [ADR-0024](0024-plugin-settings-schemaform.md) | Plugin settings store + SchemaForm: kv-backed, frontend-token-scoped, `writeOnly` secrets never returned (Arc J / J2) |

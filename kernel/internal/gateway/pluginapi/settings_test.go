@@ -1,0 +1,146 @@
+package pluginapi
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginauth"
+	"github.com/m7mdhka/llmobs/kernel/internal/platform/secretbox"
+	"github.com/m7mdhka/llmobs/kernel/internal/pluginsettings"
+	"github.com/m7mdhka/llmobs/kernel/pkg/pluginproto"
+)
+
+const settingsSchemaJSON = `{
+  "type": "object",
+  "required": ["endpoint", "apiKey"],
+  "properties": {
+    "endpoint": {"type": "string", "minLength": 1},
+    "enabled": {"type": "boolean"},
+    "apiKey": {"type": "string", "writeOnly": true}
+  }
+}`
+
+func settingsSetup(t *testing.T) (*Settings, *plugintoken.Signer) {
+	t.Helper()
+	signer, err := plugintoken.NewSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := secretbox.NewRandom()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := pluginsettings.NewStore(newFakeKV(), box)
+	schema := func(pluginID string) (json.RawMessage, bool) {
+		if pluginID == "acme/dash" {
+			return json.RawMessage(settingsSchemaJSON), true
+		}
+		return nil, false
+	}
+	return NewSettings(pluginauth.New(signer, nil), store, schema), signer
+}
+
+func frontendTok(t *testing.T, signer *plugintoken.Signer, pluginID, projectID string) string {
+	t.Helper()
+	// The mint pre-intersects scopes; settings needs no data scope (kv-backed), so an
+	// empty scope set is fine — auth here is by audience + purpose, not scope.
+	tok, _, err := signer.MintFrontendToken(pluginID, "u@x", projectID, "frontend:u@x", nil, time.Now(), 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tok
+}
+
+func callSettings(h *Settings, op, frontendToken, body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, "/v1alpha1/plugin/settings/"+op, strings.NewReader(body))
+	if frontendToken != "" {
+		r.Header.Set(pluginproto.FrontendTokenHeader, frontendToken)
+	}
+	mux := http.NewServeMux()
+	h.Register(mux, "/v1alpha1/plugin/settings")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, r)
+	return rec
+}
+
+// TestSettingsFrontendRoundTripStripsSecret: a frontend token authorizes set/get,
+// and the secret written is reported set but never returned (the J2 negative, at the
+// HTTP boundary).
+func TestSettingsFrontendRoundTripStripsSecret(t *testing.T) {
+	h, signer := settingsSetup(t)
+	tok := frontendTok(t, signer, "acme/dash", "projA")
+
+	rec := callSettings(h, "set", tok, `{"values":{"endpoint":"https://api.x","apiKey":"sk-secret-xyz","enabled":true}}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("set: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = callSettings(h, "get", tok, `{}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "sk-secret-xyz") {
+		t.Fatalf("secret leaked in GET response: %s", body)
+	}
+	var view struct {
+		Values  map[string]json.RawMessage `json:"values"`
+		Secrets map[string]bool            `json:"secrets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if !view.Secrets["apiKey"] {
+		t.Fatal("apiKey should be reported set")
+	}
+	if _, leaked := view.Values["apiKey"]; leaked {
+		t.Fatal("secret must not be in values")
+	}
+	if string(view.Values["endpoint"]) != `"https://api.x"` {
+		t.Fatalf("endpoint wrong: %s", view.Values["endpoint"])
+	}
+}
+
+func TestSettingsRejections(t *testing.T) {
+	h, signer := settingsSetup(t)
+
+	t.Run("no frontend token -> 401", func(t *testing.T) {
+		if rec := callSettings(h, "get", "", `{}`); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("want 401, got %d", rec.Code)
+		}
+	})
+	t.Run("plugin without schema -> 404", func(t *testing.T) {
+		tok := frontendTok(t, signer, "acme/noschema", "projA")
+		if rec := callSettings(h, "get", tok, `{}`); rec.Code != http.StatusNotFound {
+			t.Fatalf("want 404, got %d", rec.Code)
+		}
+	})
+	t.Run("invalid value -> 400", func(t *testing.T) {
+		tok := frontendTok(t, signer, "acme/dash", "projA")
+		// missing required endpoint
+		if rec := callSettings(h, "set", tok, `{"values":{"apiKey":"k"}}`); rec.Code != http.StatusBadRequest {
+			t.Fatalf("want 400, got %d %s", rec.Code, rec.Body.String())
+		}
+	})
+	t.Run("a backend double token is NOT accepted on the frontend settings seam", func(t *testing.T) {
+		// A service token + identity assertion (the backend credential) must not
+		// satisfy RequireFrontend — only a purpose-marked frontend token does.
+		svc, _, _ := signer.MintServiceToken("acme/dash", nil, time.Now(), time.Minute)
+		asr, _, _ := signer.MintIdentityAssertion("acme/dash", "u@x", "projA", "session:u@x", nil, time.Now(), time.Minute)
+		r := httptest.NewRequest(http.MethodPost, "/v1alpha1/plugin/settings/get", strings.NewReader(`{}`))
+		r.Header.Set("X-LLMObs-Service-Token", svc)
+		r.Header.Set(pluginproto.IdentityAssertionHeader, asr)
+		mux := http.NewServeMux()
+		h.Register(mux, "/v1alpha1/plugin/settings")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, r)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("backend double token must not authorize the frontend settings seam, got %d", rec.Code)
+		}
+	})
+}

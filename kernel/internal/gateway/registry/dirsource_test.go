@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,7 @@ metadata:
 spec:
   capabilities: [query]
   permissions: [traces:read.metadata, scores:read]
+  settingsSchema: settings.schema.json
   frontend:
     remoteName: demo
     exposedModule: ./plugin
@@ -43,6 +45,7 @@ func TestDirSourceScanAndServe(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "demo", "llmobs-plugin.yaml"), manifest)
 	writeFile(t, filepath.Join(root, "demo", "dist", "remoteEntry.js"), "console.log('remote');")
+	writeFile(t, filepath.Join(root, "demo", "settings.schema.json"), `{"type":"object","properties":{"apiKey":{"type":"string","writeOnly":true}}}`)
 	// A dir with no manifest is skipped, not fatal.
 	if err := os.MkdirAll(filepath.Join(root, "junk"), 0o755); err != nil {
 		t.Fatal(err)
@@ -79,6 +82,15 @@ func TestDirSourceScanAndServe(t *testing.T) {
 	}
 	if _, _, ok := GrantFor(ds, "acme/nope"); ok {
 		t.Fatal("GrantFor must report false for an unknown plugin")
+	}
+	// The settings schema (J2) is loaded from the manifest-relative path and served
+	// by SchemaFor for the settings store.
+	schema, ok := SchemaFor(ds, "acme/demo")
+	if !ok || !strings.Contains(string(schema), "writeOnly") {
+		t.Fatalf("SchemaFor must return the loaded settings schema, got ok=%v schema=%s", ok, schema)
+	}
+	if _, ok := SchemaFor(ds, "acme/nope"); ok {
+		t.Fatal("SchemaFor must report false for an unknown plugin")
 	}
 
 	// The asset handler serves the bundle and refuses traversal.

@@ -34,6 +34,12 @@ type Config struct {
 	ServeShell         bool   `json:"serve_shell"`          // serve the web shell at /; false => headless (API only)
 	RedactPresets      string `json:"redact_presets"`       // CSV of preset detectors; "none" disables; default the standard set
 	RedactCustomJSON   string `json:"redact_custom"`        // JSON array of {name,pattern,token} custom rules
+	IngestQueueSize    int    `json:"ingest_queue_size"`    // in-process ingest queue capacity (async-ack buffer)
+	// ShutdownDrainTimeout bounds how long shutdown waits for the ingest queue to
+	// persist before giving up (G1). It MUST be shorter than the orchestrator's
+	// terminationGracePeriodSeconds (default 30s in K8s) so the drain completes
+	// before SIGKILL — leave headroom for the ~5s server shutdown too.
+	ShutdownDrainTimeout string `json:"shutdown_drain_timeout"` // e.g. "20s"
 }
 
 func defaults() Config {
@@ -48,9 +54,11 @@ func defaults() Config {
 		BootstrapProject:   "default",
 		QueryMaxWindow:     "720h",
 		ServeShell:         true,
-		MetricsAddr:        ":9090",
-		ClockSkewThreshold: "5m",
-		RedactPresets:      "email,secret,iban,credit_card,phone",
+		MetricsAddr:          ":9090",
+		ClockSkewThreshold:   "5m",
+		RedactPresets:        "email,secret,iban,credit_card,phone",
+		IngestQueueSize:      4096,
+		ShutdownDrainTimeout: "20s",
 	}
 }
 
@@ -84,6 +92,8 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("CLOCK_SKEW_THRESHOLD"), &c.ClockSkewThreshold)
 	envStr(brand.Env("REDACT_PRESETS"), &c.RedactPresets)
 	envStr(brand.Env("REDACT_CUSTOM"), &c.RedactCustomJSON)
+	envStr(brand.Env("SHUTDOWN_DRAIN_TIMEOUT"), &c.ShutdownDrainTimeout)
+	envInt(brand.Env("INGEST_QUEUE_SIZE"), &c.IngestQueueSize)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)
@@ -100,6 +110,14 @@ func envBool(key string, dst *bool) {
 	if v, ok := os.LookupEnv(key); ok {
 		if b, err := strconv.ParseBool(v); err == nil {
 			*dst = b
+		}
+	}
+}
+
+func envInt(key string, dst *int) {
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			*dst = n
 		}
 	}
 }

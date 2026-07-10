@@ -3,6 +3,14 @@
 // enqueues it in-process, and returns, so ack latency has no synchronous DB
 // dependency (D13 ack budget). A worker pool drains the queue and runs the full
 // pipeline (authenticate -> ... -> persist).
+//
+// Async-ack has one honest cost: a job that is acked but not yet persisted lives
+// only in the in-process queue. On shutdown we DRAIN that queue before exiting
+// (G1) so a rolling deploy does not silently shed already-acked spans; the only
+// residual loss window is a forced termination that outlives the drain deadline,
+// which is counted (not silent). Under persist failure or saturation the
+// receivers shed with a retryable 503/UNAVAILABLE (G2) rather than acking into a
+// queue that cannot drain.
 package ingest
 
 import (
@@ -12,14 +20,25 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
+	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingesthealth"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/pipeline"
+	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 )
 
 const maxBodyBytes = 4 << 20 // 4 MiB request cap
+
+// highWaterFraction is the queue-occupancy threshold (of capacity) at which the
+// receivers start shedding new work with a retryable 503 instead of acking it
+// (G2). Set at 80%: it leaves headroom so requests already past the check don't
+// hard-fail at the channel, and it gives clients an early, honest backpressure
+// signal well before the queue is truly full — turning "false 200 then silent
+// loss" into "503 then client retry into the idempotent merge".
+const highWaterFraction = 0.8
 
 // job is a received-but-not-yet-processed request. It carries only bytes and the
 // bearer — no DB handle — so the hot path stays off the database.
@@ -30,24 +49,91 @@ type job struct {
 	receivedAt  time.Time
 }
 
-// Receiver is the OTLP HTTP receiver + async worker pool.
-type Receiver struct {
-	queue   chan job
-	pipe    *pipeline.Pipeline
-	log     *slog.Logger
-	workers int
-	wg      sync.WaitGroup
+// Runner is the pipeline surface the receiver drains into (interface-at-consumer,
+// go-style): the concrete *pipeline.Pipeline satisfies it, and tests inject a fake
+// so drain/backpressure can be exercised without a database.
+type Runner interface {
+	Run(ctx context.Context, ing *pipeline.Ingestion) error
 }
 
-// NewReceiver builds a receiver with an in-process queue and worker pool.
-func NewReceiver(pipe *pipeline.Pipeline, log *slog.Logger, queueSize, workers int) *Receiver {
+// Receiver is the OTLP HTTP receiver + async worker pool.
+type Receiver struct {
+	queue     chan job
+	pipe      Runner
+	log       *slog.Logger
+	workers   int
+	highWater int
+	mreg      *metrics.Registry
+	signal    *ingesthealth.Signal // persist-health gate (nil => no backpressure on health)
+
+	wg         sync.WaitGroup
+	draining   atomic.Bool
+	drainC     chan struct{}
+	drainOnce  sync.Once
+	hardCtx    context.Context
+	hardCancel context.CancelFunc
+}
+
+// NewReceiver builds a receiver with an in-process queue and worker pool. mreg may
+// be nil (instrumentation disabled). The persist-health signal is attached
+// separately via SetPersistSignal so backpressure-on-health is opt-in (G2).
+func NewReceiver(pipe Runner, log *slog.Logger, queueSize, workers int, mreg *metrics.Registry) *Receiver {
 	if queueSize <= 0 {
 		queueSize = 1024
 	}
 	if workers <= 0 {
 		workers = 4
 	}
-	return &Receiver{queue: make(chan job, queueSize), pipe: pipe, log: log, workers: workers}
+	hw := int(float64(queueSize) * highWaterFraction)
+	if hw < 1 {
+		hw = 1
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Receiver{
+		queue:      make(chan job, queueSize),
+		pipe:       pipe,
+		log:        log,
+		workers:    workers,
+		highWater:  hw,
+		mreg:       mreg,
+		drainC:     make(chan struct{}),
+		hardCtx:    ctx,
+		hardCancel: cancel,
+	}
+}
+
+// SetPersistSignal attaches the persist-health gate used for readiness-consistent
+// backpressure (G2). When the signal reports unhealthy, the receivers shed new
+// work with a retryable 503/UNAVAILABLE instead of acking it.
+func (r *Receiver) SetPersistSignal(sig *ingesthealth.Signal) { r.signal = sig }
+
+// QueueLen / QueueCap expose queue occupancy for scrape-time gauges.
+func (r *Receiver) QueueLen() int { return len(r.queue) }
+func (r *Receiver) QueueCap() int { return cap(r.queue) }
+
+// backpressure returns a non-empty reason when new work must be shed (503/
+// UNAVAILABLE) rather than acked: shutting down, persistence unhealthy, or the
+// queue past its high-water mark. Empty string => accept on the fast path.
+func (r *Receiver) backpressure() string {
+	switch {
+	case r.draining.Load():
+		return "draining"
+	case r.signal != nil && !r.signal.Healthy():
+		return "persist_unhealthy"
+	case len(r.queue) >= r.highWater:
+		return "high_water"
+	default:
+		return ""
+	}
+}
+
+// shed records a backpressure rejection (by reason) for the operator dashboard.
+func (r *Receiver) shed(reason string) {
+	if r.mreg != nil {
+		r.mreg.CounterAdd("llmobs_ingest_backpressure_shed_total",
+			"OTLP requests shed with a retryable 503/UNAVAILABLE under backpressure, by reason.",
+			map[string]string{"reason": reason}, 1)
+	}
 }
 
 // Handler returns the OTLP/HTTP traces handler (mount at /v1/traces). It is the
@@ -57,6 +143,13 @@ func (r *Receiver) Handler() http.Handler {
 	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Backpressure envelope: reject cheaply before reading the body when we are
+		// shutting down, persistence is unhealthy, or the queue is saturated.
+		if reason := r.backpressure(); reason != "" {
+			r.shed(reason)
+			retryable503(w, reason)
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes))
@@ -70,13 +163,21 @@ func (r *Receiver) Handler() http.Handler {
 		select {
 		case r.queue <- j:
 		default:
-			// Backpressure: queue full. Signal retryable so the client backs off.
-			http.Error(w, "ingestion queue full", http.StatusServiceUnavailable)
+			// Last-resort backpressure: the queue filled between the check and here.
+			r.shed("queue_full")
+			retryable503(w, "queue_full")
 			return
 		}
 		writeExportResponse(w, ct)
 	})
 	return mux
+}
+
+// retryable503 signals a retryable rejection with a conservative Retry-After so
+// OTLP exporters back off and retry into the idempotent merge.
+func retryable503(w http.ResponseWriter, reason string) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, "ingestion unavailable: "+reason, http.StatusServiceUnavailable)
 }
 
 func writeExportResponse(w http.ResponseWriter, contentType string) {
@@ -94,26 +195,89 @@ func writeExportResponse(w http.ResponseWriter, contentType string) {
 	_, _ = w.Write(b)
 }
 
-// Start launches the worker pool. Workers drain the queue and run the pipeline.
-func (r *Receiver) Start(ctx context.Context) {
+// Start launches the worker pool. Workers run on the receiver's own context, NOT
+// the caller's — a shutdown signal must not kill queued-but-unpersisted work.
+// DrainAndWait drives the ordered shutdown (stop accepting -> drain -> deadline).
+func (r *Receiver) Start(_ context.Context) {
 	for i := 0; i < r.workers; i++ {
 		r.wg.Add(1)
-		go func() {
-			defer r.wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case j := <-r.queue:
-					r.process(ctx, j)
-				}
-			}
-		}()
+		go r.worker()
 	}
 }
 
-// Stop drains and waits for workers to finish (best-effort on shutdown).
-func (r *Receiver) Stop() { r.wg.Wait() }
+func (r *Receiver) worker() {
+	defer r.wg.Done()
+	for {
+		// Priority guard: once the hard deadline has fired, stop immediately rather
+		// than let select randomly pull (and abandon) more queued jobs — so the
+		// dropped-on-shutdown count is exactly what remains queued, not fewer.
+		if r.hardCtx.Err() != nil {
+			return
+		}
+		select {
+		case <-r.hardCtx.Done():
+			return
+		case <-r.drainC:
+			r.finalDrain()
+			return
+		case j := <-r.queue:
+			r.process(r.hardCtx, j)
+		}
+	}
+}
+
+// finalDrain processes everything already queued, then returns — unless the hard
+// deadline elapsed (hardCtx cancelled), in which case it stops immediately and
+// DrainAndWait counts whatever remains as the dropped-on-shutdown floor.
+func (r *Receiver) finalDrain() {
+	for {
+		if r.hardCtx.Err() != nil {
+			return
+		}
+		select {
+		case j := <-r.queue:
+			r.process(r.hardCtx, j)
+		default:
+			return
+		}
+	}
+}
+
+// BeginDrain flips the receiver to draining so new OTLP requests are shed with a
+// retryable 503 immediately, before the listeners are torn down. Idempotent.
+func (r *Receiver) BeginDrain() { r.draining.Store(true) }
+
+// DrainAndWait stops accepting new work and blocks until the in-flight queue is
+// fully persisted or the deadline in ctx elapses. If the deadline wins, the
+// remaining acked-but-unpersisted jobs are the one unavoidable loss window for an
+// in-memory queue: they are counted (llmobs_ingest_queue_dropped_on_shutdown_total)
+// and logged at error, never dropped silently. ctx SHOULD be shorter than the
+// orchestrator's terminationGracePeriodSeconds so the drain runs to completion
+// before SIGKILL.
+func (r *Receiver) DrainAndWait(ctx context.Context) {
+	r.draining.Store(true)
+	r.drainOnce.Do(func() { close(r.drainC) })
+
+	done := make(chan struct{})
+	go func() { r.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		// clean: the queue drained fully within the deadline
+	case <-ctx.Done():
+		r.hardCancel() // force workers to stop pulling; remaining stays queued
+		<-done
+	}
+
+	if dropped := len(r.queue); dropped > 0 {
+		r.log.Error("ingest queue not drained before shutdown deadline; acked spans dropped",
+			"dropped", dropped)
+		if r.mreg != nil {
+			r.mreg.CounterAdd("llmobs_ingest_queue_dropped_on_shutdown_total",
+				"Acked ingest jobs dropped because the shutdown drain deadline elapsed before the queue emptied.",
+				nil, float64(dropped))
+		}
+	}
+}
 
 func (r *Receiver) process(ctx context.Context, j job) {
 	ing := &pipeline.Ingestion{

@@ -18,7 +18,7 @@ import (
 // (not return 200). Getting a 200 + a queued job proves the DB is off the hot path.
 func TestHotPathDoesNotTouchStorage(t *testing.T) {
 	pipe := pipeline.New(nil, nil, nil, pipeline.NoopBus{}, pipeline.Config{})
-	r := NewReceiver(pipe, slog.New(slog.NewTextHandler(io.Discard, nil)), 8, 1)
+	r := NewReceiver(pipe, slog.New(slog.NewTextHandler(io.Discard, nil)), 8, 1, nil)
 	// NOTE: workers deliberately not started.
 
 	body := []byte(`{"resourceSpans":[]}`)

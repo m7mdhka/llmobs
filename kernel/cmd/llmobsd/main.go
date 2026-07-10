@@ -102,8 +102,14 @@ func run() error {
 		Metrics: mreg, SkewThreshold: skew, RedactPresets: presets, RedactCustom: customRules,
 	})
 
-	receiver := ingest.NewReceiver(pipe, log, 4096, 4)
+	receiver := ingest.NewReceiver(pipe, log, cfg.IngestQueueSize, 4, mreg)
 	receiver.Start(rootCtx)
+	// Ingest queue occupancy is scrape-sampled so an operator can see saturation
+	// (the A1/A3 diagnosis) approaching the high-water backpressure mark.
+	mreg.SampledGauge("llmobs_ingest_queue_depth", "In-process ingest queue depth (acked, not yet persisted).",
+		func() float64 { return float64(receiver.QueueLen()) })
+	mreg.SampledGauge("llmobs_ingest_queue_capacity", "In-process ingest queue capacity.",
+		func() float64 { return float64(receiver.QueueCap()) })
 
 	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
 	qsrv := query.NewServer(store, pool, log, maxWindow, mreg)
@@ -169,12 +175,19 @@ func run() error {
 
 	select {
 	case <-rootCtx.Done():
-		log.Info("shutdown signal received")
+		log.Info("shutdown signal received; draining ingest queue")
 	case err := <-errCh:
 		log.Error("server error", "err", err.Error())
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Ordered shutdown (G1): (1) shed brand-new OTLP immediately with a retryable
+	// 503/UNAVAILABLE, (2) stop the listeners so no new work is enqueued, then
+	// (3) DRAIN the acked-but-unpersisted queue within a bounded deadline. The
+	// deadline (LLMOBS_SHUTDOWN_DRAIN_TIMEOUT) is shorter than K8s
+	// terminationGracePeriodSeconds so the drain finishes before SIGKILL; whatever
+	// cannot drain in time is counted, not dropped silently.
+	receiver.BeginDrain()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = apiServer.Shutdown(shutdownCtx)
 	_ = otlpServer.Shutdown(shutdownCtx)
@@ -182,7 +195,14 @@ func run() error {
 		_ = metricsServer.Shutdown(shutdownCtx)
 	}
 	grpcServer.GracefulStop()
-	receiver.Stop()
+
+	drainTimeout, err := time.ParseDuration(cfg.ShutdownDrainTimeout)
+	if err != nil || drainTimeout <= 0 {
+		drainTimeout = 20 * time.Second
+	}
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), drainTimeout)
+	defer drainCancel()
+	receiver.DrainAndWait(drainCtx)
 	log.Info("stopped")
 	return nil
 }

@@ -113,6 +113,34 @@ producer-derived `event_ts`, so a re-consumed span folds to the identical state 
 *receiver* inside the kernel is a possible future addition (the receiver→pipeline
 seam is clean); until then the bridge pattern needs no kernel changes.
 
+## Durability & shutdown (the async-ack promise)
+
+Ingestion is **async-ack**: the OTLP receiver reads the request, enqueues it in an
+in-process buffer, and returns `200/OK` — the database write happens on a worker a
+moment later. This keeps ack latency off the database, but it means an acked span
+lives only in memory until it is persisted. The honest question is: *is that ack a
+promise we can keep?*
+
+- **Rolling deploys / SIGTERM: the queue is drained, not dropped.** On shutdown the
+  receivers immediately shed new requests with a retryable `503`/`UNAVAILABLE`,
+  stop the listeners, then drain the in-flight queue to Postgres before exiting.
+  A normal deploy loses nothing.
+- **The one residual loss window is bounded and counted.** If a forced termination
+  outlives the drain deadline (`LLMOBS_SHUTDOWN_DRAIN_TIMEOUT`, default `20s`), the
+  jobs still queued at that instant are the unavoidable floor of an in-memory
+  queue. They are **counted** (`llmobs_ingest_queue_dropped_on_shutdown_total`) and
+  logged at error — observable, never silent.
+- **Set the grace period accordingly.** `LLMOBS_SHUTDOWN_DRAIN_TIMEOUT` must be
+  shorter than your orchestrator's `terminationGracePeriodSeconds` (K8s default
+  `30s`) with headroom for the ~5s server shutdown; the `20s` default fits the
+  default grace comfortably. Raising the drain timeout shrinks the loss window at
+  the cost of a slower shutdown.
+- **Crash (SIGKILL/OOM) is the same floor, uncounted.** A hard kill cannot drain;
+  recovery is client retry into the idempotent merge (redelivery folds to the same
+  state). The **lite** profile accepts this bounded window by design; the **scale**
+  profile's durable ingest path (S3/WAL spool) closes it entirely and is tracked
+  separately — lite makes the window honest and bounded, it does not eliminate it.
+
 ## GDPR erasure
 
 Delete every span for a user, provably:

@@ -20,9 +20,15 @@ type grpcTraceService struct {
 	r *Receiver
 }
 
-// Export enqueues the received traces and acks. On a full queue it returns
-// ResourceExhausted so the client backs off and retries (mirrors the HTTP 503).
+// Export enqueues the received traces and acks. Under backpressure (shutting
+// down, persistence unhealthy, or the queue saturated) it returns UNAVAILABLE so
+// the client backs off and retries into the idempotent merge — the gRPC mirror of
+// the HTTP 503+Retry-After envelope.
 func (g *grpcTraceService) Export(ctx context.Context, req ptraceotlp.ExportRequest) (ptraceotlp.ExportResponse, error) {
+	if reason := g.r.backpressure(); reason != "" {
+		g.r.shed(reason)
+		return ptraceotlp.NewExportResponse(), status.Error(codes.Unavailable, "ingestion unavailable: "+reason)
+	}
 	body, err := req.MarshalProto()
 	if err != nil {
 		return ptraceotlp.NewExportResponse(), status.Error(codes.InvalidArgument, "malformed export request")
@@ -37,7 +43,8 @@ func (g *grpcTraceService) Export(ctx context.Context, req ptraceotlp.ExportRequ
 	case g.r.queue <- j:
 		return ptraceotlp.NewExportResponse(), nil
 	default:
-		return ptraceotlp.NewExportResponse(), status.Error(codes.ResourceExhausted, "ingestion queue full")
+		g.r.shed("queue_full")
+		return ptraceotlp.NewExportResponse(), status.Error(codes.Unavailable, "ingestion unavailable: queue_full")
 	}
 }
 

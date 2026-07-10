@@ -34,6 +34,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginproxy"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/registry"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/webui"
+	"github.com/m7mdhka/llmobs/kernel/internal/jobs"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/secretbox"
@@ -158,6 +159,13 @@ func run() error {
 	sup := supervisor.New(supervisor.NewDirProvider(cfg.PluginDir, log),
 		executors.NewExternalURL(5*time.Second), pluginSigner, mreg, log, supervisor.Config{}, nil)
 
+	// Job scheduler (H6b): Postgres-backed, runs on the supervisor's leader cadence.
+	// The runner presents a system assertion scoped to the plugin's OWN grant on the
+	// default project — never more (pin 1); runs are audited in plugin_job_runs.
+	defaultProject, _ := controlplane.DefaultProjectID(rootCtx, pool)
+	scheduler := jobs.New(sup, jobs.NewRunner(pluginSigner, 30*time.Second, 3),
+		postgres.NewJobStore(pool), defaultProject, log, nil)
+
 	// API server: auth + query + health, all behind the session middleware so a
 	// resolved session is available to every downstream handler.
 	auth := authhttp.New(pool, log, cfg.CookieSecure)
@@ -177,6 +185,14 @@ func run() error {
 		_, ok := authhttp.SessionFrom(r.Context())
 		return ok
 	}))
+	// Jobs ops API: on-demand trigger + run status, actor from the admin session.
+	jobActor := func(r *http.Request) (string, bool) {
+		if sess, ok := authhttp.SessionFrom(r.Context()); ok {
+			return "session:" + sess.User.Email, true
+		}
+		return "", false
+	}
+	jobs.NewHandler(scheduler, jobActor).Register(apiMux, "/v1alpha1/jobs")
 	// Plugin backend proxy (H3): /api/plugins/{id}/* → the running plugin backend,
 	// cookie stripped + identity assertion injected. Only running plugins proxy.
 	projectResolver := func(r *http.Request) (string, error) {
@@ -281,12 +297,14 @@ func run() error {
 		t := time.NewTicker(reconcileEvery)
 		defer t.Stop()
 		sup.Reconcile(rootCtx)
+		scheduler.Tick(rootCtx)
 		for {
 			select {
 			case <-rootCtx.Done():
 				return
 			case <-t.C:
 				sup.Reconcile(rootCtx)
+				scheduler.Tick(rootCtx) // dispatch due jobs on the same leader cadence
 			}
 		}
 	}()

@@ -178,6 +178,37 @@ designed against. Instead:
 Postgres LISTEN/NOTIFY was **not** insufficient for the at-least-once + replay
 contract — because that contract rests on the durable log, not on notifications.
 
+## `jobs` — scheduler + bounded system identity (H6b, ruled)
+
+The `jobs` scheduler is **Postgres-backed** (cron + `@every` + on-demand, retries,
+long-running-job awareness), reusing the advisory-lock leader the migration runner
+and supervisor prove — **zero new infrastructure**, same as events. Runs are
+recorded in `plugin_job_runs`. A job already `running` is not re-triggered (the
+long-running guard), and a busy job does not read as degraded (that's the health
+watermark, separate).
+
+**A scheduled job runs user-less, so it skips the user half of the intersection —
+but that half is replaced by the plugin's OWN grant, never god-mode:**
+
+- **Pin 1 — bounded system assertion.** The runner mints an identity assertion
+  audience-bound to the plugin, scoped to the plugin's **declared permissions** on
+  the plugin's project — *not* `All()`. So a job's effective access is
+  `plugin-service-token perms ∩ plugin-grant perms ∩ project` = the plugin's own
+  grant. A job can do exactly what the plugin was granted, never more, and cannot
+  reach another tenant.
+- **Pin 2 — audit-distinguishable.** The system identity's subject/actor is
+  `system:job:<plugin>:<job>` (vs `session:<email>` for on-demand/user triggers),
+  threaded into `pluginauth.Caller.Actor`, and every run is recorded in the
+  `plugin_job_runs` audit trail (plugin, job, trigger, actor, status, attempts).
+  Scheduled-vs-on-behalf-of-user is always answerable — the place the double-token
+  model would otherwise silently erode.
+
+Prove-the-negative (H3/H4/H5 family): a test asserts the runner's system assertion
+carries ONLY the plugin's grant (metadata-only stays metadata-only, no payloads/
+scores-write leak), is pinned to the plugin's project, and is tagged system —
+i.e. a job cannot exceed the plugin's capabilities or reach another project. This
+did not force a change to how the runner mints assertions.
+
 ## Consequences
 
 - The manifest gains an additive `spec.backend` (url, healthPath, infoPath,

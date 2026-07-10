@@ -23,6 +23,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
+	"github.com/m7mdhka/llmobs/kernel/internal/jobs"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/plugindata"
 )
@@ -309,6 +310,28 @@ func (s *Supervisor) scopesFor(spec PluginSpec) []string {
 	}
 	for _, p := range spec.GrantedScopes {
 		add(p)
+	}
+	return out
+}
+
+// PluginJobs implements jobs.JobSource: the jobs of currently-running plugins,
+// each with its backend URL and the plugin's own granted permissions (which the
+// scheduler scopes the system assertion to — never more than the plugin's grant).
+func (s *Supervisor) PluginJobs() []jobs.PluginJobs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []jobs.PluginJobs
+	for _, rt := range s.plugins {
+		if len(rt.spec.Jobs) == 0 {
+			continue
+		}
+		out = append(out, jobs.PluginJobs{
+			PluginID:    rt.spec.ID,
+			BackendURL:  rt.spec.Backend.URL,
+			Permissions: rt.spec.GrantedScopes,
+			Running:     rt.state == StateRunning,
+			Jobs:        rt.spec.Jobs,
+		})
 	}
 	return out
 }

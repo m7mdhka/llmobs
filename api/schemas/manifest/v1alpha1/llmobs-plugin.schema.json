@@ -124,6 +124,21 @@
             }
           }
         },
+        "jobs": {
+          "type": "array",
+          "description": "Scheduled/on-demand jobs (the `jobs` primitive, H6b). The kernel invokes the plugin backend endpoint on schedule with a system identity assertion scoped to the plugin's own grant. A missing schedule => on-demand only.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "path"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+              "schedule": { "type": "string", "description": "5-field cron or '@every <duration>' (e.g. '@every 1h'). Absent => on-demand only." },
+              "path": { "type": "string", "pattern": "^/.+", "description": "Plugin backend endpoint the kernel POSTs to." },
+              "maxAttempts": { "type": "integer", "minimum": 1, "description": "Retries per run (default 3)." }
+            }
+          }
+        },
         "backend": {
           "type": "object",
           "additionalProperties": false,

@@ -18,11 +18,14 @@ import (
 // /plugin/v1/health, and can be flipped down (unreachable), unhealthy, or given a
 // stale watermark to exercise the supervisor state machine.
 type FakeBackend struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	info   pluginproto.Info
-	health pluginproto.Health
-	down   bool
+	server     *httptest.Server
+	mu         sync.Mutex
+	info       pluginproto.Info
+	health     pluginproto.Health
+	down       bool
+	jobFail    bool   // when true, /job returns 500 (to exercise retries/failure)
+	jobCalls   int    // count of /job invocations
+	lastJobAsr string // the identity assertion the last /job call carried
 }
 
 // NewFakeBackend starts a healthy fake backend advertising info.
@@ -36,6 +39,7 @@ func NewFakeBackend(info pluginproto.Info) *FakeBackend {
 	mux.HandleFunc(pluginproto.DefaultHealthPath, f.handleHealth)
 	// Catch-all echo: returns the path + received headers, so proxy tests can assert
 	// the cookie was stripped and the identity assertion injected.
+	mux.HandleFunc("/job", f.handleJob)
 	mux.HandleFunc("/", f.handleEcho)
 	f.server = httptest.NewServer(mux)
 	return f
@@ -86,6 +90,38 @@ func (f *FakeBackend) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, f.health)
+}
+
+// SetJobFail toggles whether /job returns 500 (to exercise retry/failure paths).
+func (f *FakeBackend) SetJobFail(fail bool) {
+	f.mu.Lock()
+	f.jobFail = fail
+	f.mu.Unlock()
+}
+
+// JobCalls / LastJobAssertion expose what the scheduler delivered to /job.
+func (f *FakeBackend) JobCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.jobCalls
+}
+func (f *FakeBackend) LastJobAssertion() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastJobAsr
+}
+
+func (f *FakeBackend) handleJob(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.jobCalls++
+	f.lastJobAsr = r.Header.Get(pluginproto.IdentityAssertionHeader)
+	fail := f.jobFail
+	f.mu.Unlock()
+	if fail {
+		http.Error(w, "job boom", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (f *FakeBackend) handleEcho(w http.ResponseWriter, r *http.Request) {

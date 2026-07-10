@@ -188,14 +188,22 @@ for s in json.load(sys.stdin)['data']:
         assert f not in s, 'metadata scope leaked '+f
 print('   metadata scope: no payload fields present')
 " || { echo "FAIL: metadata scope leaked payloads"; exit 1; }
-# payloads-scoped: attributes present (proves the gate is a real distinction).
+# payloads-scoped: attributes present, AND redaction-before-persist is proven —
+# the stored input carries [REDACTED:*] tokens, never the raw PII, plus the dq signal.
 curl -sf -H "Authorization: Bearer $PAYKEY" -H "Content-Type: application/json" -d "$SPANQ" ${API}/v1alpha1/query \
   | python3 -c "
 import sys,json
 d=json.load(sys.stdin)['data']
 assert any('attributes' in s for s in d), 'payloads scope should include attributes'
-print('   payloads scope: attributes present')
-" || { echo "FAIL: payloads scope missing attributes"; exit 1; }
+gen=[s for s in d if s.get('kind')=='generation']
+assert gen, 'no generation span'
+raw=json.dumps(gen[0])   # grep the persisted JSON, structurally
+assert 'jane@example.com' not in raw, 'raw email survived redaction!'
+assert '4111 1111 1111 1111' not in raw, 'raw card survived redaction!'
+assert '[REDACTED:email]' in raw and '[REDACTED:credit_card]' in raw, 'redaction tokens missing'
+assert gen[0].get('attributes',{}).get('llmobs.dq.redacted',{}).get('total',0) >= 2, 'dq.redacted signal missing'
+print('   redaction-before-persist: PII scrubbed to tokens, dq.redacted stamped')
+" || { echo "FAIL: redaction-before-persist"; exit 1; }
 echo ">> e2e-lite: MCP server (metadata-safe, JSON-RPC over stdio)"
 MCPBIN="$(mktemp -u)"
 go build -o "$MCPBIN" ./tools/mcp-server || { echo "FAIL: mcp build"; exit 1; }

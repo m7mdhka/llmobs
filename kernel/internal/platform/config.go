@@ -32,6 +32,8 @@ type Config struct {
 	MetricsAddr        string `json:"metrics_addr"`         // Prometheus /metrics bind; empty => mounted on API server
 	ClockSkewThreshold string `json:"clock_skew_threshold"` // e.g. "5m"; drift beyond stamps dq
 	ServeShell         bool   `json:"serve_shell"`          // serve the web shell at /; false => headless (API only)
+	RedactPresets      string `json:"redact_presets"`       // CSV of preset detectors; "none" disables; default the standard set
+	RedactCustomJSON   string `json:"redact_custom"`        // JSON array of {name,pattern,token} custom rules
 }
 
 func defaults() Config {
@@ -48,6 +50,7 @@ func defaults() Config {
 		ServeShell:         true,
 		MetricsAddr:        ":9090",
 		ClockSkewThreshold: "5m",
+		RedactPresets:      "email,secret,iban,credit_card,phone",
 	}
 }
 
@@ -79,6 +82,8 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("PLUGIN_DIR"), &c.PluginDir)
 	envStr(brand.Env("METRICS_ADDR"), &c.MetricsAddr)
 	envStr(brand.Env("CLOCK_SKEW_THRESHOLD"), &c.ClockSkewThreshold)
+	envStr(brand.Env("REDACT_PRESETS"), &c.RedactPresets)
+	envStr(brand.Env("REDACT_CUSTOM"), &c.RedactCustomJSON)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)

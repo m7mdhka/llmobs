@@ -71,6 +71,9 @@ Coercion and normalization MUST NOT be silent:
 | `start_time_normalized` | An update offered a `start_time` differing from the frozen original (`05` §5; a specialization of `frozen_field_conflict` for the timing anchor, LM-6). | recorded as `frozen_field_conflict.start_time` | `llmobs.raw.start_time` | `field=start_time` |
 | `unmapped_kind` | A source type had no mapping and fell back to `span` (`02-span.md` §2.2). | `llmobs.dq.unmapped_kind = true` | `raw_kind` already carries the source value | `raw_kind` |
 | `validation_rejected` | A score failed config validation (`04-score.md` §7). | — (the entity is rejected, not stored) | — | `entity=score`, `reason` |
+| `redacted` | Built-in redaction scrubbed one or more PII/secret matches from a payload field before persist (redact stage). | `llmobs.dq.redacted = { total, <rule>: <count>, … }` | — (redacted content is replaced by a token, e.g. `[REDACTED:email]`; the original is intentionally not preserved) | `rule` (the detector name) |
+| `clock_skew` | Producer `event_ts` deviated from receive time beyond the configured threshold (ADR-0022). | `llmobs.dq.clock_skew = <delta_seconds>` | — | — |
+| `incomplete_trace` | A span references a parent absent from the trace (upstream tail-sampling); computed at trace synthesis. | `llmobs.dq.incomplete_trace = true` (on the synthesized trace) | — | — |
 
 Adding a new signal is additive. A consumer encountering an unknown
 `llmobs.dq.*` key MUST ignore it (forward compatibility).

@@ -72,7 +72,7 @@ func main() {
 			attribute.Int("gen_ai.request.max_tokens", 256),
 			attribute.Int("gen_ai.usage.input_tokens", 812),
 			attribute.Int("gen_ai.usage.output_tokens", 96),
-			attribute.String("gen_ai.input.messages", `[{"role":"user","content":"refund order 55"}]`),
+			attribute.String("gen_ai.input.messages", `[{"role":"user","content":"refund order 55, email me at jane@example.com, card 4111 1111 1111 1111"}]`),
 			attribute.String("gen_ai.output.messages", `[{"role":"assistant","tool_calls":[{"id":"call_1","name":"get_order"}]}]`),
 		))
 	gen.AddEvent("gen_ai.choice", trace.WithAttributes(attribute.String("finish_reason", "tool_calls")))

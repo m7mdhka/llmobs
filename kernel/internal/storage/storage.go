@@ -57,6 +57,13 @@ type TelemetryStore interface {
 	GetSpan(ctx context.Context, projectID, id string) (json.RawMessage, error)
 	// GetTraceSpans returns a trace's non-deleted spans in tree-buildable order.
 	GetTraceSpans(ctx context.Context, projectID, traceID string) ([]json.RawMessage, error)
+
+	// PersistScore applies one score event with merge-on-write (LM-3/LM-8).
+	PersistScore(ctx context.Context, ev Event) error
+	// QueryScores runs a compiled scores predicate and returns folded score docs.
+	QueryScores(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error)
+	// GetScore returns a folded score doc by id, or nil if absent/deleted.
+	GetScore(ctx context.Context, projectID, id string) (json.RawMessage, error)
 }
 
 // MergeConformer is the normative-merge surface an adapter exposes to the

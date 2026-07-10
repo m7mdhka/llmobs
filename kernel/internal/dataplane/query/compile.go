@@ -72,6 +72,9 @@ type fieldDef struct {
 type queryFields struct {
 	fields    map[string]fieldDef
 	orderable map[string]bool
+	// timeAnchor is the column the mandatory timeRange, keyset cursor, and default
+	// order key are anchored on (spans/traces: start_time; scores: timestamp).
+	timeAnchor string
 }
 
 var spanFields = queryFields{
@@ -102,6 +105,7 @@ var spanFields = queryFields{
 	orderable: map[string]bool{
 		"id": true, "trace_id": true, "name": true, "start_time": true, "end_time": true, "total_cost": true,
 	},
+	timeAnchor: "start_time",
 }
 
 // traceFields is the queryable surface of the derived `traces` target. Columns
@@ -125,6 +129,31 @@ var traceFields = queryFields{
 	orderable: map[string]bool{
 		"id": true, "name": true, "start_time": true, "end_time": true,
 	},
+	timeAnchor: "start_time",
+}
+
+// scoreFields is the queryable surface of the `scores` target (04-score.md,
+// fields.json). Time anchor is `timestamp`.
+var scoreFields = queryFields{
+	fields: map[string]fieldDef{
+		"id":            {"id", classString},
+		"subject_type":  {"subject_type", classString},
+		"subject_id":    {"subject_id", classString},
+		"name":          {"name", classString},
+		"data_type":     {"data_type", classEnum},
+		"value_numeric": {"value_numeric", classNumeric},
+		"value_string":  {"value_string", classString},
+		"source":        {"source", classEnum},
+		"timestamp":     {"timestamp", classTimestamp},
+		"environment":   {"environment", classString},
+		"comment":       {"comment", classString},
+		"metadata":      {"metadata", classAttrMap},
+		"config_ref":    {"config_ref", classReference},
+	},
+	orderable: map[string]bool{
+		"id": true, "name": true, "value_numeric": true, "timestamp": true,
+	},
+	timeAnchor: "timestamp",
 }
 
 type builder struct {
@@ -163,10 +192,19 @@ func CompileTraces(doc map[string]any, projectID string, maxWindow time.Duration
 	if t, _ := doc["target"].(string); t != "traces" {
 		return nil, errf("schema_invalid", 400, "target must be 'traces'")
 	}
-	if _, hasScores := doc["scores"]; hasScores {
-		return nil, errf("not_implemented", 501, "score semi-join (QD-9) is not implemented in v1alpha1")
-	}
 	return compileTarget(doc, projectID, maxWindow, traceFields)
+}
+
+// CompileScores compiles a scores query. Score fields per 04-score.md; the time
+// anchor is `timestamp`.
+func CompileScores(doc map[string]any, projectID string, maxWindow time.Duration) (*Compiled, error) {
+	if t, _ := doc["target"].(string); t != "scores" {
+		return nil, errf("schema_invalid", 400, "target must be 'scores'")
+	}
+	if _, hasScores := doc["scores"]; hasScores {
+		return nil, errf("schema_invalid", 400, "the scores semi-join block is only valid on the traces target")
+	}
+	return compileTarget(doc, projectID, maxWindow, scoreFields)
 }
 
 // compileTarget is the shared row-query compiler; qf selects the target's
@@ -197,7 +235,8 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 	if maxWindow > 0 && to.Sub(from) > maxWindow {
 		return nil, errf("ceiling_exceeded", 422, "timeRange window exceeds LLMOBS_QUERY_MAX_WINDOW")
 	}
-	preds = append(preds, "start_time >= "+b.ph(from)+" AND start_time < "+b.ph(to))
+	anchor := qf.timeAnchor
+	preds = append(preds, anchor+" >= "+b.ph(from)+" AND "+anchor+" < "+b.ph(to))
 
 	// filters
 	condCount := 0
@@ -240,6 +279,23 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 		return nil, errf("condition_limit_exceeded", 422, "more than %d conditions", maxConditions)
 	}
 
+	// scores semi-join (QD-9, §8) — only reaches here on target=traces (spans and
+	// scores reject a scores block earlier). Each entry is ANDed at the trace
+	// level: for each, the trace must have ≥1 matching score.
+	if raw, ok := doc["scores"].([]any); ok {
+		for _, e := range raw {
+			cond, ok := e.(map[string]any)
+			if !ok {
+				return nil, errf("schema_invalid", 400, "score condition must be an object")
+			}
+			pred, err := compileScoreCondition(b, projectID, cond)
+			if err != nil {
+				return nil, err
+			}
+			preds = append(preds, pred)
+		}
+	}
+
 	order, err := compileOrder(doc, qf)
 	if err != nil {
 		return nil, err
@@ -264,10 +320,111 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 		if cfp != fp {
 			return nil, errf("schema_invalid", 400, "cursor does not match query (filters/timeRange/orderBy changed)")
 		}
-		preds = append(preds, "(start_time < "+b.ph(st)+" OR (start_time = "+b.ph(st)+" AND id > "+b.ph(id)+"))")
+		preds = append(preds, "("+anchor+" < "+b.ph(st)+" OR ("+anchor+" = "+b.ph(st)+" AND id > "+b.ph(id)+"))")
 	}
 
 	return &Compiled{Where: strings.Join(preds, " AND "), Args: b.args, Order: order, Limit: limit, Fingerprint: fp}, nil
+}
+
+// compileScoreCondition builds one QD-9 EXISTS predicate: the trace has ≥1 score
+// (subject_type='trace', subject_id=trace_proj.id) matching the condition.
+// data_type fully determines the operator set, matched column, and value JSON
+// type — no inference, no coercion (04-score.md §2, DSL §8).
+func compileScoreCondition(b *builder, projectID string, c map[string]any) (string, error) {
+	name, _ := c["name"].(string)
+	if name == "" {
+		return "", errf("schema_invalid", 400, "score condition requires name")
+	}
+	dataType, _ := c["data_type"].(string)
+	op, _ := c["op"].(string)
+
+	inner := []string{
+		"sc.project_id = " + b.ph(projectID),
+		"sc.subject_type = " + b.ph("trace"),
+		"sc.subject_id = trace_proj.id",
+		"sc.is_deleted = false",
+		"sc.name = " + b.ph(name),
+		"sc.data_type = " + b.ph(dataType),
+	}
+	if src, ok := c["source"].(string); ok && src != "" {
+		inner = append(inner, "sc.source = "+b.ph(src))
+	}
+
+	switch dataType {
+	case "numeric":
+		if !scoreNumericOp(op) {
+			return "", errf("score_type_mismatch", 422, "op %q not allowed for numeric score", op)
+		}
+		n, ok := c["value"].(float64)
+		if !ok {
+			return "", errf("score_type_mismatch", 422, "numeric score value must be a number")
+		}
+		inner = append(inner, "sc.value_numeric "+scoreCmp(op)+" "+b.ph(n))
+	case "categorical":
+		switch op {
+		case "eq", "neq":
+			s, ok := c["value"].(string)
+			if !ok {
+				return "", errf("score_type_mismatch", 422, "categorical score value must be a string")
+			}
+			cmp := "="
+			if op == "neq" {
+				cmp = "IS DISTINCT FROM"
+			}
+			inner = append(inner, "sc.value_string "+cmp+" "+b.ph(s))
+		case "in":
+			arr, ok := c["value"].([]any)
+			if !ok {
+				return "", errf("score_type_mismatch", 422, "categorical 'in' value must be an array of strings")
+			}
+			if len(arr) > maxInList {
+				return "", errf("schema_invalid", 400, "in-list exceeds %d", maxInList)
+			}
+			vals := make([]any, len(arr))
+			for i, v := range arr {
+				s, ok := v.(string)
+				if !ok {
+					return "", errf("score_type_mismatch", 422, "categorical 'in' value must be an array of strings")
+				}
+				vals[i] = s
+			}
+			inner = append(inner, "sc.value_string = ANY("+b.ph(vals)+")")
+		default:
+			return "", errf("score_type_mismatch", 422, "op %q not allowed for categorical score", op)
+		}
+	case "boolean":
+		if op != "eq" {
+			return "", errf("score_type_mismatch", 422, "op %q not allowed for boolean score", op)
+		}
+		bv, ok := c["value"].(bool)
+		if !ok {
+			return "", errf("score_type_mismatch", 422, "boolean score value must be a boolean")
+		}
+		n := 0.0
+		if bv {
+			n = 1.0
+		}
+		inner = append(inner, "sc.value_numeric = "+b.ph(n))
+	default:
+		return "", errf("score_type_mismatch", 422, "score data_type must be numeric|categorical|boolean")
+	}
+
+	return "EXISTS (SELECT 1 FROM scores sc WHERE " + strings.Join(inner, " AND ") + ")", nil
+}
+
+func scoreNumericOp(op string) bool {
+	switch op {
+	case "eq", "neq", "gt", "gte", "lt", "lte":
+		return true
+	}
+	return false
+}
+
+func scoreCmp(op string) string {
+	if op == "neq" {
+		return "IS DISTINCT FROM"
+	}
+	return sqlCmp(op)
 }
 
 // queryFingerprint hashes the query shape that a cursor sequence must hold fixed:
@@ -277,6 +434,7 @@ func queryFingerprint(doc map[string]any) string {
 		"filters":   doc["filters"],
 		"timeRange": doc["timeRange"],
 		"orderBy":   doc["orderBy"],
+		"scores":    doc["scores"],
 	}
 	b, _ := json.Marshal(shape)
 	sum := sha256.Sum256(b)
@@ -441,7 +599,7 @@ func compileOrder(doc map[string]any, qf queryFields) (string, error) {
 		parts = append(parts, "id ASC")
 		return strings.Join(parts, ", "), nil
 	}
-	return "start_time DESC, id ASC", nil
+	return qf.timeAnchor + " DESC, id ASC", nil
 }
 
 // helpers

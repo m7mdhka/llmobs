@@ -143,4 +143,55 @@ assert isinstance(t.get('status'),dict), 'trace status shape'
 print('   assert OK: traces target returned synthesized trace, span_count=%d, env=%s'%(t['span_count'],t['environment']))
 " || { echo "FAIL: traces target"; echo "$TRESP"; exit 1; }
 
+echo ">> e2e-lite: machine API-key issuance + score write + scores target + QD-9 semi-join"
+NOW="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+CK="$(mktemp)"
+LGN="$(curl -sf -c "$CK" -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"admin-dev-password"}' ${API}/auth/login)"
+XCSRF="$(printf '%s' "$LGN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["csrf_token"])')"
+# Issue a scoped machine key (admin session + CSRF); secret shown once.
+KEYRESP="$(curl -sf -b "$CK" -X POST -H "X-CSRF-Token: $XCSRF" -H "Content-Type: application/json" \
+  -d '{"scopes":["scores:write","query"]}' ${API}/v1alpha1/api-keys)"
+SCKEY="$(printf '%s' "$KEYRESP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["secret"])')"
+SCPK="$(printf '%s' "$KEYRESP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["public_key"])')"
+[ -n "$SCKEY" ] || { echo "FAIL: key issuance"; echo "$KEYRESP"; exit 1; }
+# Write a score against the trace, via the issued key (not the bootstrap key).
+SCORE="{\"id\":\"score-e2e-1\",\"subject_type\":\"trace\",\"subject_id\":\"$TRACE_ID\",\"name\":\"hallucination\",\"data_type\":\"numeric\",\"value_numeric\":0.2,\"source\":\"eval\",\"timestamp\":\"$NOW\",\"environment\":\"production\"}"
+WR="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $SCKEY" -H "Content-Type: application/json" -d "$SCORE" ${API}/v1alpha1/scores)"
+[ "$WR" = "201" ] || { echo "FAIL: score write returned $WR"; exit 1; }
+# A wrong-typed value is rejected 422 (no coercion, LM-3).
+BADSCORE="{\"id\":\"bad\",\"subject_type\":\"trace\",\"subject_id\":\"$TRACE_ID\",\"name\":\"x\",\"data_type\":\"numeric\",\"value_numeric\":\"0.2\",\"source\":\"eval\",\"timestamp\":\"$NOW\",\"environment\":\"production\"}"
+BADWR="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $SCKEY" -H "Content-Type: application/json" -d "$BADSCORE" ${API}/v1alpha1/scores)"
+[ "$BADWR" = "422" ] || { echo "FAIL: wrong-typed score returned $BADWR (want 422)"; exit 1; }
+# Scores target returns the written score.
+SCQ="{\"target\":\"scores\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"filters\":[{\"field\":\"name\",\"op\":\"eq\",\"value\":\"hallucination\"}]}"
+SCRESP="$(curl -sf -H "Authorization: Bearer $SCKEY" -H "Content-Type: application/json" -d "$SCQ" ${API}/v1alpha1/query || true)"
+printf '%s' "$SCRESP" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)['data']
+assert any(s['id']=='score-e2e-1' and s['subject_id']=='$TRACE_ID' for s in d), 'score not found via scores target'
+" || { echo "FAIL: scores target"; echo "$SCRESP"; exit 1; }
+# QD-9 semi-join: traces having a score hallucination < 0.5 includes our trace.
+QD9="{\"target\":\"traces\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"scores\":[{\"name\":\"hallucination\",\"data_type\":\"numeric\",\"op\":\"lt\",\"value\":0.5}]}"
+QDRESP="$(curl -sf -H "Authorization: Bearer $SCKEY" -H "Content-Type: application/json" -d "$QD9" ${API}/v1alpha1/query || true)"
+printf '%s' "$QDRESP" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)['data']
+assert any(t['id']=='$TRACE_ID' for t in d), 'QD-9 semi-join did not select the scored trace'
+" || { echo "FAIL: QD-9 semi-join"; echo "$QDRESP"; exit 1; }
+# A tighter threshold excludes it (score 0.2 is NOT < 0.1).
+QD9B="{\"target\":\"traces\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"scores\":[{\"name\":\"hallucination\",\"data_type\":\"numeric\",\"op\":\"lt\",\"value\":0.1}]}"
+QDB="$(curl -sf -H "Authorization: Bearer $SCKEY" -H "Content-Type: application/json" -d "$QD9B" ${API}/v1alpha1/query || true)"
+printf '%s' "$QDB" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)['data']
+assert not any(t['id']=='$TRACE_ID' for t in d), 'QD-9 semi-join wrongly selected the trace at a tighter threshold'
+" || { echo "FAIL: QD-9 negative case"; echo "$QDB"; exit 1; }
+# Revoke the key; a subsequent write is rejected.
+curl -sf -b "$CK" -X DELETE -H "X-CSRF-Token: $XCSRF" ${API}/v1alpha1/api-keys/${SCPK} >/dev/null || { echo "FAIL: revoke"; exit 1; }
+REVWR="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $SCKEY" -H "Content-Type: application/json" -d "$SCORE" ${API}/v1alpha1/scores)"
+[ "$REVWR" = "403" ] || { echo "FAIL: revoked key still works ($REVWR)"; exit 1; }
+rm -f "$CK"
+echo "   assert OK: key issued, score written (201) + bad-score 422, scores target, QD-9 +/- , revocation 403"
+
 echo "E2E_LITE_OK"

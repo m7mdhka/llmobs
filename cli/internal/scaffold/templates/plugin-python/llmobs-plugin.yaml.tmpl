@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../api/schemas/manifest/v1alpha1/llmobs-plugin.schema.json
+apiVersion: llmobs.dev/v1alpha1
+kind: Plugin
+metadata:
+  id: {{.ID}}
+  name: {{.Name}}
+  version: 0.1.0
+  description: A Python plugin backend scaffolded from templates/plugin-python.
+spec:
+  capabilities: []          # add: ingest | query | write | events | jobs | kv | secrets | store | surface
+  permissions: []           # fine-grained data scopes, e.g. traces:read.metadata
+  backend:
+    url: http://{{.Slug}}:8080
+    healthPath: /plugin/v1/health
+    infoPath: /plugin/v1/info

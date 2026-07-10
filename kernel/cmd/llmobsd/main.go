@@ -106,9 +106,12 @@ func run() error {
 	}
 	registry.NewHandler(regSource).Register(apiMux)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
-	// The web shell (static SPA) is served at the origin root; more-specific API
-	// prefixes above win, and unknown non-asset paths fall back to index.html.
-	apiMux.Handle("/", webui.Handler(cfg.WebUIDir))
+	// The web shell (static SPA) is served at the origin root unless the kernel is
+	// run headless (LLMOBS_SERVE_SHELL=false) — then / is API-only, for Kenji's
+	// own-UI deployment. More-specific API prefixes above always win.
+	if cfg.ServeShell {
+		apiMux.Handle("/", webui.Handler(cfg.WebUIDir))
+	}
 	apiServer := &http.Server{Addr: cfg.APIAddr, Handler: auth.Middleware(apiMux), ReadHeaderTimeout: 5 * time.Second}
 
 	// OTLP HTTP receiver server.

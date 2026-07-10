@@ -191,7 +191,21 @@ assert not any(t['id']=='$TRACE_ID' for t in d), 'QD-9 semi-join wrongly selecte
 curl -sf -b "$CK" -X DELETE -H "X-CSRF-Token: $XCSRF" ${API}/v1alpha1/api-keys/${SCPK} >/dev/null || { echo "FAIL: revoke"; exit 1; }
 REVWR="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $SCKEY" -H "Content-Type: application/json" -d "$SCORE" ${API}/v1alpha1/scores)"
 [ "$REVWR" = "403" ] || { echo "FAIL: revoked key still works ($REVWR)"; exit 1; }
+# GDPR erasure: delete the user-42 span, provably (audit id + count).
+ERASE="$(curl -sf -b "$CK" -X DELETE "${API}/v1alpha1/spans?user_id=user-42&from=${FROM}&to=${TO}" || true)"
+printf '%s' "$ERASE" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+assert d.get('erased',0) >= 1, 'expected >=1 span erased'
+assert d.get('audit_id','').startswith('era_'), 'missing erasure audit id'
+print('   erased %d span(s), audit=%s'%(d['erased'], d['audit_id']))
+" || { echo "FAIL: erasure"; echo "$ERASE"; exit 1; }
+# The erased user's spans are gone.
+LEFT="$(curl -sf -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d "{\"target\":\"spans\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"filters\":[{\"field\":\"user_id\",\"op\":\"eq\",\"value\":\"user-42\"}]}" \
+  ${API}/v1alpha1/query | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("data",[])))')"
+[ "$LEFT" = "0" ] || { echo "FAIL: erased user still has $LEFT spans"; exit 1; }
 rm -f "$CK"
-echo "   assert OK: key issued, score written (201) + bad-score 422, scores target, QD-9 +/- , revocation 403"
+echo "   assert OK: key issued, score written (201) + bad-score 422, scores target, QD-9 +/- , revocation 403, GDPR erasure + audit"
 
 echo "E2E_LITE_OK"

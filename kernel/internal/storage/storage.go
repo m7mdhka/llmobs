@@ -64,6 +64,10 @@ type TelemetryStore interface {
 	QueryScores(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error)
 	// GetScore returns a folded score doc by id, or nil if absent/deleted.
 	GetScore(ctx context.Context, projectID, id string) (json.RawMessage, error)
+
+	// EraseSpans hard-deletes spans for (projectID, userID) within [from, to) and
+	// records an erasure audit row; returns the count erased and the audit id.
+	EraseSpans(ctx context.Context, projectID, userID, actor string, from, to time.Time) (int, string, error)
 }
 
 // MergeConformer is the normative-merge surface an adapter exposes to the

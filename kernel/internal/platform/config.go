@@ -29,6 +29,7 @@ type Config struct {
 	CookieSecure      bool   `json:"cookie_secure"`    // set Secure on session cookies
 	WebUIDir          string `json:"webui_dir"`        // dir of the built shell; empty => placeholder
 	PluginDir         string `json:"plugin_dir"`       // dir of dev-mode plugins; empty => none
+	ServeShell        bool   `json:"serve_shell"`      // serve the web shell at /; false => headless (API only)
 }
 
 func defaults() Config {
@@ -42,6 +43,7 @@ func defaults() Config {
 		MigrateOnBoot:    true,
 		BootstrapProject: "default",
 		QueryMaxWindow:   "720h",
+		ServeShell:       true,
 	}
 }
 
@@ -73,6 +75,7 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("PLUGIN_DIR"), &c.PluginDir)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
+	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)
 	return c, nil
 }
 

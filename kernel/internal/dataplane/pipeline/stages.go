@@ -10,6 +10,7 @@ import (
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
+	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/redact"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
@@ -111,12 +112,69 @@ func eventTS(in normalize.SpanInput) time.Time {
 	return time.Unix(0, int64(n)).UTC()
 }
 
-// redact: no-op pass-through. Interface + config present.
-// TODO(issue): redaction runs before persistence (D10); not built in B1.
-type redactStage struct{}
+// redact: scrub PII/secret patterns from payload fields BEFORE persist (#11).
+// Scope: input, output, and span-event attribute VALUES — never keys, never
+// promoted fields. Redaction is observable: llmobs.dq.redacted carries per-rule
+// counts. The redactor is resolved per event (today a global default; the
+// per-project seam is `resolve`).
+type redactStage struct {
+	resolve func(projectID string) *redact.Redactor
+}
 
-func (s *redactStage) Name() string                                  { return "redact" }
-func (s *redactStage) Process(_ context.Context, _ *Ingestion) error { return nil }
+func (s *redactStage) Name() string { return "redact" }
+func (s *redactStage) Process(_ context.Context, ing *Ingestion) error {
+	if s.resolve == nil {
+		return nil
+	}
+	r := s.resolve(ing.Identity.ProjectID)
+	if r == nil || !r.Enabled() {
+		return nil
+	}
+	for _, ev := range ing.Events {
+		redactEvent(r, ev.Payload)
+	}
+	return nil
+}
+
+// payloadKeys are the span fields whose VALUES may carry prompt/response content.
+var payloadKeys = []string{"input", "output"}
+
+func redactEvent(r *redact.Redactor, payload map[string]any) {
+	counts := map[string]int{}
+	for _, k := range payloadKeys {
+		if v, ok := payload[k]; ok {
+			red, c := r.RedactValue(v)
+			payload[k] = red
+			for rk, rv := range c {
+				counts[rk] += rv
+			}
+		}
+	}
+	// Span-event attribute values (message content lives here).
+	if events, ok := payload["events"].([]any); ok {
+		for _, e := range events {
+			em, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			if attrs, ok := em["attributes"].(map[string]any); ok {
+				red, c := r.RedactValue(attrs)
+				em["attributes"] = red
+				for rk, rv := range c {
+					counts[rk] += rv
+				}
+			}
+		}
+	}
+	if redact.TotalCount(counts) > 0 {
+		attrs, ok := payload["attributes"].(map[string]any)
+		if !ok {
+			attrs = map[string]any{}
+			payload["attributes"] = attrs
+		}
+		attrs["llmobs.dq.redacted"] = redact.CountsToSignal(counts)
+	}
+}
 
 // sample: no-op pass-through.
 // TODO(issue): per-project sampling; not built in B1.

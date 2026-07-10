@@ -4,12 +4,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/pipeline"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/query"
+	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/redact"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/registry"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/webui"
@@ -94,7 +97,10 @@ func run() error {
 	store := postgres.NewStore(pool)
 	reg := normalize.Default()
 	skew, _ := time.ParseDuration(cfg.ClockSkewThreshold)
-	pipe := pipeline.New(pool, store, reg, pipeline.NoopBus{}, pipeline.Config{Metrics: mreg, SkewThreshold: skew})
+	presets, customRules := parseRedactConfig(cfg.RedactPresets, cfg.RedactCustomJSON)
+	pipe := pipeline.New(pool, store, reg, pipeline.NoopBus{}, pipeline.Config{
+		Metrics: mreg, SkewThreshold: skew, RedactPresets: presets, RedactCustom: customRules,
+	})
 
 	receiver := ingest.NewReceiver(pipe, log, 4096, 4)
 	receiver.Start(rootCtx)
@@ -179,6 +185,24 @@ func run() error {
 	receiver.Stop()
 	log.Info("stopped")
 	return nil
+}
+
+// parseRedactConfig turns the CSV preset list ("none" disables) and the JSON
+// custom-rule array into the pipeline's redaction config.
+func parseRedactConfig(presetsCSV, customJSON string) ([]string, []redact.CustomRule) {
+	var presets []string
+	if p := strings.TrimSpace(presetsCSV); p != "" && p != "none" {
+		for _, name := range strings.Split(p, ",") {
+			if n := strings.TrimSpace(name); n != "" {
+				presets = append(presets, n)
+			}
+		}
+	}
+	var custom []redact.CustomRule
+	if strings.TrimSpace(customJSON) != "" {
+		_ = json.Unmarshal([]byte(customJSON), &custom)
+	}
+	return presets, custom
 }
 
 func serve(s *http.Server, log *slog.Logger, name string, errCh chan<- error) {

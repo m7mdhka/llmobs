@@ -23,9 +23,11 @@ const singletons = {
   react: { singleton: true, requiredVersion: pkg.dependencies.react, eager: true },
   "react-dom": { singleton: true, requiredVersion: pkg.dependencies["react-dom"], eager: true },
   "react-router-dom": { singleton: true, requiredVersion: pkg.dependencies["react-router-dom"], eager: true },
-  "@llmobs/tokens": { singleton: true, eager: true },
-  "@llmobs/ui": { singleton: true, eager: true },
-  "@llmobs/plugin-sdk": { singleton: true, eager: true },
+  // Workspace packages use "workspace:*" specifiers, which are not semver ranges;
+  // requiredVersion:false tells MF to treat them as a plain singleton by name.
+  "@llmobs/tokens": { singleton: true, eager: true, requiredVersion: false },
+  "@llmobs/ui": { singleton: true, eager: true, requiredVersion: false },
+  "@llmobs/plugin-sdk": { singleton: true, eager: true, requiredVersion: false },
 };
 
 export default {

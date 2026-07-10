@@ -18,9 +18,9 @@ const shared = {
   react: { singleton: true, requiredVersion: pkg.dependencies.react },
   "react-dom": { singleton: true, requiredVersion: pkg.dependencies["react-dom"] },
   "react-router-dom": { singleton: true, requiredVersion: pkg.dependencies["react-router-dom"] },
-  "@llmobs/plugin-sdk": { singleton: true },
-  "@llmobs/ui": { singleton: true },
-  "@llmobs/tokens": { singleton: true },
+  "@llmobs/plugin-sdk": { singleton: true, requiredVersion: false },
+  "@llmobs/ui": { singleton: true, requiredVersion: false },
+  "@llmobs/tokens": { singleton: true, requiredVersion: false },
 };
 
 export default {

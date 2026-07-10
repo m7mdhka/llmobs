@@ -59,7 +59,10 @@ export class DataClient {
   constructor(private readonly cfg: ClientConfig) {}
 
   private get doFetch(): typeof fetch {
-    return this.cfg.fetchImpl ?? fetch;
+    // Native fetch must be invoked with `this === window`; a bare reference
+    // (`const f = fetch; f()`) throws "Illegal invocation". Bind to globalThis.
+    const f = this.cfg.fetchImpl ?? globalThis.fetch;
+    return f.bind(globalThis);
   }
 
   private headers(json: boolean): Record<string, string> {

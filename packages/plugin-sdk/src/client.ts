@@ -98,4 +98,32 @@ export class DataClient {
   traceTree(traceId: string, signal?: AbortSignal): Promise<TraceTree> {
     return this.request<TraceTree>("GET", `/v1alpha1/traces/${encodeURIComponent(traceId)}/tree`, undefined, signal);
   }
+
+  /**
+   * Write a score (the `write` primitive) — closes the read-traces→write-scores
+   * loop through the SDK. Requires the scores:write scope (enforced by the kernel
+   * intersection). Returns the created score's id.
+   */
+  writeScore(score: ScoreInput, signal?: AbortSignal): Promise<{ id: string }> {
+    return this.request<{ id: string }>("POST", "/v1alpha1/scores", score, signal);
+  }
+}
+
+// ScoreInput is the wire shape of a score write (LM-3/LM-8): exactly one value_*
+// field is set, matching data_type. subject_type is a kernel type
+// (span|trace|session) or a namespaced `ns/name`.
+export interface ScoreInput {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  name: string;
+  data_type: "numeric" | "categorical" | "boolean";
+  value_numeric?: number;
+  value_categorical?: string;
+  value_boolean?: boolean;
+  source: string;
+  timestamp: string;
+  environment: string;
+  comment?: string;
+  [k: string]: unknown;
 }

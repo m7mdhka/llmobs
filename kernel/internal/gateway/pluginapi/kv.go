@@ -123,11 +123,16 @@ func (h *KV) list(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 
 func decode(w http.ResponseWriter, r *http.Request) (kvReq, bool) {
 	var req kvReq
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
 		return req, false
 	}
 	return req, true
+}
+
+// decodeJSON reads a capped JSON body into out.
+func decodeJSON(w http.ResponseWriter, r *http.Request, out any) error {
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(out)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

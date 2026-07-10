@@ -35,6 +35,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/webui"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
+	"github.com/m7mdhka/llmobs/kernel/internal/platform/secretbox"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 	"github.com/m7mdhka/llmobs/kernel/pkg/brand"
 )
@@ -185,6 +186,14 @@ func run() error {
 	// token; each is capability-gated and tenant-scoped from the assertion.
 	pluginAuthz := pluginauth.New(pluginSigner, nil)
 	pluginapi.NewKV(pluginAuthz, postgres.NewPluginKV(pool)).Register(apiMux, "/v1alpha1/plugin/kv")
+	// Secrets: envelope-encrypted with the kernel master key (in-memory for lite,
+	// ADR-0023). The plaintext is never persisted/logged and returned only to the
+	// owning plugin's authenticated delivery.
+	secretBox, err := secretbox.NewRandom()
+	if err != nil {
+		return err
+	}
+	pluginapi.NewSecrets(pluginAuthz, postgres.NewPluginSecrets(pool), secretBox, log).Register(apiMux, "/v1alpha1/plugin/secrets")
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is

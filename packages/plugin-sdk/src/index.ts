@@ -7,15 +7,19 @@
 export { LLMObsPluginProvider, useLLMObs } from "./context.js";
 export type { LLMObsContextValue, ProviderConfig } from "./context.js";
 
-// Data primitive: `query`.
-export { useQuery, useTraces, useTrace } from "./hooks.js";
-export type { AsyncState, TracesParams } from "./hooks.js";
+// Data primitives: `query` + `write` (score writes).
+export { useQuery, useTraces, useTrace, useWriteScore } from "./hooks.js";
+export type { AsyncState, TracesParams, MutationState } from "./hooks.js";
 export { DataClient, SdkError } from "./client.js";
-export type { QueryResponse, TraceTree, ClientConfig, QueryInput } from "./client.js";
+export type { QueryResponse, TraceTree, ClientConfig, QueryInput, ScoreInput } from "./client.js";
 
 // Data primitive: `kv` (per-plugin, tenant-scoped key/value; backend double-token).
 export { KvClient } from "./kv.js";
 export type { KvConfig } from "./kv.js";
+
+// Data primitive: `secrets` (per-plugin encrypted store; backend double-token).
+export { SecretsClient } from "./secrets.js";
+export type { SecretsConfig, SecretInfo } from "./secrets.js";
 
 // Manifest types (mirror of the JSON Schema contract).
 export type {

@@ -1,26 +1,18 @@
 // Dynamic Module Federation remote loading. The shell registers plugin remotes
 // from the registry at runtime and loads their exposed module on demand. The
 // host hardcodes no remotes — this is the whole point of the platform.
-import { init, loadRemote } from "@module-federation/enhanced/runtime";
+import { registerRemotes, loadRemote } from "@module-federation/enhanced/runtime";
 import type { ComponentType } from "react";
 import type { RegistryPlugin } from "./api.js";
 
-let initialized = false;
-
-/** Register the registry's plugins as MF remotes. Idempotent per set. */
+/** Register the registry's plugins as MF remotes at runtime. The host runtime is
+ *  already initialized by the ModuleFederationPlugin (build time); we only add
+ *  remotes here — using init() would reset the host. `force` lets re-registration
+ *  update an existing remote. */
 export function registerPlugins(plugins: RegistryPlugin[]): void {
-  const remotes = plugins.map((p) => ({
-    name: p.remoteName,
-    entry: p.remoteEntry,
-    // Subresource integrity, when the registry pins it.
-    ...(p.integrity ? { entryGlobalName: p.remoteName } : {}),
-  }));
-  if (!initialized) {
-    init({ name: "shell", remotes });
-    initialized = true;
-  } else {
-    // enhanced runtime supports re-registration via init merge.
-    init({ name: "shell", remotes });
+  const remotes = plugins.map((p) => ({ name: p.remoteName, entry: p.remoteEntry }));
+  if (remotes.length > 0) {
+    registerRemotes(remotes, { force: true });
   }
 }
 

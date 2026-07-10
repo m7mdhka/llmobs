@@ -36,11 +36,22 @@ printf '%s' "$ROOT_HTML" | grep -q '<div id="root">' \
 # SPA fallback: an unknown client route returns the app HTML, not a 404.
 DEEP_STATUS="$(curl -s -o /dev/null -w '%{http_code}' ${API}/traces)"
 [ "$DEEP_STATUS" = "200" ] || { echo "FAIL: SPA deep-link /traces returned $DEEP_STATUS"; exit 1; }
-# The registry endpoint the shell's loader consumes exists and is empty in D2.
+# The registry endpoint the shell's loader consumes advertises the baked-in
+# tracing plugin, and its MF remoteEntry is served with an SRI integrity hash.
 REG="$(curl -sf ${API}/v1alpha1/registry/plugins || true)"
-printf '%s' "$REG" | python3 -c 'import sys,json;d=json.load(sys.stdin);assert d.get("plugins")==[]' \
-  || { echo "FAIL: registry endpoint not empty-list"; echo "$REG"; exit 1; }
-echo "   assert OK: shell HTML at /, SPA fallback, empty registry"
+ENTRY="$(printf '%s' "$REG" | python3 -c '
+import sys,json
+d=json.load(sys.stdin)["plugins"]
+tr=[p for p in d if p["id"]=="llmobs/tracing"]
+assert tr, "tracing plugin not advertised by registry"
+p=tr[0]
+assert p["integrity"].startswith("sha384-"), p.get("integrity")
+assert any(n["path"]=="/traces" for n in p["nav"]), "missing /traces nav"
+print(p["remoteEntry"])
+')" || { echo "FAIL: registry did not advertise the tracing plugin"; echo "$REG"; exit 1; }
+RE_STATUS="$(curl -s -o /dev/null -w '%{http_code}' ${API}${ENTRY})"
+[ "$RE_STATUS" = "200" ] || { echo "FAIL: plugin remoteEntry $ENTRY returned $RE_STATUS"; exit 1; }
+echo "   assert OK: shell HTML at /, SPA fallback, tracing plugin advertised + remoteEntry served"
 
 echo ">> e2e-lite: auth smoke (login -> me -> logout)"
 COOKIES="$(mktemp)"

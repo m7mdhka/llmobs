@@ -256,8 +256,9 @@ type publishStage struct{ bus EventBus }
 
 func (s *publishStage) Name() string { return "publish" }
 func (s *publishStage) Process(ctx context.Context, ing *Ingestion) error {
+	proj := ing.Identity.ProjectID
 	for _, ev := range ing.Events {
-		_ = s.bus.Publish(ctx, "span.ingested", ev.EventID)
+		_ = s.bus.Publish(ctx, "span.ingested", proj, ev.EventID)
 	}
 	return nil
 }

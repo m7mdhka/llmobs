@@ -25,6 +25,10 @@ export type { SecretsConfig, SecretInfo } from "./secrets.js";
 export { StoreClient } from "./store.js";
 export type { StoreConfig, StoreQuery, StoreFilter, StoreOp, StorePage } from "./store.js";
 
+// Data primitive: `events` (durable subscribe; at-least-once; backend double-token).
+export { EventsClient } from "./events.js";
+export type { EventsConfig, Event } from "./events.js";
+
 // Manifest types (mirror of the JSON Schema contract).
 export type {
   PluginManifest,

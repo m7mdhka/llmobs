@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/m7mdhka/llmobs/kernel/internal/bus"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
@@ -118,10 +119,13 @@ func run() error {
 	if ttl, terr := time.ParseDuration(cfg.ErasureSuppressionTTL); terr == nil {
 		store.SetErasureSuppressionTTL(ttl) // G3 tombstone retention
 	}
+	// Durable event bus (H6): Postgres-backed for lite (no new infra). Publishes
+	// span.ingested from the pipeline; plugins subscribe via poll/ack.
+	eventBus := bus.New(postgres.NewEventStore(pool), int64(cfg.EventBacklogCap))
 	reg := normalize.Default()
 	skew, _ := time.ParseDuration(cfg.ClockSkewThreshold)
 	presets, customRules := parseRedactConfig(cfg.RedactPresets, cfg.RedactCustomJSON)
-	pipe := pipeline.New(pool, store, reg, pipeline.NoopBus{}, pipeline.Config{
+	pipe := pipeline.New(pool, store, reg, eventBus, pipeline.Config{
 		Metrics: mreg, SkewThreshold: skew, RedactPresets: presets, RedactCustom: customRules,
 		Signal: persistHealth,
 	})
@@ -199,6 +203,8 @@ func run() error {
 	pluginStore := postgres.NewPluginStore(pool)
 	sup.SetProvisioner(pluginStore)
 	pluginapi.NewStore(pluginAuthz, pluginStore).Register(apiMux, "/v1alpha1/plugin/store")
+	// Events: durable subscribe (poll/ack) over the Postgres event bus.
+	pluginapi.NewEvents(pluginAuthz, eventBus).Register(apiMux, "/v1alpha1/plugin/events")
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is

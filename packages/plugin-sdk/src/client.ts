@@ -75,7 +75,21 @@ export interface ClientConfig {
   frontendToken?: FrontendTokenProvider;
 }
 
-export class DataClient {
+/**
+ * LLMObsClient is the data surface the hooks depend on — the narrow interface a
+ * plugin surface actually calls. DataClient implements it against the gateway; the
+ * testing utilities (@llmobs/plugin-sdk/testing) implement it with a fake so a plugin
+ * author can unit-test hooks without a running kernel.
+ */
+export interface LLMObsClient {
+  query<T = unknown>(doc: QueryInput, signal?: AbortSignal): Promise<QueryResponse<T>>;
+  traceTree(traceId: string, signal?: AbortSignal): Promise<TraceTree>;
+  writeScore(score: ScoreInput, signal?: AbortSignal): Promise<{ id: string }>;
+  getSettings(signal?: AbortSignal): Promise<SettingsView>;
+  setSettings(values: Record<string, unknown>, signal?: AbortSignal): Promise<void>;
+}
+
+export class DataClient implements LLMObsClient {
   constructor(private readonly cfg: ClientConfig) {}
 
   private get doFetch(): typeof fetch {

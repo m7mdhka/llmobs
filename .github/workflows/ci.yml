@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - run: pnpm install --frozen-lockfile --filter @llmobs/shell... --filter @llmobs/plugin-tracing...
+      - run: pnpm install --frozen-lockfile --filter @llmobs/shell... --filter @llmobs/plugin-tracing... --filter @llmobs/plugin-sdk...
       - name: Build design system, SDK, shell (MF host), and tracing plugin (MF remote)
         run: |
           pnpm --filter @llmobs/query-client build
@@ -67,6 +67,8 @@ jobs:
           pnpm --filter @llmobs/plugin-sdk build
           NODE_ENV=production pnpm --filter @llmobs/shell build
           NODE_ENV=production pnpm --filter @llmobs/plugin-tracing build
+      - name: SDK unit tests (hooks + @llmobs/plugin-sdk/testing utilities)
+        run: pnpm --filter @llmobs/plugin-sdk test
       - name: Typecheck the shell + SDK + tracing plugin
         run: |
           pnpm --filter @llmobs/shell typecheck

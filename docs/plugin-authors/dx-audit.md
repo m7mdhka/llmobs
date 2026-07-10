@@ -24,10 +24,11 @@ what is still a gap. Written to find the gaps, not to claim the loop is done.
 
 ## What is still a gap (the honest cries-and-quits list)
 
-- **No `make dev` hot-reload loop.** There is no one-command "kernel + shell + my
-  plugin, reloading on save, against seeded data." An author still wires up
-  compose + the loadgen by hand. This is the single biggest remaining DX gap — the
-  inner loop is create-then-figure-it-out, not create-then-iterate.
+- **`make dev` hot-reload loop — CLOSED (J3).** One command brings up the kernel +
+  shell + a plugin, all wired against seeded Postgres, with the frontend hot-reloading
+  on save (the plugin runs its own rspack dev server; the kernel's dev-remote override
+  points the registry at it). A backend restart re-handshakes (dev-restart-not-a-fault,
+  H2). See [dev-loop.md](dev-loop.md). The inner loop is now create-then-iterate.
 - **Frontend-direct plugin identity — CLOSED (J1).** A *pure-frontend* plugin now
   has a confined-by-default identity: the shell mints a per-plugin, per-session,
   short-TTL **frontend token** (`plugin-grant ∩ session ∩ project`) and the SDK data
@@ -38,21 +39,23 @@ what is still a gap. Written to find the gaps, not to claim the loop is done.
   *trusted-at-install* (see [trust-model.md](trust-model.md)); untrusted logic still
   belongs in a backend. This unblocks B2/B4/B9-style frontend persistence (J2 builds
   the kv-backed settings store on top of this identity).
-- **SchemaForm is not built.** The manifest declares `settingsSchema`, but the
-  `packages/schema-form` renderer that would turn it into a settings tab is still
-  designed-not-built. A settings UX is therefore hand-rolled.
-- **No SDK test utilities for hooks.** There is no provided harness to unit-test a
-  plugin frontend's `useQuery`/`useWriteScore` against a fake client; authors mock
-  by hand.
+- **SchemaForm — CLOSED (J2).** `packages/schema-form` renders a plugin's
+  `settingsSchema` as a settings tab, validated client + kernel side, with `writeOnly`
+  secrets that are never rendered back. See [settings.md](settings.md).
+- **SDK test utilities — CLOSED (J3).** `@llmobs/plugin-sdk/testing` ships a
+  `createFakeClient` + `TestLLMObsProvider` so an author unit-tests
+  `useQuery`/`useTraces`/`useWriteScore`/`useSettings` against a fake client, no kernel
+  running — the SDK's own hooks are self-tested this way. See [dev-loop.md](dev-loop.md).
 - **CLI is `create`-only.** `init/dev/apply/render/bundle/backup` remain
   skeletons; `plugin create` is the one real command this arc.
 
-## Priority read
+## Priority read (post-Arc-J)
 
-The primitives are real and a backend plugin is genuinely buildable today
-(see the Set-B re-color: B3/B6/B7/B8/B10 are first-class). The DX gap is now the
-binding constraint, not the platform. Of the two highest-leverage items called out
-in the original audit, **frontend-direct plugin identity is now closed (J1)** —
-pure-frontend plugins have a least-privilege identity — which unblocks the
-persistence stories B2/B4/B9. The remaining highest-leverage item is **`make dev`
-hot-reload** (J3), which fixes the inner loop for everyone.
+The primitives are real, a backend plugin is genuinely buildable, and — after Arc J —
+the binding DX constraints the original audit named are closed: **frontend-direct
+plugin identity (J1)**, **SchemaForm settings (J2)**, and the **`make dev` inner loop
++ SDK test utilities (J3)**. A pure-frontend plugin can now be created, run with hot
+reload, persist settings (secrets included), and be unit-tested — without standing up
+a backend or reading kernel code. The remaining gaps are the still-skeleton CLI verbs
+(`init/dev/apply/render/bundle/backup`) and breadth (one first-party plugin is wired
+end-to-end for `make dev`); both are named, not glossed.

@@ -1,0 +1,23 @@
+# Dev profile: JUST Postgres, published to the host, for `make dev` (J3).
+# `make dev` runs the kernel with `go run` and the shell + plugin with their rspack
+# dev servers locally — so only the database needs to be containerized. The kernel
+# reaches it at localhost:5432.
+#   docker compose -f deploy/compose/dev.yaml up -d
+name: llmobs-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: llmobs
+      POSTGRES_PASSWORD: llmobs
+      POSTGRES_DB: llmobs
+    ports:
+      # Published to the host so the locally-run kernel can connect. Override the
+      # host port with LLMOBS_DEV_PG_PORT if 5432 is taken.
+      - "${LLMOBS_DEV_PG_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llmobs -d llmobs"]
+      interval: 2s
+      timeout: 3s
+      retries: 40

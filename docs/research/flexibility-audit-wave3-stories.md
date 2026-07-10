@@ -3,11 +3,14 @@
 Evaluated against `develop` @ `abc0156` (2026-07-10). **No code was changed** — this
 is a read-only audit. Every verdict cites `file:line` from the current tree.
 
-> **Set-B re-color after Arc H (Tier-3) — the honesty statement.** See the
-> "Set-B re-color" section at the bottom: what Arc H's eight PRs actually moved,
-> and — more importantly — the three stories that **stayed yellow** and why. A
-> table with no yellows would mean the audit went easy on itself; these yellows are
-> the post-Tier-3 roadmap.
+> **Set-B re-color, Arc H then Arc J — the honesty statement.** See the two
+> "Set-B re-color" sections at the bottom. Arc H's eight PRs moved most of Set B and
+> left **three yellows** (B2/B4/B9), all held by the deferred frontend-direct
+> identity + DX. **Arc J closed those three** (J1 frontend token, J2 schema-form
+> settings, J3 `make dev` + SDK test utils) — Set B is now all 🟢 — and names the
+> **new** yellows honestly (frontend origin isolation, per-user settings, CLI
+> breadth, coarse RBAC). A table with no yellows would mean the audit went easy on
+> itself; the yellows just moved up a level.
 
 Wave 3 has two story sets:
 - **Set A — deployment-under-fire** (A1–A10): the platform under operational stress.
@@ -359,3 +362,39 @@ Re-evaluated against `develop` post-H1–H8. Vocabulary as before: 🟢 first-cl
 - **No 🔴 remain, and no 🟢 was granted a story an author can't actually build.**
   The distinction B1 draws — platform-enables vs plugin-is-written — is kept
   explicit rather than counted as a win.
+
+## Set-B re-color after Arc J — closing the three yellows
+
+Arc J set out to flip exactly the three yellows Arc H named (B2, B4, B9), all held by
+the same missing pieces: a *pure-frontend* plugin could not act with a confined
+identity, could not persist settings, and could not be developed comfortably. Three
+PRs closed them in dependency order.
+
+| # | Story | Was | Now | What moved it — and what's still short |
+|---|-------|:--:|:--:|----------------------------------------|
+| B2 | Cost-budget alerts | 🟡 | 🟢 | The backend alert engine was already buildable (`events` + `jobs` + `secrets` from Arc H); the **frontend config tab** — thresholds, the alert channel key — is now first-class: it persists through the **settings store (J2)** under the **frontend token (J1)**, with the channel key a `writeOnly` secret that is never rendered back. Both halves are real. |
+| B4 | Configurable dashboards | 🟡 | 🟢\* | A pure-frontend dashboard now persists its layout through the settings store (J2) with no backend — the exact gap that held it. \*Honest caveat: settings are **project-shared and admin-write** in the coarse model, so a *shared/team* dashboard is 🟢 today; a viewer saving their **own** per-user layout needs per-user settings (a named future dimension, ADR-0024), not a new primitive. |
+| B9 | Settings schema-form tab | 🟡 | 🟢 | **The headline flip.** `packages/schema-form` (J2) renders the manifest's `settingsSchema` as a settings tab, validated client + kernel side; values persist via the frontend-token-scoped settings store; `writeOnly` fields are encrypted and never returned. Declaration → rendering → persistence → secrets, all real. Dogfooded by `plugins/tracing`. |
+
+### What moved in Arc J, and the new yellows
+
+- **The two Arc-H unlocks landed.** The H8 re-color named the post-Tier-3 roadmap as
+  *frontend-direct identity* + *`make dev` hot-reload*. J1 built the first (as
+  least-privilege-by-default, honestly **not** a hostile-frontend boundary — see
+  [trust-model.md](../plugin-authors/trust-model.md)); J3 built the second (kernel +
+  shell + plugin, frontend HMR via a dev-remote override) and added the missing **SDK
+  test utilities**. The DX gaps the audit called binding are closed.
+- **All ten Set-B stories are now 🟢** (B1's substrate + B2–B10). No 🟡, no 🔴 remain.
+- **The new yellows are honestly named, not hidden:**
+  - **Frontend origin isolation** (🟡, security posture) — the frontend token is
+    least-privilege-by-default, not a boundary; a hostile same-origin frontend can
+    bypass it. A real boundary (sandboxed cross-origin iframe + postMessage) is
+    specified and triggered by the first *untrusted* third-party frontend plugin
+    (ADR-0004 amendment / ADR-0023 deferred). Until then: untrusted logic → a backend.
+  - **Per-user settings** (🟡, feature dimension) — settings are project-shared +
+    admin-write today; per-user config (B4's per-viewer layout) is a future dimension.
+  - **CLI breadth** (🟡, DX) — `init/dev/apply/render/bundle/backup` remain skeletons;
+    `plugin create` is the one real verb. And `make dev` wires **one** first-party
+    plugin end-to-end; the mechanism is general, the orchestration lists one.
+  - **Coarse RBAC** (🟡, pre-existing) — admin vs viewer only; finer roles are the
+    standing #21 seam that both J2's write-authority gate and the supervisor lean on.

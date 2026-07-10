@@ -26,6 +26,20 @@ type DirSource struct {
 	plugins []Plugin
 	// dist roots keyed by the URL segment used in the asset path.
 	assetRoots map[string]string
+	// devRemotes maps plugin id -> a live dev-server remoteEntry URL (J3). When set
+	// for a plugin, the registry advertises that URL instead of the built dist and
+	// drops the integrity hash — so `make dev` hot-reloads the plugin's frontend from
+	// its own rspack dev server. Empty in production.
+	devRemotes map[string]string
+}
+
+// DirOption configures a DirSource before its initial scan.
+type DirOption func(*DirSource)
+
+// WithDevRemotes overrides plugin remoteEntry URLs with live dev-server URLs (J3),
+// keyed by plugin id. Used only by `make dev`; never in production.
+func WithDevRemotes(m map[string]string) DirOption {
+	return func(ds *DirSource) { ds.devRemotes = m }
 }
 
 // loaded manifest shape (subset of the JSON Schema).
@@ -59,8 +73,11 @@ type manifestDoc struct {
 
 // NewDirSource scans root once at construction. assetPrefix is the URL path the
 // asset file server is mounted at (e.g. "/v1alpha1/registry/plugins").
-func NewDirSource(root, assetPrefix string, log *slog.Logger) *DirSource {
+func NewDirSource(root, assetPrefix string, log *slog.Logger, opts ...DirOption) *DirSource {
 	ds := &DirSource{root: root, baseURL: strings.TrimRight(assetPrefix, "/"), log: log, assetRoots: map[string]string{}}
+	for _, o := range opts {
+		o(ds)
+	}
 	ds.scan()
 	return ds
 }
@@ -87,7 +104,11 @@ func (ds *DirSource) scan() {
 			continue
 		}
 		ds.plugins = append(ds.plugins, p)
-		ds.assetRoots[assetKey(p.ID)] = distRoot
+		// A dev-remote plugin has no local dist to serve (distRoot==""); its assets
+		// come from its own dev server, so don't register an asset root for it.
+		if distRoot != "" {
+			ds.assetRoots[assetKey(p.ID)] = distRoot
+		}
 		ds.log.Info("registered plugin", "id", p.ID, "version", p.Version, "nav", len(p.Nav))
 	}
 }
@@ -108,12 +129,6 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 	if m.Spec.Frontend == nil {
 		return Plugin{}, "", fmt.Errorf("plugin %s has no frontend surface", m.Metadata.ID)
 	}
-	distRoot := filepath.Join(dir, "dist")
-	entryFile := filepath.Join(distRoot, m.Spec.Frontend.Entry)
-	integrity, err := fileIntegrity(entryFile)
-	if err != nil {
-		return Plugin{}, "", fmt.Errorf("hash remote entry: %w", err)
-	}
 	key := assetKey(m.Metadata.ID)
 	nav := make([]NavEntry, 0, len(m.Spec.Frontend.Nav))
 	for _, n := range m.Spec.Frontend.Nav {
@@ -123,13 +138,28 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 		ID:            m.Metadata.ID,
 		Name:          m.Metadata.Name,
 		Version:       m.Metadata.Version,
-		RemoteEntry:   ds.baseURL + "/" + key + "/assets/" + m.Spec.Frontend.Entry,
 		RemoteName:    m.Spec.Frontend.RemoteName,
 		ExposedModule: m.Spec.Frontend.ExposedModule,
-		Integrity:     integrity,
 		Nav:           nav,
 		Capabilities:  m.Spec.Capabilities,
 		Permissions:   m.Spec.Permissions,
+	}
+	// Dev hot-reload (J3): when a live dev-server remoteEntry is configured for this
+	// plugin, advertise it directly and DON'T read the built dist (it may not exist —
+	// the frontend is served by its own rspack dev server). Integrity is dropped (the
+	// dev bundle changes every save). Production leaves devRemotes empty and takes the
+	// built-dist path below.
+	distRoot := ""
+	if url, ok := ds.devRemotes[m.Metadata.ID]; ok && url != "" {
+		p.RemoteEntry = url
+	} else {
+		distRoot = filepath.Join(dir, "dist")
+		integrity, err := fileIntegrity(filepath.Join(distRoot, m.Spec.Frontend.Entry))
+		if err != nil {
+			return Plugin{}, "", fmt.Errorf("hash remote entry: %w", err)
+		}
+		p.RemoteEntry = ds.baseURL + "/" + key + "/assets/" + m.Spec.Frontend.Entry
+		p.Integrity = integrity
 	}
 	// Load the settings JSON Schema (J2) if declared. The path is manifest-relative
 	// and must stay inside the plugin dir (no traversal). A missing/invalid schema

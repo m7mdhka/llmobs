@@ -178,7 +178,12 @@ func run() error {
 	auth.RegisterKeys(apiMux)
 	var regSource registry.Source = registry.EmptySource{}
 	if cfg.PluginDir != "" {
-		regSource = registry.NewDirSource(cfg.PluginDir, "/v1alpha1/registry/plugins", log)
+		var opts []registry.DirOption
+		if dev := parseDevRemotes(cfg.DevPluginRemotes); len(dev) > 0 {
+			log.Warn("dev plugin remotes active — advertising live dev-server URLs (not for production)", "remotes", dev)
+			opts = append(opts, registry.WithDevRemotes(dev))
+		}
+		regSource = registry.NewDirSource(cfg.PluginDir, "/v1alpha1/registry/plugins", log, opts...)
 	}
 	registry.NewHandler(regSource).Register(apiMux)
 	// Supervisor ops API: snapshot readable by any authenticated caller; disable/
@@ -389,6 +394,24 @@ func parseRedactConfig(presetsCSV, customJSON string) ([]string, []redact.Custom
 		_ = json.Unmarshal([]byte(customJSON), &custom)
 	}
 	return presets, custom
+}
+
+// parseDevRemotes parses the J3 `make dev` override "id=url,id=url" into a map of
+// plugin id -> live dev-server remoteEntry URL. Malformed entries are skipped.
+func parseDevRemotes(spec string) map[string]string {
+	out := map[string]string{}
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, url, ok := strings.Cut(part, "=")
+		id, url = strings.TrimSpace(id), strings.TrimSpace(url)
+		if ok && id != "" && url != "" {
+			out[id] = url
+		}
+	}
+	return out
 }
 
 func serve(s *http.Server, log *slog.Logger, name string, errCh chan<- error) {

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "rspack build",
+    "dev": "rspack serve",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {

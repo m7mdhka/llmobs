@@ -73,6 +73,8 @@ build: ## Build kernel, cli, web, and packages
 test: ## Run unit tests (Go + TS)
 	@echo ">> test: kernel go test (incl. spec-parsed merge vectors + fixture conformance)"
 	@cd kernel && go test ./...
+	@echo ">> test: cli (incl. plugin-create scaffold)"
+	@cd cli && go test ./...
 	@echo ">> test: (TS) turbo run test — wired as packages land"
 
 .PHONY: plugin-python-test

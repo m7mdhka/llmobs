@@ -3,6 +3,12 @@
 Evaluated against `develop` @ `abc0156` (2026-07-10). **No code was changed** — this
 is a read-only audit. Every verdict cites `file:line` from the current tree.
 
+> **Set-B re-color after Arc H (Tier-3) — the honesty statement.** See the
+> "Set-B re-color" section at the bottom: what Arc H's eight PRs actually moved,
+> and — more importantly — the three stories that **stayed yellow** and why. A
+> table with no yellows would mean the audit went easy on itself; these yellows are
+> the post-Tier-3 roadmap.
+
 Wave 3 has two story sets:
 - **Set A — deployment-under-fire** (A1–A10): the platform under operational stress.
 - **Set B — plugin-author's-life** (B1–B10): what a plugin author can actually build.
@@ -313,3 +319,43 @@ without touching infrastructure. (The alternative — generalizing `write`+`quer
 but that stretches two primitives whose current contract is explicitly canonical-only, so
 a distinct `store` primitive is the cleaner, more honest evolution.) Seven stands for the
 consumer surface; the platform needs an eighth to host producers of their own data.
+
+---
+
+## Set-B re-color after Arc H (Tier-3)
+
+Re-evaluated against `develop` post-H1–H8. Vocabulary as before: 🟢 first-class /
+🟡 works-but-not-first-class or blocked-on-DX / 🟠 needs-contract-evolution /
+🔴 resists. Written adversarially — looking for what is still short.
+
+| # | Story | Was | Now | What moved it — and what's still short |
+|---|-------|:--:|:--:|----------------------------------------|
+| B1 | n8n compat poller | 🟡→🟠 | 🟢\* | `ingest` cold-path (H7a, service-token-only) + `jobs` poller (H6b) + `secrets` (H4b) — and **langfuse-compat proves the exact shape end-to-end in CI**. \*The *platform* demonstrably supports it; n8n-the-plugin is a poller someone writes, not a platform gap. |
+| B2 | Cost-budget alerts | 🟡 | 🟡 | `events` subscribe (H6a) + `jobs` + `secrets` + `kv` all real → buildable as a **backend** plugin. Stays yellow: the frontend config tab's persistence needs frontend-direct `kv`, which is deferred. |
+| B3 | LLM-judge eval | 🟡 | 🟢 | `events` (subscribe) + `query` + `secrets` (judge key) + `jobs` + **score-write in the SDK** (H4b) — the read→judge→write loop is real. (Topic coverage: `span.ingested` today; `trace.completed` additive.) |
+| B4 | Configurable dashboards | 🟡 | 🟡 | `query` + `kv` are real, but `kv` is backend-double-token only. A **pure-frontend** dashboard can't persist layouts without a backend — the frontend-direct path is deferred. |
+| B5 | Prompt management | 🟠 | 🟢 | **`store` (H5)** gives versioned, queryable, plugin-owned prompt entities — the data model gap is closed. (Frontend-direct CRUD UX is the same deferred frontend path.) |
+| B6 | External-provider key | 🟡 | 🟢 | `secrets` (H4b), with the tested "never returned by any read" prove-the-negative. First-class. |
+| B7 | Plugin-owned relational entities | 🔴 | 🟢 | **The headline flip.** `store` (H5) — the eighth primitive — provides plugin-owned, tenant-scoped, queryable collections, with the cross-tenant isolation prove-the-negative. (No joins by design, R4 — a plugin denormalizes.) |
+| B8 | Nightly aggregation job | 🟠 | 🟢 | `jobs` (H6b) schedule + `query` read + **`store` as the derived sink** (H5) — the derived-storage gap that made this 🟠 is closed. The job runs under a bounded system identity (H6b pin 1). |
+| B9 | Settings schema-form tab | 🟡 | 🟡 | `settingsSchema` declared + `kv` real, but the **`packages/schema-form` renderer is still designed-not-built**, and settings persistence from a frontend tab needs the deferred frontend-direct path. |
+| B10 | Real-time span annotation | 🟡 | 🟢 | `events` subscribe (H6a) is the trigger (was designed-not-built) + annotation-as-score via score-write (H4b). (Filters `span.ingested` client-side; annotates alongside spans, never mutates — by design.) |
+
+### What moved, and what deliberately didn't
+
+- **The eighth primitive resolved the hardest gaps.** `store` (H5) flipped the only
+  🔴 (B7) to 🟢 and resolved B5/B8 — plugin-owned structured data was the one thing
+  the other primitives could not paper over, and it's now real and isolation-proven.
+- **Backend plugins are first-class; six stories are 🟢.** B3, B6, B7, B8, B10 (and
+  B1's substrate) are buildable end-to-end today, each on a tested primitive.
+- **Three stories stayed 🟡 — B2, B4, B9 — for one shared reason.** All three are
+  *pure-frontend* plugins that need to persist config/settings, and Arc H
+  deliberately deferred the **frontend-direct plugin identity** (a shell-minted,
+  per-plugin assertion) — so `kv`/`store`/`settings` are backend-double-token only
+  (the honest H4a deferral). B9 additionally waits on the `schema-form` renderer.
+  These yellows are not oversights; they are the **post-Tier-3 roadmap**, and the
+  DX audit names the two unlocks (frontend-direct identity + `make dev`
+  hot-reload).
+- **No 🔴 remain, and no 🟢 was granted a story an author can't actually build.**
+  The distinction B1 draws — platform-enables vs plugin-is-written — is kept
+  explicit rather than counted as a win.

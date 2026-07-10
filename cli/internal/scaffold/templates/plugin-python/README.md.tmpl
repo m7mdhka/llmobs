@@ -1,0 +1,10 @@
+# {{.Name}}
+
+A Python plugin (`{{.ID}}`) scaffolded by `llmobs plugin create`. Born-identical to
+`templates/plugin-python`; see docs/plugin-authors/.
+
+- `backend/app.py` — your FastAPI service (handshake + health implemented).
+- `backend/llmobs_plugin.py` — the protocol library (verify assertions, kernel client).
+- `llmobs-plugin.yaml` — declare capabilities/permissions/backend.
+
+Run the offline contract check: `cd backend && python3 interop_test.py`.

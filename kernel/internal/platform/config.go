@@ -51,6 +51,10 @@ type Config struct {
 	// plugins toward running (handshake + health probe). Only the leader replica
 	// supervises (pg advisory lock).
 	PluginReconcileInterval string `json:"plugin_reconcile_interval"` // e.g. "15s"
+	// EventBacklogCap: max unacked events a plugin subscriber may fall behind on a
+	// (project, topic) before the overflow is dead-lettered (H6) — bounds a dead
+	// subscriber so it cannot pin the event log.
+	EventBacklogCap int `json:"event_backlog_cap"`
 }
 
 func defaults() Config {
@@ -73,6 +77,7 @@ func defaults() Config {
 		PersistUnhealthyThreshold: 5,
 		ErasureSuppressionTTL:     "720h",
 		PluginReconcileInterval:   "15s",
+		EventBacklogCap:           10000,
 	}
 }
 
@@ -111,6 +116,7 @@ func LoadConfig() (Config, error) {
 	envInt(brand.Env("PERSIST_UNHEALTHY_THRESHOLD"), &c.PersistUnhealthyThreshold)
 	envStr(brand.Env("ERASURE_SUPPRESSION_TTL"), &c.ErasureSuppressionTTL)
 	envStr(brand.Env("PLUGIN_RECONCILE_INTERVAL"), &c.PluginReconcileInterval)
+	envInt(brand.Env("EVENT_BACKLOG_CAP"), &c.EventBacklogCap)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)

@@ -149,6 +149,35 @@ toward the disable cap — the same structural treatment as the in-memory-key
 ruling: absence/incompleteness is a re-do trigger; only a genuine failure faults.
 This did not force any change to R1's shared-schema model.
 
+## `events` — durable bus, Postgres-backed for lite (H6, ruled)
+
+The `events` primitive needs a durable, at-least-once bus with replay. **We do NOT
+add Redis to the lite profile** — a mandatory Redis dependency would break the
+founding lite promise (single-dependency, Postgres-only, one `docker compose up`),
+the exact "Langfuse v3 added ClickHouse+Redis and self-hosters revolted" mistake we
+designed against. Instead:
+
+- **Lite backend = Postgres** (`internal/bus` over `postgres.EventStore`): a durable
+  event log (`plugin_event_log`, monotonic id = offset), per-subscriber consumer
+  offsets, and a dead-letter table. **Durability is the log + offsets** —
+  LISTEN/NOTIFY is only a latency wake, never the correctness mechanism, so a
+  subscriber that was down replays from its offset on the next poll regardless.
+  H6 adds **zero** new infrastructure to the lite stack.
+- **Scale backend = Redis Streams**, deferred (issue), behind the **same `bus.Store`
+  interface** — parallel to Postgres-lite/ClickHouse-scale for storage. The
+  plugin-facing contract (poll/ack, at-least-once, replay, DLQ, backlog cap) is
+  identical across backends because it lives in `bus.Bus`, not the backend. The
+  contract test runs against the interface, so it validates any backend.
+- **Delivery contract:** at-least-once (event `id` is the idempotency key; the SDK
+  dedupes), replay-from-offset after downtime, and a per-(plugin, project, topic)
+  **backlog cap** that dead-letters a too-far-behind subscriber's overflow so one
+  dead subscriber cannot pin the log. Poll does not advance the offset; only ack
+  does. Topics for H6: `span.ingested` (published from the pipeline);
+  `score.created`/`trace.completed` are additive on the same bus.
+
+Postgres LISTEN/NOTIFY was **not** insufficient for the at-least-once + replay
+contract — because that contract rests on the durable log, not on notifications.
+
 ## Consequences
 
 - The manifest gains an additive `spec.backend` (url, healthPath, infoPath,

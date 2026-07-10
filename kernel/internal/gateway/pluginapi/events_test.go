@@ -1,0 +1,125 @@
+package pluginapi
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/bus"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginauth"
+	"github.com/m7mdhka/llmobs/kernel/pkg/pluginproto"
+)
+
+func eventsSetup(t *testing.T) (*Events, *bus.Bus, *plugintoken.Signer) {
+	t.Helper()
+	signer, err := plugintoken.NewSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bus.New(bus.NewMemStore(), 1000)
+	return NewEvents(pluginauth.New(signer, nil), b), b, signer
+}
+
+func evTokens(t *testing.T, signer *plugintoken.Signer, pluginID, projectID string, caps ...string) (svc, asr string) {
+	t.Helper()
+	now := time.Now()
+	if len(caps) == 0 {
+		caps = []string{perm.CapMarker("events")}
+	}
+	svc, _, err := signer.MintServiceToken(pluginID, caps, now, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asr, _, err = signer.MintIdentityAssertion(pluginID, "u", projectID, "s", perm.All(), now, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return svc, asr
+}
+
+func callEvents(h *Events, op, svc, asr, body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, "/v1alpha1/plugin/events/"+op, strings.NewReader(body))
+	if svc != "" {
+		r.Header.Set("X-LLMObs-Service-Token", svc)
+	}
+	if asr != "" {
+		r.Header.Set(pluginproto.IdentityAssertionHeader, asr)
+	}
+	mux := http.NewServeMux()
+	h.Register(mux, "/v1alpha1/plugin/events")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, r)
+	return rec
+}
+
+// TestEventsPollAckTenantScoped drives the events primitive end-to-end through the
+// HTTP + double-token path: a plugin polls only its own tenant's events, and ack
+// advances its offset. A different project sees nothing.
+func TestEventsPollAckTenantScoped(t *testing.T) {
+	h, b, signer := eventsSetup(t)
+	ctx := context.Background()
+	_ = b.Publish(ctx, "span.ingested", "projA", "a1")
+	_ = b.Publish(ctx, "span.ingested", "projB", "b1")
+
+	aSvc, aAsr := evTokens(t, signer, "acme/w", "projA")
+	rec := callEvents(h, "poll", aSvc, aAsr, `{"topics":["span.ingested"],"max":10}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("poll: %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Events []bus.Delivered `json:"events"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Events) != 1 || out.Events[0].SubjectID != "a1" {
+		t.Fatalf("projA must see only its own event: %+v", out.Events)
+	}
+
+	// projB subscriber sees only b1 — tenant isolation through the handler.
+	bSvc, bAsr := evTokens(t, signer, "acme/w", "projB")
+	brec := callEvents(h, "poll", bSvc, bAsr, `{"topics":["span.ingested"],"max":10}`)
+	if strings.Contains(brec.Body.String(), "a1") {
+		t.Fatalf("projB leaked projA's event: %s", brec.Body.String())
+	}
+
+	// Ack projA up to the event id → no re-delivery.
+	ackBody := `{"topic":"span.ingested","offset":` + itoaID(out.Events[0].ID) + `}`
+	if arec := callEvents(h, "ack", aSvc, aAsr, ackBody); arec.Code != http.StatusNoContent {
+		t.Fatalf("ack: %d %s", arec.Code, arec.Body.String())
+	}
+	empty := callEvents(h, "poll", aSvc, aAsr, `{"topics":["span.ingested"],"max":10}`)
+	var out2 struct {
+		Events []bus.Delivered `json:"events"`
+	}
+	_ = json.Unmarshal(empty.Body.Bytes(), &out2)
+	if len(out2.Events) != 0 {
+		t.Fatalf("acked events must not re-deliver, got %d", len(out2.Events))
+	}
+}
+
+func TestEventsRequireCapability(t *testing.T) {
+	h, _, signer := eventsSetup(t)
+	svc, asr := evTokens(t, signer, "acme/w", "projA", perm.CapMarker("kv")) // no cap:events
+	if rec := callEvents(h, "poll", svc, asr, `{"topics":["span.ingested"]}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("missing cap:events must be 403, got %d", rec.Code)
+	}
+}
+
+func itoaID(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}

@@ -72,6 +72,11 @@ SQ_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -b "$COOKIES" -H "Content-Ty
 BAD_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"wrong"}' ${API}/auth/login)"
 [ "$BAD_STATUS" = "401" ] || { echo "FAIL: bad login returned $BAD_STATUS (want 401)"; exit 1; }
+# Supervisor ops API (H2): the snapshot is readable by an authenticated session and
+# returns a plugins array (empty in the baked image — no backend plugins installed).
+SUP="$(curl -sf -b "$COOKIES" ${API}/v1alpha1/supervisor/plugins || true)"
+printf '%s' "$SUP" | python3 -c 'import sys,json;assert isinstance(json.load(sys.stdin).get("plugins"),list)' \
+  || { echo "FAIL: supervisor snapshot shape"; echo "$SUP"; exit 1; }
 curl -sf -b "$COOKIES" -X POST -H "X-CSRF-Token: $CSRF" ${API}/auth/logout >/dev/null || { echo "FAIL: logout"; exit 1; }
 rm -f "$COOKIES"
 echo "   assert OK: login/me/session-query/bad-login/logout"

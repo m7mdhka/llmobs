@@ -73,6 +73,27 @@ kernel package a plugin backend imports — the dogfood rule).
   aggregations in v1, no joins ever.** A noun-about-data primitive, not a second
   query engine. (H5)
 
+## Lite-profile property — in-memory signing key (H2)
+
+The kernel's Ed25519 signing key is generated **in memory at boot** and not
+persisted (persisted/shared keys are the deferred JWKS/rotation pass). Therefore a
+**kernel restart rotates the key and invalidates every live service token**. This
+is by design harmless because tokens are short-TTL, but it imposes one rule on the
+supervisor state machine:
+
+> A service token that no longer verifies after a kernel restart is a **normal
+> re-handshake trigger, NOT a plugin fault**. It must not count toward the
+> exponential-backoff-to-`disabled` cap — otherwise a routine kernel restart would
+> march every healthy plugin toward auto-disable.
+
+The supervisor satisfies this structurally: "no valid token" routes to the
+handshake path, and only a handshake/health *failure* increments the fault
+counter. After a restart the supervisor's in-memory state is empty, so it
+re-handshakes every plugin and returns the healthy ones to `running` with zero
+faults (proved by `TestKernelRestartReHandshakeIsNotAFault`). This is a known,
+accepted lite-profile property; the scale profile's persisted/shared key removes
+it (deferred).
+
 ## Consequences
 
 - The manifest gains an additive `spec.backend` (url, healthPath, infoPath,

@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,27 +34,39 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var existingDoc []byte
-	var existingTS time.Time
+	var existingDoc, existingProv []byte
 	err = tx.QueryRow(ctx,
-		`SELECT doc, event_ts FROM spans WHERE project_id=$1 AND id=$2 FOR UPDATE`,
-		projectID, id).Scan(&existingDoc, &existingTS)
+		`SELECT doc, provenance FROM spans WHERE project_id=$1 AND id=$2 FOR UPDATE`,
+		projectID, id).Scan(&existingDoc, &existingProv)
 
-	var merged map[string]any
+	state := map[string]any{}
+	prov := Provenance{}
 	switch err {
 	case nil:
-		var state map[string]any
 		if uerr := json.Unmarshal(existingDoc, &state); uerr != nil {
 			return uerr
 		}
-		merged = mergeInto(state, existingTS, ev)
+		if len(existingProv) > 0 {
+			if uerr := json.Unmarshal(existingProv, &prov); uerr != nil {
+				return uerr
+			}
+		}
 	case pgx.ErrNoRows:
-		merged = Fold("span", []Event{ev})
+		// first sight of this id: fold against empty state+provenance
 	default:
 		return err
 	}
 
+	// Per-field provenance fold under the row lock (issue #17): incoming event
+	// folds against per-group stamps, so out-of-order updates converge to the
+	// same state as the ordered Fold.
+	merged, newProv := MergeEvent("span", state, prov, ev)
+
 	doc, err := json.Marshal(merged)
+	if err != nil {
+		return err
+	}
+	provJSON, err := json.Marshal(newProv)
 	if err != nil {
 		return err
 	}
@@ -65,9 +76,9 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 			start_time, end_time, status_code, environment, release, version, session_id, user_id,
 			model, provider, total_cost, attributes, usage_details, cost_details,
 			provided_usage_details, provided_cost_details, prompt_ref, pricing_snapshot_ref,
-			is_deleted, event_ts, doc, updated_at)
+			is_deleted, event_ts, doc, provenance, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-			$19,$20,$21,$22,$23,$24,$25,$26,$27,$28, now())
+			$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29, now())
 		ON CONFLICT (project_id, id) DO UPDATE SET
 			trace_id=EXCLUDED.trace_id, parent_span_id=EXCLUDED.parent_span_id, kind=EXCLUDED.kind,
 			raw_kind=EXCLUDED.raw_kind, name=EXCLUDED.name, start_time=EXCLUDED.start_time,
@@ -78,17 +89,19 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 			cost_details=EXCLUDED.cost_details, provided_usage_details=EXCLUDED.provided_usage_details,
 			provided_cost_details=EXCLUDED.provided_cost_details, prompt_ref=EXCLUDED.prompt_ref,
 			pricing_snapshot_ref=EXCLUDED.pricing_snapshot_ref, is_deleted=EXCLUDED.is_deleted,
-			event_ts=EXCLUDED.event_ts, doc=EXCLUDED.doc, updated_at=now()`,
+			event_ts=EXCLUDED.event_ts, doc=EXCLUDED.doc, provenance=EXCLUDED.provenance, updated_at=now()`,
 		projectID, id, c.traceID, c.parentSpanID, c.kind, c.rawKind, c.name,
 		c.startTime, c.endTime, c.statusCode, c.environment, c.release, c.version, c.sessionID, c.userID,
 		c.model, c.provider, c.totalCost, c.attributes, c.usageDetails, c.costDetails,
 		c.providedUsageDetails, c.providedCostDetails, c.promptRef, c.pricingSnapshotRef,
-		c.isDeleted, ev.EventTS.UTC(), doc)
+		c.isDeleted, ev.EventTS.UTC(), doc, provJSON)
 	if err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
+
+// (merge-on-write folds via MergeEvent above; see merge.go for the fold.)
 
 // GetSpan returns the folded span document by id, or nil if absent/deleted.
 func (s *Store) GetSpan(ctx context.Context, projectID, id string) (json.RawMessage, error) {
@@ -100,6 +113,27 @@ func (s *Store) GetSpan(ctx context.Context, projectID, id string) (json.RawMess
 		return nil, nil
 	}
 	return doc, err
+}
+
+// GetTraceSpans returns all non-deleted spans of a trace (folded docs). Ordered
+// by (start_time, id) so the tree assembler produces a deterministic preorder.
+func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([]json.RawMessage, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT doc FROM spans WHERE project_id=$1 AND trace_id=$2 AND is_deleted=false
+		 ORDER BY start_time ASC, id ASC`, projectID, traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []json.RawMessage
+	for rows.Next() {
+		var doc []byte
+		if err := rows.Scan(&doc); err != nil {
+			return nil, err
+		}
+		out = append(out, doc)
+	}
+	return out, rows.Err()
 }
 
 // QuerySpans runs a compiled spans query and returns the folded documents.
@@ -128,33 +162,4 @@ func (s *Store) QuerySpans(ctx context.Context, where string, args []any, order 
 		out = append(out, doc)
 	}
 	return out, rows.Err()
-}
-
-// mergeInto folds the current state (as a prior event at its event_ts) with a new
-// event — the read-modify-write merge. The stored state's control fields
-// (is_deleted, dq) are not re-folded as payload; dq history is preserved.
-func mergeInto(state map[string]any, stateTS time.Time, ev Event) map[string]any {
-	priorDQ, _ := state["dq"].(map[string]any)
-	payload := map[string]any{}
-	for k, v := range state {
-		if k == "is_deleted" || k == "dq" {
-			continue
-		}
-		payload[k] = v
-	}
-	prior := Event{Op: OpUpsert, EventTS: stateTS, EventID: "", Payload: payload}
-	merged := Fold("span", []Event{prior, ev})
-	if len(priorDQ) > 0 {
-		newDQ, _ := merged["dq"].(map[string]any)
-		if newDQ == nil {
-			newDQ = map[string]any{}
-		}
-		for k, v := range priorDQ {
-			if _, ok := newDQ[k]; !ok {
-				newDQ[k] = v
-			}
-		}
-		merged["dq"] = newDQ
-	}
-	return merged
 }

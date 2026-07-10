@@ -12,6 +12,7 @@ export LLMOBS_BOOTSTRAP_API_KEY="$KEY"
 # Overridable host ports (defaults dodge common local conflicts; CI can override).
 export LLMOBS_API_PORT="${LLMOBS_API_PORT:-18080}"
 export LLMOBS_OTLP_PORT="${LLMOBS_OTLP_PORT:-14318}"
+export LLMOBS_OTLP_GRPC_PORT="${LLMOBS_OTLP_GRPC_PORT:-14317}"
 API="http://localhost:${LLMOBS_API_PORT}"
 
 cleanup() { "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true; }
@@ -60,6 +61,24 @@ assert gen.get("provider")=="openai", gen.get("provider")
 assert gen.get("environment")=="production", gen.get("environment")
 assert gen.get("provided_usage_details",{}).get("input")==812
 print("   assert OK: kinds="+",".join(sorted(kinds))+", generation model/usage/env verified")
+'
+
+echo ">> e2e-lite: fetching the trace tree"
+TREE="$(curl -sf -H "Authorization: Bearer $KEY" ${API}/v1alpha1/traces/${TRACE_ID}/tree || true)"
+printf '%s' "$TREE" | python3 -c '
+import sys,json
+t=json.load(sys.stdin)
+trace=t["trace"]; spans=t["spans"]
+assert trace["id"], "trace.id missing"
+assert len(spans)>=4, f"expected >=4 spans in tree, got {len(spans)}"
+# tree order: every non-root parent appears before its children
+pos={s["id"]:i for i,s in enumerate(spans)}
+for i,s in enumerate(spans):
+    p=s.get("parent_span_id") or ""
+    if p and p in pos:
+        assert pos[p] < i, "child precedes parent: "+s["id"]
+assert trace.get("start_time"), "trace.start_time not synthesized"
+print(f"   assert OK: tree of {len(spans)} spans in parent-before-child order, trace synthesized")
 '
 
 echo "E2E_LITE_OK"

@@ -83,9 +83,9 @@ sentinel, 0022 time authority. Open/closed issues checked via
 | Demand item | Votes | Maps to LLMObs decision/issue |
 |-------------|------:|-------------------------------|
 | Full-text search #939 | 75 | ADR-0019 (Query DSL) + ADR-0020 (indexed attribute keys); issue #16 (ClickHouse adapter + DSL→SQL) |
-| Embedding observation type #1021 | 91 | **ADR-0018 span taxonomy** — add `embedding` span kind (additive, D8) |
-| Session-level scores #2728 / #6777 | 35/29 | **ADR-0017 score model** — score grain (trace/observation/session) |
-| Categorical/boolean judge scores #4965 | 29 | **ADR-0017 score model** — non-numeric score types |
+| Embedding observation type #1021 | 91 | ✅ **shipped** — `embedding` is in the frozen `kind` enum (LM-1 / ADR-0018, `span.schema.json`) |
+| Session-level scores #2728 / #6777 | 35/29 | ✅ **shipped** — `session` subject type live in the score write path (ADR-0017, PR-E2) |
+| Categorical/boolean judge scores #4965 | 29 | ✅ **shipped** — `categorical`/`boolean` `data_type` live in the score write path (ADR-0017, PR-E2) |
 | Multi-modal / base64 content #3004/#6017 | 64/71 | **ADR-0018 payload shapes** + blob primitive (needs contract evolution) |
 | Multi-shard ClickHouse #5021 | 34 | **issue #16** (scale ClickHouse storage adapter) |
 | Webhooks / event subscribe #1033 | 109 | **issue #14** (durable event bus, Redis/NATS) + `events` primitive |
@@ -116,19 +116,22 @@ vocabulary: 🟢 supported / 🟡 designed-not-built / 🟠 needs-contract-evolu
 |---|------------------|------:|----------------|:---:|-------------------|
 | 1 | n8n tracing #4397 | 381 | community/first-party **compat plugin** (own endpoint, cold path) | 🟢 | The #1 ask Langfuse *structurally cannot* ship; our plugin model makes it a container+manifest — flagship proof of the thesis. |
 | 2 | Webhooks / event subscribe #1033 | 109 | **kernel** event bus + `events`/`surface` primitives | 🟡 | issue #14 designed; a durable bus + subscription is table-stakes and unlocks alerts (#3997). |
-| 3 | Embedding observation type #1021 | 91 | **kernel** canonical model (ADR-0018) | 🟢 | Additive span kind (D8 additive-only); one-line contract win that closes a 91-vote gap. |
+| 3 | Embedding observation type #1021 | 91 | **kernel** canonical model (LM-1 / ADR-0018) | ✅ shipped before requested | `embedding` is already in the frozen `kind` enum (`span.schema.json`); the vote ratifies a decision we shipped. |
 | 4 | Full-text search on I/O #939 | 75 | **kernel** Query DSL + storage adapter | 🟠 | ADR-0019/0020 + issue #16; needs DSL + CH/PG search path — high value, real work. |
 | 5 | Multi-modal content #3004/#6017 | 64/71 | **kernel** payload shapes + blob; **plugin** playground UX | 🟠 | ADR-0018 payload evolution + blob primitive; separating large media from the trace row is our design's strength. |
 | 6 | Alerts/limits on cost/eval #3997 | 67 | **kernel** event bus + `jobs` + cost enrich | 🟡 | issues #13+#14; converts observability into action — a headline differentiator. |
 | 7 | Self-host deploy stacks (AWS/Azure/GCP) #4645/#4647/#4646 | 94/73/69 | **deploy/** templates (Helm/operator) | 🟢 | Two-profiles/one-Query-API + Helm already exist; official IaC per cloud is packaging, and directly answers v4's stranded-self-hoster pain. |
-| 8 | Session-level & categorical scores #2728/#4965 | 35/29 | **kernel** score model (ADR-0017) | 🟢 | Score grain + non-numeric types are additive to ADR-0017; unblocks the evals plugin. |
+| 8 | Session-level & categorical scores #2728/#4965 | 35/29 | **kernel** score model (ADR-0017) | ✅ shipped before requested | `session` subject type + `categorical` (and `boolean`) `data_type` are live in the score write path since PR-E2; the votes ratify shipped contracts. |
 | 9 | Admin API + RBAC/key scopes #1007/#7104 | 41/25 | **kernel** auth/tenancy (issue #21) | 🟡 | RBAC + scoped keys with permission intersection (D7) is designed; enterprise self-host precondition. |
 | 10 | LangChain + LlamaIndex ingestion #2237/#1291 | 239/91 (target mass) | **normalizers** (hot path) or SDK | 🟢 | OTLP-canonical normalizers; the two most-demanded frameworks after n8n — must be first-party. |
 
-**Bottom line:** build n8n-plugin (proves the ecosystem), event-bus+webhooks
-(#14, unlocks alerts), embedding type + score-grain (cheap additive ADR wins),
-and the LangChain/LlamaIndex normalizers — in that order. Every one of these maps
-to an existing ADR or open issue; the demand data ratifies the roadmap rather than
+**Two of the top ten are already shipped** — the `embedding` kind (#3) and
+session/categorical scores (#8) landed before the community asked. That's not a
+gap, it's ratification: the votes confirm decisions we already made. **Bottom
+line:** build n8n-plugin (proves the ecosystem), event-bus+webhooks (#14, unlocks
+alerts), and the LangChain/LlamaIndex normalizers — in that order. Every one of
+these maps to an existing ADR or open issue; the demand data ratifies the roadmap
+rather than
 redirecting it. The single strategic wedge is **self-hosting**: v4 (#12518) has
 publicly stranded Langfuse's self-hosters mid-migration for months, and items
 #4645/#4647/#4646 (236 combined votes) show self-host deploy ergonomics are a

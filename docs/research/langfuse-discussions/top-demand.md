@@ -105,7 +105,7 @@ hardest thing for users to figure out (see clusters.md).
 1. **#4397 n8n (381)** — trace n8n workflows node-by-node; blocked on n8n-side instrumentation → LLMObs compat plugin.
 2. **#1033 Webhooks (109)** — subscribe to Langfuse events (trace/score created) via webhook; maps to kernel event bus + surface.
 3. **#4645 AWS stack (94)** — official Terraform/IaC to self-host v3 on AWS; a deploy-template concern.
-4. **#1021 Embedding observation (91)** — first-class `embedding` observation type in the data model.
+4. **#1021 Embedding observation (91)** — ✅ **shipped before requested**: `embedding` is already in the frozen `kind` enum (LM-1 / ADR-0018).
 5. **#4454 Prompt-experiment inputs (79)** — user input, message history, structured output, tool calls in experiments.
 6. **#939 Full-text search (75)** — search across trace/observation input/output bodies (a storage-adapter capability).
 7. **#4647 Azure stack (73)** — official IaC to self-host on Azure.
@@ -128,7 +128,7 @@ hardest thing for users to figure out (see clusters.md).
 24. **#2237 LangChain in prompt mgmt (37)** — render Langchain-format prompts from prompt management.
 25. **#6596 Dataset versioning (37)** — version datasets like prompts.
 26. **#3550 Async Langfuse client (36)** — non-blocking Python client.
-27. **#2728 Session-level scores (35)** — attach scores at the session grain (score-model / ADR-0017).
+27. **#2728 Session-level scores (35)** — ✅ **shipped before requested**: the `session` subject type is live in the score write path (ADR-0017, PR-E2).
 28. **#1011 Configurable dashboards (34)** — user-built dashboards; a dashboards plugin surface.
 29. **#5021 Multi-shard ClickHouse (34)** — scale-profile CH sharding (scale storage adapter).
 30. **#4268 Image messages in playground (32)** — image content in playground messages.
@@ -136,9 +136,9 @@ hardest thing for users to figure out (see clusters.md).
 32. **#1105 Prompt diff view (32)** — git-style diff between prompt versions.
 33. **#4484 Non-LLM evaluators via UI (31)** — custom/heuristic scores configured in UI.
 34. **#5235 LiveKit (30)** — voice-agent tracing integration.
-35. **#6777 Session-level LLM-judge (29)** — run evaluators at session grain.
+35. **#6777 Session-level LLM-judge (29)** — run evaluators at session grain (score *subject* already supports `session`; the evaluator runner is evals-plugin scope).
 36. **#1212 Async LangChain methods (29)** — instrument LangChain async callbacks.
 37. **#6883 Media rendering in datasets (29)** — render mediaId-referenced files in dataset items.
-38. **#4965 Categorical/boolean judge scores (29)** — non-numeric LLM-judge outputs (score model).
+38. **#4965 Categorical/boolean judge scores (29)** — ✅ **shipped before requested**: `categorical`/`boolean` `data_type` are live in the score write path (ADR-0017, PR-E2).
 39. **#2131 Warehouse export (29)** — export traces to BigQuery/Snowflake via blob (S3/GCS/Azure).
 40. **#1258 Org-wide dashboard (28)** — cross-project dashboard for an organization.

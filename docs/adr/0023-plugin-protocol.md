@@ -121,6 +121,34 @@ one-line note at the `auth()` computation site explains *why* they're ignored so
 future reader does not wire them up thinking they are authoritative. Inert-and-
 documented, not inert-and-mysterious.
 
+## The `store` primitive — the eighth (H5)
+
+`store` gives a plugin its own structured, queryable, tenant-scoped collections —
+the one Set-B gap (B5/B7/B8) the other primitives could not paper over. R1/R4 as
+built:
+
+- **R1 — physical model.** Each plugin gets a **Postgres schema in the shared DB**
+  (`plugin_<owner>__<name>`), one table per declared collection, behind the
+  `plugindata.Store` interface so a dedicated-DB backend slots in for scale. The
+  kernel owns the schema lifecycle; the plugin never gets a connection string.
+- **R4 — query surface.** Filter/order/paginate on **declared indexed fields
+  only** — no aggregations, no joins. Indexed fields are promoted to typed columns;
+  non-indexed fields live in the opaque `doc`. The compiler **always** scopes by
+  `project_id` and rejects filters/orders on non-indexed fields.
+- **`store` ≠ telemetry.** `store` holds plugin *domain* entities; the canonical
+  model (spans/traces/scores via `query`) is the single source of truth. A plugin
+  MUST NOT duplicate telemetry into `store` (pinned in the SDK + manifest docs).
+
+**Migration-during-`starting` is a health signal (pinned).** The supervisor
+provisions a plugin's collections during `starting`, *before* it can reach
+`running`. A slow or failed collection migration **faults the plugin to
+`degraded`** — it never reaches `running`. Provisioning is **idempotent**
+(`CREATE … IF NOT EXISTS` + registry upsert), so a migration interrupted by a
+kernel restart re-runs cleanly on the next re-handshake and does **not** count
+toward the disable cap — the same structural treatment as the in-memory-key
+ruling: absence/incompleteness is a re-do trigger; only a genuine failure faults.
+This did not force any change to R1's shared-schema model.
+
 ## Consequences
 
 - The manifest gains an additive `spec.backend` (url, healthPath, infoPath,

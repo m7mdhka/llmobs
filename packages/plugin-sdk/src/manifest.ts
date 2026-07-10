@@ -25,6 +25,20 @@ export interface PluginBackend {
   watermarkBudget?: string; // e.g. "30s"
 }
 
+// Plugin-owned structured collections (the `store` primitive, ADR-0023/R1+R4).
+export interface PluginCollectionField {
+  name: string;
+  type: "string" | "number" | "boolean" | "json";
+  indexed?: boolean;
+}
+export interface PluginCollection {
+  name: string;
+  fields: PluginCollectionField[];
+}
+export interface PluginStore {
+  collections: PluginCollection[];
+}
+
 export interface PluginManifest {
   apiVersion: "llmobs.dev/v1alpha1";
   kind: "Plugin";
@@ -40,5 +54,6 @@ export interface PluginManifest {
     frontend?: PluginFrontend;
     settingsSchema?: string;
     backend?: PluginBackend;
+    store?: PluginStore;
   };
 }

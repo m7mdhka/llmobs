@@ -24,7 +24,15 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
+	"github.com/m7mdhka/llmobs/kernel/internal/plugindata"
 )
+
+// Provisioner provisions a plugin's store collections during the starting phase.
+// Implementations MUST be idempotent (re-runnable) so a migration interrupted by a
+// kernel restart recovers on re-handshake without faulting (ADR-0023).
+type Provisioner interface {
+	Provision(ctx context.Context, pluginID string, collections []plugindata.CollectionSpec) error
+}
 
 // State is a plugin's lifecycle state.
 type State string
@@ -105,10 +113,16 @@ type Supervisor struct {
 	cfg      Config
 	now      func() time.Time // injectable clock
 
+	provisioner Provisioner // provisions store collections in the starting phase (nil => none)
+
 	mu       sync.Mutex
 	plugins  map[string]*pluginRuntime
 	disabled map[string]string // operator-disabled id -> reason (persists across reconcile)
 }
+
+// SetProvisioner attaches the store-collection provisioner (H5). Migration failure
+// becomes a health signal: the plugin degrades rather than reaching running.
+func (s *Supervisor) SetProvisioner(p Provisioner) { s.provisioner = p }
 
 // New builds a supervisor. now may be nil (defaults to time.Now).
 func New(p Provider, exec executors.Executor, signer *plugintoken.Signer, mreg *metrics.Registry, log *slog.Logger, cfg Config, now func() time.Time) *Supervisor {
@@ -177,6 +191,18 @@ func (s *Supervisor) reconcileOne(ctx context.Context, rt *pluginRuntime) {
 			return
 		}
 		rt.token, rt.exp = tok, claims.Exp
+
+		// Provision the plugin's store collections as part of starting (H5). This is
+		// a HEALTH SIGNAL: a slow/failed collection migration faults the plugin to
+		// degraded — it never reaches running. Provisioning is idempotent, so a
+		// migration interrupted by a kernel restart re-runs cleanly on the next
+		// re-handshake and does NOT count as a fresh fault (ADR-0023).
+		if s.provisioner != nil && len(rt.spec.Collections) > 0 {
+			if err := s.provisioner.Provision(ctx, rt.spec.ID, rt.spec.Collections); err != nil {
+				s.fault(rt, "collection migration: "+err.Error())
+				return
+			}
+		}
 	} else if now.Add(s.cfg.RefreshBefore).Unix() >= rt.exp {
 		// Proactive refresh while running. A refresh failure is tracked but not an
 		// immediate fault — the next reconcile re-handshakes when the token lapses.

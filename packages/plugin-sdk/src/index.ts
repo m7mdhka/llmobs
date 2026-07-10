@@ -21,6 +21,10 @@ export type { KvConfig } from "./kv.js";
 export { SecretsClient } from "./secrets.js";
 export type { SecretsConfig, SecretInfo } from "./secrets.js";
 
+// Data primitive: `store` (plugin-owned structured collections; backend double-token).
+export { StoreClient } from "./store.js";
+export type { StoreConfig, StoreQuery, StoreFilter, StoreOp, StorePage } from "./store.js";
+
 // Manifest types (mirror of the JSON Schema contract).
 export type {
   PluginManifest,

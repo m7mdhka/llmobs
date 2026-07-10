@@ -196,8 +196,41 @@ d=json.load(sys.stdin)['data']
 assert any('attributes' in s for s in d), 'payloads scope should include attributes'
 print('   payloads scope: attributes present')
 " || { echo "FAIL: payloads scope missing attributes"; exit 1; }
+echo ">> e2e-lite: MCP server (metadata-safe, JSON-RPC over stdio)"
+MCPBIN="$(mktemp -u)"
+go build -o "$MCPBIN" ./tools/mcp-server || { echo "FAIL: mcp build"; exit 1; }
+# Safety posture: a payload-scoped key is refused without --allow-payloads.
+if LLMOBS_URL="$API" LLMOBS_API_KEY="$PAYKEY" "$MCPBIN" </dev/null >/dev/null 2>/tmp/mcp_refuse.txt; then
+  echo "FAIL: MCP server should refuse a payload key"; exit 1
+fi
+grep -qi 'refusing to start' /tmp/mcp_refuse.txt || { echo "FAIL: wrong refusal"; cat /tmp/mcp_refuse.txt; exit 1; }
+# Drive a JSON-RPC session with the metadata key: initialize -> tools/list -> get_trace_tree.
+MCPOUT="$(printf '%s\n%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"get_trace_tree\",\"arguments\":{\"trace_id\":\"$TRACE_ID\"}}}" \
+  | LLMOBS_URL="$API" LLMOBS_API_KEY="$METAKEY" "$MCPBIN" 2>/dev/null)"
+printf '%s' "$MCPOUT" | python3 -c "
+import sys,json
+resps={}
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    r=json.loads(line); resps[r.get('id')]=r
+assert len(resps[2]['result']['tools'])==5, 'expected 5 tools'
+names={t['name'] for t in resps[2]['result']['tools']}
+assert 'query_traces' in names and 'top_costs' in names, names
+tree=json.loads(resps[3]['result']['content'][0]['text'])
+assert tree['span_count']>=4, tree
+# metadata-safe: no payload keys in the summarized spans
+for sp in tree['spans']:
+    for f in ('input','output','events','attributes'):
+        assert f not in sp, 'MCP leaked '+f
+print('   assert OK: 5 tools, tree via MCP (%d spans), no payloads in summaries'%tree['span_count'])
+" || { echo "FAIL: MCP session"; echo "$MCPOUT"; exit 1; }
+rm -f "$MCPBIN"
 rm -f "$PCK"
-echo "   assert OK: payload-scope enforced on the query path"
+echo "   assert OK: payload-scope enforced on the query path + MCP metadata-safe"
 
 echo ">> e2e-lite: machine API-key issuance + score write + scores target + QD-9 semi-join"
 NOW="$(python3 -c 'import datetime;print(datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))')"

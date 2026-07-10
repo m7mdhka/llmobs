@@ -205,6 +205,22 @@ func (s *Server) runAggregation(w http.ResponseWriter, r *http.Request, doc map[
 	})
 }
 
+// Whoami: GET /v1alpha1/whoami — returns the authenticated caller's project and
+// effective scopes. Lets a machine client (e.g. the MCP server) verify its key is
+// metadata-scoped before starting, and is generally useful for tooling.
+func (s *Server) Whoami(w http.ResponseWriter, r *http.Request) {
+	id, aerr := s.auth(r, "query")
+	if aerr != nil {
+		writeErr(w, aerr)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project_id":    id.ProjectID,
+		"scopes":        id.Scopes,
+		"read_payloads": id.HasScope("query:payloads"),
+	})
+}
+
 // GetSpan: GET /v1alpha1/spans/{id}
 func (s *Server) GetSpan(w http.ResponseWriter, r *http.Request, id string) {
 	ident, aerr := s.auth(r, "query")

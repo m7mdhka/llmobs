@@ -11,13 +11,22 @@ from __future__ import annotations
 import os
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 
 from llmobs_plugin import KernelClient  # noqa: F401 — use for kv/store/secrets/ingest
 
 PLUGIN_ID = "owner/plugin-name"  # MUST match llmobs-plugin.yaml metadata.id
 app = FastAPI()
 _started = int(time.time())
+# The kernel DELIVERS your service token here (H7c) — you don't fetch it.
+_token = {"value": os.environ.get("LLMOBS_SERVICE_TOKEN", "")}
+
+
+@app.post("/plugin/v1/token")
+async def receive_token(request: Request):
+    body = await request.json()
+    _token["value"] = body.get("serviceToken", "")
+    return Response(status_code=200)
 
 
 @app.get("/plugin/v1/info")
@@ -39,5 +48,5 @@ def health():
 
 
 def kernel() -> KernelClient:
-    """A kernel client authenticated with this plugin's service token."""
-    return KernelClient(os.environ["LLMOBS_KERNEL_URL"], os.environ.get("LLMOBS_SERVICE_TOKEN", ""))
+    """A kernel client authenticated with this plugin's delivered service token."""
+    return KernelClient(os.environ["LLMOBS_KERNEL_URL"], _token["value"])

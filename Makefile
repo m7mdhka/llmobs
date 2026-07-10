@@ -99,6 +99,9 @@ e2e: e2e-lite ## Run end-to-end tests (lite compose profile)
 e2e-lite: ## Lite e2e: up -> emit agent trace -> query spans back through the DSL
 	@bash scripts/e2e-lite.sh
 
+e2e-plugin: ## Fully-live plugin e2e: kernel + Python plugin, handshake+token delivery, LANGFUSE_HOST->us migration
+	@bash scripts/e2e-plugin.sh
+
 .PHONY: e2e-k8s
 e2e-k8s: ## Run Kubernetes e2e (kind + Helm + operator)
 	@echo ">> e2e-k8s: kind cluster, helm install, operator reconcile, plugin lifecycle"

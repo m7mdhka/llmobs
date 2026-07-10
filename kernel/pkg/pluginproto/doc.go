@@ -34,7 +34,20 @@ const (
 	// supervisor calls when the manifest does not override them.
 	DefaultInfoPath   = "/plugin/v1/info"
 	DefaultHealthPath = "/plugin/v1/health"
+	// DefaultTokenPath is the well-known endpoint the kernel PUSHES the plugin's
+	// service token to at handshake completion + on refresh (H7c). Delivery is
+	// kernel-initiated to the plugin's own registered URL — there is no plugin-pull
+	// path, so "obtain another plugin's token" is not an expressible operation.
+	DefaultTokenPath = "/plugin/v1/token"
 )
+
+// TokenDelivery is the body the kernel POSTs to a plugin's token endpoint. The
+// plugin stores the token and presents it on calls back to the kernel; it MUST
+// treat a delivery as authoritative only over its operator-configured URL.
+type TokenDelivery struct {
+	ServiceToken string `json:"serviceToken"`
+	ExpiresUnix  int64  `json:"expiresUnix"`
+}
 
 // SupportedProtocols is the set of plugin-protocol maturities this kernel can run.
 var SupportedProtocols = []string{"v1alpha1"}

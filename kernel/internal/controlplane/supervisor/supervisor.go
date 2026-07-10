@@ -193,6 +193,14 @@ func (s *Supervisor) reconcileOne(ctx context.Context, rt *pluginRuntime) {
 		}
 		rt.token, rt.exp = tok, claims.Exp
 
+		// Deliver the token to the plugin (kernel-initiated push, H7c). This is part
+		// of READINESS, not a side channel: a plugin that cannot receive its token
+		// faults to degraded and never reaches running.
+		if err := s.exec.DeliverToken(ctx, rt.spec.Backend, tok, claims.Exp); err != nil {
+			s.fault(rt, "deliver-token: "+err.Error())
+			return
+		}
+
 		// Provision the plugin's store collections as part of starting (H5). This is
 		// a HEALTH SIGNAL: a slow/failed collection migration faults the plugin to
 		// degraded — it never reaches running. Provisioning is idempotent, so a
@@ -208,6 +216,10 @@ func (s *Supervisor) reconcileOne(ctx context.Context, rt *pluginRuntime) {
 		// Proactive refresh while running. A refresh failure is tracked but not an
 		// immediate fault — the next reconcile re-handshakes when the token lapses.
 		if tok, claims, err := s.signer.MintServiceToken(rt.spec.ID, s.scopesFor(rt.spec), now, s.cfg.TokenTTL); err != nil {
+			rt.tokenRefreshErr++
+		} else if derr := s.exec.DeliverToken(ctx, rt.spec.Backend, tok, claims.Exp); derr != nil {
+			// A refresh delivery failure is tracked, not an immediate fault — the
+			// current token still works until it lapses, then re-handshake re-delivers.
 			rt.tokenRefreshErr++
 		} else {
 			rt.token, rt.exp = tok, claims.Exp

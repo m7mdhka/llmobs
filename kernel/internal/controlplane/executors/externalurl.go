@@ -1,6 +1,7 @@
 package executors
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -52,6 +53,29 @@ func (e *ExternalURL) Health(ctx context.Context, b Backend) (pluginproto.Health
 		return h, fmt.Errorf("health: %w", err)
 	}
 	return h, nil
+}
+
+// DeliverToken POSTs the service token to {url}/plugin/v1/token (H7c). This is the
+// only token path — kernel-initiated push to the plugin's own registered URL.
+func (e *ExternalURL) DeliverToken(ctx context.Context, b Backend, token string, expiresUnix int64) error {
+	body, err := json.Marshal(pluginproto.TokenDelivery{ServiceToken: token, ExpiresUnix: expiresUnix})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(b.URL, pluginproto.DefaultTokenPath), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := e.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("deliver token: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("deliver token: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (e *ExternalURL) getJSON(ctx context.Context, url string, out any) error {

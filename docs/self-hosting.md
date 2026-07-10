@@ -49,6 +49,70 @@ ingestion, no unredacted payload is ever persisted, and you keep it server-side
 without changing every emitting service. This is a deployment component you own;
 the kernel needs no changes.
 
+## The OTel Collector in front (first-class topology)
+
+Most production estates route telemetry through a fleet of OpenTelemetry
+Collectors (tail-sampling, attribute-scrubbing, batching, multi-exporter fan-out).
+LLMObs is **an OTLP exporter target** — point a Collector's `otlp` exporter at the
+kernel's `:4317`/`:4318`:
+
+```yaml
+exporters:
+  otlp/llmobs:
+    endpoint: llmobs-kernel:4317
+    headers: { authorization: "Bearer ${LLMOBS_API_KEY}" }
+service:
+  pipelines:
+    traces: { receivers: [otlp], processors: [tail_sampling, batch], exporters: [otlp/llmobs] }
+```
+
+**What to expect when the Collector mangles reality:**
+- **Tail-sampling drops spans**, so a trace can arrive missing its root or middle
+  spans. The kernel detects this: a span referencing a parent absent from the
+  trace stamps **`llmobs.dq.incomplete_trace`**, exposed on the synthesized trace
+  and **filterable** (`{"field":"incomplete_trace","op":"eq","value":true}`). The
+  tracing UI badges incomplete traces.
+- **Trace-level rollups (cost, root name) are best-effort** on incomplete traces —
+  treat `incomplete_trace=true` rollups as lower bounds.
+- **Scrubbed/rewritten attributes** are preserved as-is; the kernel never assumes
+  a resource attribute is present.
+- **`/metrics`** exposes ingest rate and error-span rate so you can reconcile
+  against the Collector's own sampled counts.
+
+Fixtures under `kernel/testdata/fixtures/otel-genai/collector-*` represent
+Collector-mangled inputs and run through conformance, so this topology is a
+tested first-class citizen — not an afterthought.
+
+## Multi-tenant emitter (router-shim pattern)
+
+If one process (e.g. a company-wide LiteLLM proxy) emits traffic for many
+projects, the kernel binds **one API key to one project** at the connection level
+(tenant isolation). Per-span project routing is not a kernel feature today
+(tracked: `ingest:route`). The honest v1 is a **single router shim** in front:
+
+```
+LiteLLM proxy ──OTLP──▶ [ router: reads team_id, forwards with that project's key ] ──▶ kernel
+```
+
+One process, not forty exporters. The shim owns the `team_id → (project, key)`
+mapping; the kernel sees clean, correctly-attributed streams per project.
+
+## Bring-your-own transport (Kafka→OTLP bridge)
+
+If your estate forbids service-to-service HTTP and mandates Kafka, run a **bridge
+consumer** that reads your OTLP-carrying topic and forwards to the kernel's OTLP
+endpoint:
+
+```
+services ──▶ Kafka (OTLP/Avro) ──▶ [ bridge consumer ] ──OTLP──▶ kernel
+```
+
+Redelivery is safe: the merge is idempotent on `(project_id, id)` with a
+producer-derived `event_ts`, so a re-consumed span folds to the identical state —
+**exactly-once-ish by construction**, no dedup store needed. A first-party Kafka
+*receiver* inside the kernel is a possible future addition (the receiver→pipeline
+seam is clean); until then the bridge pattern needs no kernel changes.
+
 ## GDPR erasure
 
 Delete every span for a user, provably:

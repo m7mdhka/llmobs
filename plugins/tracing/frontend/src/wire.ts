@@ -17,6 +17,8 @@ export interface WireTrace {
   session_id?: string;
   user_id?: string;
   span_count?: number;
+  is_open?: boolean;
+  "llmobs.dq.incomplete_trace"?: boolean;
   attributes?: Record<string, unknown>;
   tags?: string[];
 }

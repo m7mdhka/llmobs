@@ -13,6 +13,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/queryapi"
+	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
@@ -24,10 +25,11 @@ type Server struct {
 	pool      *pgxpool.Pool
 	log       *slog.Logger
 	maxWindow time.Duration
+	metrics   *metrics.Registry
 }
 
-func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration) *Server {
-	return &Server{store: store, pool: pool, log: log, maxWindow: maxWindow}
+func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration, reg *metrics.Registry) *Server {
+	return &Server{store: store, pool: pool, log: log, maxWindow: maxWindow, metrics: reg}
 }
 
 // Handler returns the routed Query API handler (generated routing).
@@ -146,6 +148,11 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	if cursor != "" {
 		resp["cursor"] = cursor
+	}
+	if s.metrics != nil {
+		lbl := map[string]string{"target": target}
+		s.metrics.CounterAdd("llmobs_query_requests_total", "Query requests by target.", lbl, 1)
+		s.metrics.Observe("llmobs_query_duration_seconds", "Query latency by target (seconds).", lbl, time.Since(started).Seconds())
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

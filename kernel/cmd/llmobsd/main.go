@@ -24,6 +24,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/registry"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/webui"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform"
+	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 	"github.com/m7mdhka/llmobs/kernel/pkg/brand"
 )
@@ -83,15 +84,23 @@ func run() error {
 			"email", cfg.BootstrapAdminEml)
 	}
 
+	// Metrics registry, shared across pipeline + query. Pool stats are sampled at
+	// scrape time. Labels are project_id only — never trace/user ids (cardinality).
+	mreg := metrics.New()
+	mreg.SampledGauge("llmobs_db_pool_total_conns", "Total DB pool connections.", func() float64 { return float64(pool.Stat().TotalConns()) })
+	mreg.SampledGauge("llmobs_db_pool_idle_conns", "Idle DB pool connections.", func() float64 { return float64(pool.Stat().IdleConns()) })
+	mreg.SampledGauge("llmobs_db_pool_acquired_conns", "Acquired DB pool connections.", func() float64 { return float64(pool.Stat().AcquiredConns()) })
+
 	store := postgres.NewStore(pool)
 	reg := normalize.Default()
-	pipe := pipeline.New(pool, store, reg, pipeline.NoopBus{}, pipeline.Config{})
+	skew, _ := time.ParseDuration(cfg.ClockSkewThreshold)
+	pipe := pipeline.New(pool, store, reg, pipeline.NoopBus{}, pipeline.Config{Metrics: mreg, SkewThreshold: skew})
 
 	receiver := ingest.NewReceiver(pipe, log, 4096, 4)
 	receiver.Start(rootCtx)
 
 	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
-	qsrv := query.NewServer(store, pool, log, maxWindow)
+	qsrv := query.NewServer(store, pool, log, maxWindow, mreg)
 
 	// API server: auth + query + health, all behind the session middleware so a
 	// resolved session is available to every downstream handler.
@@ -114,6 +123,19 @@ func run() error {
 	}
 	apiServer := &http.Server{Addr: cfg.APIAddr, Handler: auth.Middleware(apiMux), ReadHeaderTimeout: 5 * time.Second}
 
+	// Metrics: served on a SEPARATE bind (default :9090) so the scrape surface is
+	// network-isolated from the public API — an operator exposes it only to
+	// Prometheus, not to tenants (see the report's scrape-auth decision). If
+	// LLMOBS_METRICS_ADDR is empty, /metrics is mounted on the API server instead.
+	var metricsServer *http.Server
+	if cfg.MetricsAddr != "" {
+		mmux := http.NewServeMux()
+		mmux.Handle("/metrics", mreg.Handler())
+		metricsServer = &http.Server{Addr: cfg.MetricsAddr, Handler: mmux, ReadHeaderTimeout: 5 * time.Second}
+	} else {
+		apiMux.Handle("/metrics", mreg.Handler())
+	}
+
 	// OTLP HTTP receiver server.
 	otlpServer := &http.Server{Addr: cfg.OTLPHTTPAddr, Handler: receiver.Handler(), ReadHeaderTimeout: 5 * time.Second}
 
@@ -125,9 +147,12 @@ func run() error {
 		return err
 	}
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 	go serve(apiServer, log, "api", errCh)
 	go serve(otlpServer, log, "otlp-http", errCh)
+	if metricsServer != nil {
+		go serve(metricsServer, log, "metrics", errCh)
+	}
 	go func() {
 		log.Info("otlp-grpc listening", "addr", cfg.OTLPGRPCAddr)
 		if err := grpcServer.Serve(grpcLis); err != nil {
@@ -146,6 +171,9 @@ func run() error {
 	defer cancel()
 	_ = apiServer.Shutdown(shutdownCtx)
 	_ = otlpServer.Shutdown(shutdownCtx)
+	if metricsServer != nil {
+		_ = metricsServer.Shutdown(shutdownCtx)
+	}
 	grpcServer.GracefulStop()
 	receiver.Stop()
 	log.Info("stopped")

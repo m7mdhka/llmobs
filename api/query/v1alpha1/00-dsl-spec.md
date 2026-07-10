@@ -168,9 +168,15 @@ it incrementally, but the observable result MUST be:
 - **NULL/ceiling/422 semantics are identical to `spans`** (§2.2, §6, §11): the
   only difference is the field set (`fields.json` `traces`) and that the fields
   are derived per this section.
-- **Score semi-join (§8) is `not_implemented` (501) in this maturity** until the
-  scores write path lands; a `traces` query MUST NOT be rejected for omitting
-  `scores`, and a query that includes `scores` receives `not_implemented`.
+- **Activity & incompleteness (derived).** Three computed trace fields let a
+  caller find long-running or Collector-mangled traces without knowing when they
+  started: `last_activity` (timestamp = max span `end_time`, else max
+  `start_time`), `is_open` (boolean = any span still open), and
+  `incomplete_trace` (boolean = a span references a parent absent from the trace
+  — the tail-sampling signal, surfaced as `llmobs.dq.incomplete_trace`). They are
+  computed (like §4.2) and exempt from the model-property check; `last_activity`
+  is orderable, so "active runs regardless of age" is `is_open eq true orderBy
+  last_activity desc` within a bounded window.
 
 > Rationale: spans already carry per-field provenance and merge under the row
 > lock; deriving traces from them keeps a single source of truth and avoids a

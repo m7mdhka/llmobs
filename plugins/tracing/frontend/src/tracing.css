@@ -269,3 +269,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+.tr-incomplete, .tr-open {
+  margin-left: var(--llmobs-space-2);
+  font-size: var(--llmobs-text-2xs);
+  font-family: var(--llmobs-font-mono);
+  padding: 0 var(--llmobs-space-1);
+  border-radius: var(--llmobs-radius-sm);
+}
+.tr-incomplete { color: var(--llmobs-warning); background: var(--llmobs-warning-soft); }
+.tr-open { color: var(--llmobs-accent); background: var(--llmobs-accent-soft); }

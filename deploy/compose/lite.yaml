@@ -31,6 +31,7 @@ services:
       LLMOBS_OTLP_HTTP_ADDR: ":4318"
       LLMOBS_OTLP_GRPC_ADDR: ":4317"
       LLMOBS_API_ADDR: ":8080"
+      LLMOBS_METRICS_ADDR: ":9090"
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,3 +39,4 @@ services:
       - "${LLMOBS_OTLP_PORT:-4318}:4318"
       - "${LLMOBS_OTLP_GRPC_PORT:-4317}:4317"
       - "${LLMOBS_API_PORT:-8080}:8080"
+      - "${LLMOBS_METRICS_PORT:-9090}:9090"

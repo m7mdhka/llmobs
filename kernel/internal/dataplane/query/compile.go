@@ -59,6 +59,7 @@ const (
 	classAttrMap
 	classNumericMap
 	classReference
+	classBoolean
 )
 
 type fieldDef struct {
@@ -131,9 +132,13 @@ var traceFields = queryFields{
 		"session_id":  {"session_id", classString},
 		"user_id":     {"user_id", classString},
 		"attributes":  {"attributes", classAttrMap},
+		// Activity anchor + incompleteness (F1): "active runs regardless of age".
+		"last_activity":    {"last_activity", classTimestamp},
+		"is_open":          {"is_open", classBoolean},
+		"incomplete_trace": {"incomplete_trace", classBoolean},
 	},
 	orderable: map[string]bool{
-		"id": true, "name": true, "start_time": true, "end_time": true,
+		"id": true, "name": true, "start_time": true, "end_time": true, "last_activity": true,
 	},
 	timeAnchor: "start_time",
 }
@@ -469,6 +474,20 @@ func compileCondition(b *builder, c map[string]any, qf queryFields) (string, err
 func compileSimpleCond(b *builder, f fieldDef, c map[string]any, op string) (string, error) {
 	col := f.col
 	num := f.class == classNumeric || f.class == classTimestamp
+	if f.class == classBoolean {
+		bv, ok := c["value"].(bool)
+		if !ok {
+			return "", errf("operator_not_allowed", 422, "boolean field requires a boolean value")
+		}
+		switch op {
+		case "eq":
+			return col + " = " + b.ph(bv), nil
+		case "neq":
+			return col + " IS DISTINCT FROM " + b.ph(bv), nil
+		default:
+			return "", errf("operator_not_allowed", 422, "%s not allowed on boolean field", op)
+		}
+	}
 	switch op {
 	case "eq":
 		return col + " = " + b.ph(coerce(f, c["value"])), nil

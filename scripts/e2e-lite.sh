@@ -13,7 +13,9 @@ export LLMOBS_BOOTSTRAP_API_KEY="$KEY"
 export LLMOBS_API_PORT="${LLMOBS_API_PORT:-18080}"
 export LLMOBS_OTLP_PORT="${LLMOBS_OTLP_PORT:-14318}"
 export LLMOBS_OTLP_GRPC_PORT="${LLMOBS_OTLP_GRPC_PORT:-14317}"
+export LLMOBS_METRICS_PORT="${LLMOBS_METRICS_PORT:-19090}"
 API="http://localhost:${LLMOBS_API_PORT}"
+METRICS="http://localhost:${LLMOBS_METRICS_PORT}"
 
 cleanup() { "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true; }
 trap cleanup EXIT
@@ -126,6 +128,16 @@ assert trace.get("start_time"), "trace.start_time not synthesized"
 print(f"   assert OK: tree of {len(spans)} spans in parent-before-child order, trace synthesized")
 '
 
+echo ">> e2e-lite: /metrics exposition (separate bind) + trace activity fields"
+MOUT="$(curl -sf ${METRICS}/metrics || true)"
+printf '%s' "$MOUT" | grep -q 'llmobs_ingest_spans_total{' \
+  || { echo "FAIL: /metrics missing ingest counter"; printf '%s\n' "$MOUT" | head; exit 1; }
+printf '%s' "$MOUT" | grep -q '# TYPE llmobs_pipeline_stage_seconds histogram' \
+  || { echo "FAIL: /metrics missing stage histogram"; exit 1; }
+printf '%s' "$MOUT" | grep -q 'llmobs_db_pool_total_conns' \
+  || { echo "FAIL: /metrics missing pool gauge"; exit 1; }
+echo "   assert OK: /metrics exposes ingest + stage + pool series"
+
 echo ">> e2e-lite: querying the traces DSL target (derived from spans)"
 TQUERY="{\"target\":\"traces\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"filters\":[{\"field\":\"environment\",\"op\":\"eq\",\"value\":\"production\"}],\"limit\":10}"
 TRESP="$(curl -sf -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d "$TQUERY" ${API}/v1alpha1/query || true)"
@@ -139,6 +151,8 @@ t=tr[0]
 assert t.get('environment')=='production', t.get('environment')
 assert t.get('span_count',0)>=4, t.get('span_count')
 assert t.get('start_time'), 'trace start_time not synthesized'
+assert 'is_open' in t, 'trace is_open not synthesized'
+assert t.get('last_activity'), 'trace last_activity not synthesized'
 assert isinstance(t.get('status'),dict), 'trace status shape'
 print('   assert OK: traces target returned synthesized trace, span_count=%d, env=%s'%(t['span_count'],t['environment']))
 " || { echo "FAIL: traces target"; echo "$TRESP"; exit 1; }

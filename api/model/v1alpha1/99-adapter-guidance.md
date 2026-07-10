@@ -87,6 +87,17 @@ contract.
 - The lite profile targets the D13 performance envelope (Postgres-only,
   `docker compose up`); it need not match scale-profile analytical throughput,
   only the same observable semantics.
+- **Per-field provenance & the field-path separator (adapter-internal).** The
+  merge fold tracks, per field-group, the `(event_ts, event_id)` stamp that owns
+  it (a `provenance` `jsonb` column) so out-of-order updates converge to the same
+  state as the ordered fold. The lite adapter joins field-group path segments
+  with an ASCII **SOH (`0x01`)** separator so that a dotted attribute key
+  (`gen_ai.request.model`) stays one key while a genuinely nested object
+  deep-merges per leaf. This separator is **adapter-internal** and never
+  observable: it is legal in `jsonb` (unlike NUL, which raises `22P05`), and
+  because §6.3 forbids control characters in attribute keys at normalize time,
+  the separator can never collide with a real key. A different adapter MAY choose
+  any encoding — the observable fold is what conformance checks.
 
 ## 4. Cross-adapter conformance (Informative)
 

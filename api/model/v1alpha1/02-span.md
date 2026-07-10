@@ -398,6 +398,23 @@ data-quality signal `llmobs.dq.truncated_attributes = true`
 vectors, big blobs) SHOULD be sent as **media references** (§7) rather than inline
 attribute values. The cap MUST NOT apply to promoted or identity/frozen fields.
 
+### 6.3 Attribute key sanitization (Normative)
+
+Attribute **keys** MUST NOT contain ASCII control characters (`U+0000`–`U+001F`
+and `U+007F`). A normalizer MUST reject such a key: the offending characters are
+stripped to produce the sanitized key, the **original** key is preserved under
+`llmobs.raw.attr_key.<sanitized>` (so nothing is lost, invariant 6), and the
+data-quality counter `llmobs.dq.sanitized_attribute_keys` is incremented
+(`08-data-quality.md`). Sanitization runs in the shared `normalize` stage, so it
+is identical across every transport (the LM-11 discipline, §4.2).
+
+> Rationale: control characters in keys have no legitimate source and break
+> downstream encodings. A canonical adapter MAY use a control character as an
+> internal field-path separator (`99-adapter-guidance.md`); forbidding them in
+> keys at normalize time makes that encoding collision-free *by construction*
+> rather than by escaping. The prohibition is a property of the canonical model,
+> not of any one adapter.
+
 ## 7. Media references (Normative) — LM-10
 
 Binary/media payloads are handled **out of band**. A span field (`input`,

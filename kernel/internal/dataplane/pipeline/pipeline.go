@@ -18,6 +18,7 @@ import (
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
+	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
@@ -49,6 +50,11 @@ type Config struct {
 	Sample  StageConfig
 	Enrich  StageConfig
 	Publish StageConfig
+	// SkewThreshold: producer-vs-receive time drift beyond this stamps
+	// llmobs.dq.clock_skew. Zero disables detection.
+	SkewThreshold time.Duration
+	// Metrics is the shared registry; nil disables instrumentation.
+	Metrics *metrics.Registry
 }
 
 // StageConfig is a placeholder for per-stage configuration.
@@ -58,27 +64,38 @@ type StageConfig struct {
 
 // Pipeline is the ordered chain.
 type Pipeline struct {
-	stages []Stage
+	stages  []Stage
+	metrics *metrics.Registry
 }
 
 // New builds the default chain.
-func New(pool *pgxpool.Pool, store storage.TelemetryStore, reg *normalize.Registry, bus EventBus, _ Config) *Pipeline {
-	return &Pipeline{stages: []Stage{
-		&authenticateStage{pool: pool},
-		&decodeStage{},
-		&normalizeStage{reg: reg},
-		&redactStage{}, // no-op (issue: kernel-ingestion redaction)
-		&sampleStage{}, // no-op (issue: kernel-ingestion sampling)
-		&enrichStage{}, // no-op (issue: cost derivation / price table)
-		&persistStage{store: store},
-		&publishStage{bus: bus}, // no-op in-proc bus (issue: Redis Streams bus)
-	}}
+func New(pool *pgxpool.Pool, store storage.TelemetryStore, reg *normalize.Registry, bus EventBus, cfg Config) *Pipeline {
+	return &Pipeline{
+		metrics: cfg.Metrics,
+		stages: []Stage{
+			&authenticateStage{pool: pool},
+			&decodeStage{},
+			&normalizeStage{reg: reg, skewThreshold: cfg.SkewThreshold},
+			&redactStage{}, // no-op (issue: kernel-ingestion redaction)
+			&sampleStage{}, // no-op (issue: kernel-ingestion sampling)
+			&enrichStage{}, // no-op (issue: cost derivation / price table)
+			&persistStage{store: store, metrics: cfg.Metrics},
+			&publishStage{bus: bus}, // no-op in-proc bus (issue: Redis Streams bus)
+		},
+	}
 }
 
-// Run executes the chain in order, stopping at the first error.
+// Run executes the chain in order, stopping at the first error. Per-stage latency
+// is recorded when metrics are enabled.
 func (p *Pipeline) Run(ctx context.Context, ing *Ingestion) error {
 	for _, s := range p.stages {
-		if err := s.Process(ctx, ing); err != nil {
+		start := time.Now()
+		err := s.Process(ctx, ing)
+		if p.metrics != nil {
+			p.metrics.Observe("llmobs_pipeline_stage_seconds", "Pipeline stage latency (seconds).",
+				map[string]string{"stage": s.Name()}, time.Since(start).Seconds())
+		}
+		if err != nil {
 			return err
 		}
 	}

@@ -39,3 +39,4 @@ order). New decisions continue the numbering:
 | [ADR-0019](0019-query-dsl.md) | Query DSL (QD-1..QD-10) |
 | [ADR-0020](0020-indexed-attribute-keys.md) | Indexed attribute keys — per-project custom dimensions (audit) |
 | [ADR-0021](0021-explicit-clear-sentinel.md) | Explicit-clear sentinel — one merge algorithm survives (audit) |
+| [ADR-0022](0022-time-authority-policy.md) | Time authority policy — producer vs receive time (audit) |

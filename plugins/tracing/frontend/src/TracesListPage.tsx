@@ -102,7 +102,11 @@ export function TracesListPage(): React.ReactElement {
           <tbody>
             {traces.map((t) => (
               <Row key={t.id} onActivate={() => navigate(t.id)}>
-                <td>{t.name || <span className="tr-muted">(unnamed)</span>}</td>
+                <td>
+                  {t.name || <span className="tr-muted">(unnamed)</span>}
+                  {t["llmobs.dq.incomplete_trace"] && <span className="tr-incomplete" title="Some spans are missing (upstream sampling)">incomplete</span>}
+                  {t.is_open && <span className="tr-open" title="Trace still active">open</span>}
+                </td>
                 <td>
                   <Mono>{t.id.slice(0, 12)}</Mono>
                 </td>

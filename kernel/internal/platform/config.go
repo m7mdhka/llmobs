@@ -14,36 +14,40 @@ import (
 // optional JSON file (LLMOBS_CONFIG_FILE), then environment overrides. Every env
 // var is LLMOBS_-prefixed via the brand constant (D15).
 type Config struct {
-	DatabaseURL       string `json:"database_url"`
-	OTLPHTTPAddr      string `json:"otlp_http_addr"`
-	OTLPGRPCAddr      string `json:"otlp_grpc_addr"`
-	APIAddr           string `json:"api_addr"`
-	LogLevel          string `json:"log_level"`
-	LogFormat         string `json:"log_format"`
-	MigrateOnBoot     bool   `json:"migrate_on_boot"`
-	BootstrapProject  string `json:"bootstrap_project"`
-	BootstrapAPIKey   string `json:"bootstrap_api_key"`
-	BootstrapAdminEml string `json:"bootstrap_admin_email"`
-	BootstrapAdminPwd string `json:"bootstrap_admin_password"`
-	QueryMaxWindow    string `json:"query_max_window"` // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
-	CookieSecure      bool   `json:"cookie_secure"`    // set Secure on session cookies
-	WebUIDir          string `json:"webui_dir"`        // dir of the built shell; empty => placeholder
-	PluginDir         string `json:"plugin_dir"`       // dir of dev-mode plugins; empty => none
-	ServeShell        bool   `json:"serve_shell"`      // serve the web shell at /; false => headless (API only)
+	DatabaseURL        string `json:"database_url"`
+	OTLPHTTPAddr       string `json:"otlp_http_addr"`
+	OTLPGRPCAddr       string `json:"otlp_grpc_addr"`
+	APIAddr            string `json:"api_addr"`
+	LogLevel           string `json:"log_level"`
+	LogFormat          string `json:"log_format"`
+	MigrateOnBoot      bool   `json:"migrate_on_boot"`
+	BootstrapProject   string `json:"bootstrap_project"`
+	BootstrapAPIKey    string `json:"bootstrap_api_key"`
+	BootstrapAdminEml  string `json:"bootstrap_admin_email"`
+	BootstrapAdminPwd  string `json:"bootstrap_admin_password"`
+	QueryMaxWindow     string `json:"query_max_window"`     // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
+	CookieSecure       bool   `json:"cookie_secure"`        // set Secure on session cookies
+	WebUIDir           string `json:"webui_dir"`            // dir of the built shell; empty => placeholder
+	PluginDir          string `json:"plugin_dir"`           // dir of dev-mode plugins; empty => none
+	MetricsAddr        string `json:"metrics_addr"`         // Prometheus /metrics bind; empty => mounted on API server
+	ClockSkewThreshold string `json:"clock_skew_threshold"` // e.g. "5m"; drift beyond stamps dq
+	ServeShell         bool   `json:"serve_shell"`          // serve the web shell at /; false => headless (API only)
 }
 
 func defaults() Config {
 	return Config{
-		DatabaseURL:      "postgres://llmobs:llmobs@localhost:5432/llmobs?sslmode=disable",
-		OTLPHTTPAddr:     ":4318",
-		OTLPGRPCAddr:     ":4317",
-		APIAddr:          ":8080",
-		LogLevel:         "info",
-		LogFormat:        "json",
-		MigrateOnBoot:    true,
-		BootstrapProject: "default",
-		QueryMaxWindow:   "720h",
-		ServeShell:       true,
+		DatabaseURL:        "postgres://llmobs:llmobs@localhost:5432/llmobs?sslmode=disable",
+		OTLPHTTPAddr:       ":4318",
+		OTLPGRPCAddr:       ":4317",
+		APIAddr:            ":8080",
+		LogLevel:           "info",
+		LogFormat:          "json",
+		MigrateOnBoot:      true,
+		BootstrapProject:   "default",
+		QueryMaxWindow:     "720h",
+		ServeShell:         true,
+		MetricsAddr:        ":9090",
+		ClockSkewThreshold: "5m",
 	}
 }
 
@@ -73,6 +77,8 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("QUERY_MAX_WINDOW"), &c.QueryMaxWindow)
 	envStr(brand.Env("WEBUI_DIR"), &c.WebUIDir)
 	envStr(brand.Env("PLUGIN_DIR"), &c.PluginDir)
+	envStr(brand.Env("METRICS_ADDR"), &c.MetricsAddr)
+	envStr(brand.Env("CLOCK_SKEW_THRESHOLD"), &c.ClockSkewThreshold)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)

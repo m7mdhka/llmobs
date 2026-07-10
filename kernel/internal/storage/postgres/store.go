@@ -135,19 +135,31 @@ roots AS (
 		start_time ASC, id ASC
 ),
 agg AS (
-	SELECT trace_id, project_id,
-		MIN(start_time) AS start_time,
-		MAX(end_time)   AS end_time,
-		bool_or(status_code = 'error') AS any_error,
+	SELECT sb.trace_id, sb.project_id,
+		MIN(sb.start_time) AS start_time,
+		MAX(sb.end_time)   AS end_time,
+		bool_or(sb.status_code = 'error') AS any_error,
+		bool_or(sb.end_time IS NULL) AS is_open,
+		-- last_activity: the most recent known time (max end_time, else max start).
+		COALESCE(MAX(sb.end_time), MAX(sb.start_time)) AS last_activity,
+		-- incomplete_trace (llmobs.dq): a span references a parent absent from the
+		-- trace (Collector tail-sampling dropped it). Orphan-with-parent-ref.
+		bool_or(
+			sb.parent_span_id IS NOT NULL AND sb.parent_span_id <> ''
+			AND NOT EXISTS (
+				SELECT 1 FROM span_base p
+				WHERE p.project_id = sb.project_id AND p.trace_id = sb.trace_id AND p.id = sb.parent_span_id
+			)
+		) AS incomplete_trace,
 		count(*) AS span_count
-	FROM span_base
-	GROUP BY trace_id, project_id
+	FROM span_base sb
+	GROUP BY sb.trace_id, sb.project_id
 )
 SELECT
-	a.trace_id AS id, a.project_id, a.start_time, a.end_time,
+	a.trace_id AS id, a.project_id, a.start_time, a.end_time, a.last_activity,
 	CASE WHEN a.any_error THEN 'error' ELSE r.status_code END AS status_code,
 	r.name, r.environment, r.release, r.version, r.session_id, r.user_id,
-	r.attributes, a.span_count
+	r.attributes, a.span_count, a.is_open, a.incomplete_trace
 FROM agg a JOIN roots r ON r.trace_id = a.trace_id`
 
 // QueryTraces runs a compiled traces query against the synthesized projection and
@@ -158,10 +170,10 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 	// filter/order predicate still sees the real values (it runs on trace_proj,
 	// where NULLs are preserved for NULL-policy semantics).
 	sql := "WITH trace_proj AS (" + traceProjection + ") SELECT " +
-		"id, project_id, start_time, end_time, " +
+		"id, project_id, start_time, end_time, last_activity, " +
 		"COALESCE(status_code,''), COALESCE(name,''), COALESCE(environment,''), " +
 		"COALESCE(release,''), COALESCE(version,''), COALESCE(session_id,''), COALESCE(user_id,''), " +
-		"attributes, span_count " +
+		"attributes, span_count, is_open, incomplete_trace " +
 		"FROM trace_proj"
 	if where != "" {
 		sql += " WHERE " + where
@@ -180,12 +192,13 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 		var (
 			id, projectID, statusCode, name, environment, release, version, sessionID, userID string
 			startTime                                                                         time.Time
-			endTime                                                                           *time.Time
+			endTime, lastActivity                                                             *time.Time
 			attributes                                                                        []byte
 			spanCount                                                                         int64
+			isOpen, incompleteTrace                                                           bool
 		)
-		if err := rows.Scan(&id, &projectID, &startTime, &endTime, &statusCode, &name,
-			&environment, &release, &version, &sessionID, &userID, &attributes, &spanCount); err != nil {
+		if err := rows.Scan(&id, &projectID, &startTime, &endTime, &lastActivity, &statusCode, &name,
+			&environment, &release, &version, &sessionID, &userID, &attributes, &spanCount, &isOpen, &incompleteTrace); err != nil {
 			return nil, err
 		}
 		doc := map[string]any{
@@ -201,6 +214,13 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 			"user_id":     userID,
 			"tags":        []any{},
 			"span_count":  spanCount,
+			"is_open":     isOpen,
+		}
+		if incompleteTrace {
+			doc["llmobs.dq.incomplete_trace"] = true
+		}
+		if lastActivity != nil {
+			doc["last_activity"] = lastActivity.UTC().Format(time.RFC3339Nano)
 		}
 		if endTime != nil {
 			doc["end_time"] = endTime.UTC().Format(time.RFC3339Nano)

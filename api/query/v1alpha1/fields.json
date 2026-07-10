@@ -301,6 +301,30 @@
           "orderable": false,
           "groupable": false,
           "anchor": "03-trace.md \u00a71"
+        },
+        {
+          "name": "last_activity",
+          "class": "timestamp",
+          "orderable": true,
+          "groupable": false,
+          "computed": true,
+          "anchor": "00-dsl-spec.md \u00a74.1 (max end_time; activity anchor)"
+        },
+        {
+          "name": "is_open",
+          "class": "boolean",
+          "orderable": false,
+          "groupable": true,
+          "computed": true,
+          "anchor": "00-dsl-spec.md \u00a74.1 (any span still open)"
+        },
+        {
+          "name": "incomplete_trace",
+          "class": "boolean",
+          "orderable": false,
+          "groupable": true,
+          "computed": true,
+          "anchor": "08-data-quality.md (llmobs.dq.incomplete_trace)"
         }
       ]
     },

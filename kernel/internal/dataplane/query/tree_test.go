@@ -82,3 +82,39 @@ func TestSynthesizeTrace(t *testing.T) {
 		t.Fatalf("environment should come from root: %v", tr["environment"])
 	}
 }
+
+// A complete trace is not open and not incomplete.
+func TestSynthesizeTraceComplete(t *testing.T) {
+	spans := []map[string]any{
+		{"id": "root", "parent_span_id": "", "start_time": "2026-01-01T00:00:00Z", "end_time": "2026-01-01T00:00:05Z"},
+		{"id": "child", "parent_span_id": "root", "start_time": "2026-01-01T00:00:01Z", "end_time": "2026-01-01T00:00:04Z"},
+	}
+	tr := synthesizeTrace("p1", "t1", spans)
+	if tr["is_open"] != false {
+		t.Fatalf("closed trace should not be open: %v", tr["is_open"])
+	}
+	if _, ok := tr["llmobs.dq.incomplete_trace"]; ok {
+		t.Fatalf("complete trace should carry no incomplete signal")
+	}
+	if tr["last_activity"] != "2026-01-01T00:00:05Z" {
+		t.Fatalf("last_activity should be max end: %v", tr["last_activity"])
+	}
+}
+
+// Collector tail-sampling: a child whose parent was dropped -> incomplete_trace;
+// an unfinished span -> is_open.
+func TestSynthesizeTraceIncompleteAndOpen(t *testing.T) {
+	spans := []map[string]any{
+		// the real root was tail-sampled away; "child" references a missing parent
+		{"id": "child", "parent_span_id": "dropped-root", "start_time": "2026-01-01T00:00:01Z", "end_time": "2026-01-01T00:00:04Z"},
+		// an open span (no end_time)
+		{"id": "grandchild", "parent_span_id": "child", "start_time": "2026-01-01T00:00:02Z"},
+	}
+	tr := synthesizeTrace("p1", "t1", spans)
+	if tr["llmobs.dq.incomplete_trace"] != true {
+		t.Fatalf("dropped-parent trace should be incomplete: %v", tr)
+	}
+	if tr["is_open"] != true {
+		t.Fatalf("trace with an unfinished span should be open: %v", tr["is_open"])
+	}
+}

@@ -144,14 +144,29 @@ func synthesizeTrace(projectID, traceID string, spans []map[string]any) map[stri
 			trace[k] = v
 		}
 	}
+	ids := make(map[string]bool, len(spans))
+	for _, sp := range spans {
+		if id, _ := sp["id"].(string); id != "" {
+			ids[id] = true
+		}
+	}
 	starts := make([]string, 0, len(spans))
 	var latestEnd string
+	isOpen := false
+	incomplete := false
 	for _, sp := range spans {
 		if st, ok := sp["start_time"].(string); ok && st != "" {
 			starts = append(starts, st)
 		}
-		if et, ok := sp["end_time"].(string); ok && et > latestEnd {
+		et, hasEnd := sp["end_time"].(string)
+		if !hasEnd || et == "" {
+			isOpen = true
+		} else if et > latestEnd {
 			latestEnd = et
+		}
+		// incomplete_trace (llmobs.dq): a span references a parent not in the trace.
+		if p, _ := sp["parent_span_id"].(string); p != "" && !ids[p] {
+			incomplete = true
 		}
 	}
 	if len(starts) > 0 {
@@ -160,6 +175,13 @@ func synthesizeTrace(projectID, traceID string, spans []map[string]any) map[stri
 	}
 	if latestEnd != "" {
 		trace["end_time"] = latestEnd
+		trace["last_activity"] = latestEnd
+	} else if len(starts) > 0 {
+		trace["last_activity"] = starts[len(starts)-1]
+	}
+	trace["is_open"] = isOpen
+	if incomplete {
+		trace["llmobs.dq.incomplete_trace"] = true
 	}
 	return trace
 }

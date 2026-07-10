@@ -75,7 +75,13 @@ test: ## Run unit tests (Go + TS)
 	@cd kernel && go test ./...
 	@echo ">> test: cli (incl. plugin-create scaffold)"
 	@cd cli && go test ./...
-	@echo ">> test: (TS) turbo run test — wired as packages land"
+	@echo ">> test: (TS) SDK hooks + testing utilities (vitest; build deps first)"
+	@pnpm --filter @llmobs/query-client build >/dev/null
+	@pnpm --filter @llmobs/tokens build >/dev/null
+	@pnpm --filter @llmobs/ui build >/dev/null
+	@pnpm --filter @llmobs/schema-form build >/dev/null
+	@pnpm --filter @llmobs/plugin-sdk build >/dev/null
+	@pnpm --filter @llmobs/plugin-sdk test
 
 .PHONY: plugin-python-test
 plugin-python-test: ## Python plugin backend tests (cross-language interop + Langfuse translation)
@@ -91,8 +97,8 @@ lint: ## Run all linters (Go + TS + boundary/import checks)
 # ---------------------------------------------------------------------------
 
 .PHONY: dev
-dev: ## Run the lite profile locally (compose up + web shell)
-	@echo ">> dev: docker compose (lite profile) + web shell"
+dev: ## Dev inner loop: Postgres + kernel + shell + tracing plugin, all hot-reloading
+	@bash scripts/dev.sh
 
 .PHONY: e2e
 e2e: e2e-lite ## Run end-to-end tests (lite compose profile)

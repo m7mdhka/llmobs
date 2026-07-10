@@ -7,3 +7,9 @@ packages:
   - "packages/*"
   - "plugins/*/frontend"
   - "templates/*/frontend"
+# Approve the native build scripts we trust (pnpm 11 blocks all by default). esbuild
+# ships with vitest (the SDK's test runner); its postinstall fetches the platform
+# binary. Without this, `pnpm install` / `pnpm run` hard-fail the deps-status check.
+onlyBuiltDependencies:
+  - esbuild
+

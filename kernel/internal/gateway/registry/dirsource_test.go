@@ -106,3 +106,45 @@ func TestDirSourceScanAndServe(t *testing.T) {
 		t.Fatal("path traversal must not be served")
 	}
 }
+
+// TestDirSourceDevRemotes: with a dev-remote override (J3 `make dev`), the plugin's
+// remoteEntry is the live dev-server URL and the integrity hash is dropped (the dev
+// bundle changes every save). Plugins without an override are untouched.
+func TestDirSourceDevRemotes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "demo", "llmobs-plugin.yaml"), manifest)
+	writeFile(t, filepath.Join(root, "demo", "dist", "remoteEntry.js"), "console.log('remote');")
+	writeFile(t, filepath.Join(root, "demo", "settings.schema.json"), `{"type":"object"}`)
+
+	ds := NewDirSource(root, "/v1alpha1/registry/plugins", slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WithDevRemotes(map[string]string{"acme/demo": "http://localhost:3001/remoteEntry.js"}))
+	p := ds.Plugins()[0]
+	if p.RemoteEntry != "http://localhost:3001/remoteEntry.js" {
+		t.Fatalf("dev remote must override remoteEntry, got %s", p.RemoteEntry)
+	}
+	if p.Integrity != "" {
+		t.Fatalf("dev remote must drop integrity, got %q", p.Integrity)
+	}
+
+	// A source without the override advertises the built dist + integrity.
+	prod := NewDirSource(root, "/v1alpha1/registry/plugins", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	pp := prod.Plugins()[0]
+	if pp.RemoteEntry == p.RemoteEntry || pp.Integrity == "" {
+		t.Fatalf("without the override, remoteEntry must be the built dist with integrity: %+v", pp)
+	}
+
+	// The key dev scenario: a plugin with NO built dist still loads when it has a dev
+	// remote (its frontend is served live by its own dev server). Without the override
+	// the same dir fails (no dist to hash).
+	nodist := t.TempDir()
+	writeFile(t, filepath.Join(nodist, "demo", "llmobs-plugin.yaml"), manifest)
+	writeFile(t, filepath.Join(nodist, "demo", "settings.schema.json"), `{"type":"object"}`)
+	dev := NewDirSource(nodist, "/v1alpha1/registry/plugins", slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WithDevRemotes(map[string]string{"acme/demo": "http://localhost:3001/remoteEntry.js"}))
+	if len(dev.Plugins()) != 1 {
+		t.Fatal("a dev-remote plugin must load without a built dist")
+	}
+	if none := NewDirSource(nodist, "/v1alpha1/registry/plugins", slog.New(slog.NewTextHandler(io.Discard, nil))); len(none.Plugins()) != 0 {
+		t.Fatal("without a dev remote, a plugin with no dist must be skipped")
+	}
+}

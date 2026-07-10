@@ -8,6 +8,7 @@ Covers:
 
 - The seven SDK primitives (query, write, events, jobs, kv, secrets, surface).
 - The `llmobs-plugin.yaml` manifest.
+- [The inner loop — `make dev` (create → dev → edit → reload)](dev-loop.md) (J3).
 - [Settings — a schema-form tab with no backend](settings.md) (J2).
 - The [plugin trust model](trust-model.md) — what the frontend token confines (J1).
 - Scaffolding from `templates/` via `llmobs plugin create`.

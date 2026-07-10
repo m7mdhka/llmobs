@@ -1,5 +1,5 @@
 import * as React from "react";
-import { DataClient, type FrontendTokenProvider } from "./client.js";
+import { DataClient, type FrontendTokenProvider, type LLMObsClient } from "./client.js";
 
 // The runtime context the shell provides to every plugin surface: which project
 // is active, the gateway base URL, and the signed-in user. A plugin reads it via
@@ -8,7 +8,7 @@ export interface LLMObsContextValue {
   projectId?: string;
   baseUrl: string;
   user?: { id: string; email: string; role: string };
-  client: DataClient;
+  client: LLMObsClient;
 }
 
 const LLMObsContext = React.createContext<LLMObsContextValue | null>(null);
@@ -29,6 +29,12 @@ export interface ProviderConfig {
   frontendToken?: FrontendTokenProvider;
   /** Test seam. */
   fetchImpl?: typeof fetch;
+  /**
+   * Inject a pre-built data client instead of constructing one from baseUrl. The
+   * testing utilities (@llmobs/plugin-sdk/testing) use this to supply a fake client;
+   * production leaves it unset and a real DataClient is built.
+   */
+  client?: LLMObsClient;
 }
 
 /** The shell wraps each plugin surface in this. Plugins never render it. */
@@ -45,14 +51,16 @@ export function LLMObsPluginProvider({
       baseUrl,
       projectId: config.projectId,
       user: config.user,
-      client: new DataClient({
-        baseUrl,
-        projectId: config.projectId,
-        fetchImpl: config.fetchImpl,
-        frontendToken: config.frontendToken,
-      }),
+      client:
+        config.client ??
+        new DataClient({
+          baseUrl,
+          projectId: config.projectId,
+          fetchImpl: config.fetchImpl,
+          frontendToken: config.frontendToken,
+        }),
     };
-  }, [config.baseUrl, config.projectId, config.user, config.fetchImpl, config.frontendToken]);
+  }, [config.baseUrl, config.projectId, config.user, config.fetchImpl, config.frontendToken, config.client]);
 
   return <LLMObsContext.Provider value={value}>{children}</LLMObsContext.Provider>;
 }

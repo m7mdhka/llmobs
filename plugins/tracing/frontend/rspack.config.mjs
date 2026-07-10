@@ -64,4 +64,15 @@ export default {
   ],
   experiments: { css: true },
   optimization: { moduleIds: "deterministic" },
+  // `make dev` (J3): the plugin runs its OWN rspack dev server serving remoteEntry.js
+  // with hot reload. The shell (a different origin, :3000) loads this remote, so CORS
+  // must allow it; the kernel's dev-remote override points the registry at this URL.
+  // Edits to the plugin's frontend hot-reload in place — no rebuild, no kernel restart.
+  devServer: {
+    port: Number(process.env.PLUGIN_PORT ?? 3001),
+    hot: true,
+    headers: { "Access-Control-Allow-Origin": "*" },
+    // A remote has no HTML entry; serve the built assets (remoteEntry.js + chunks).
+    static: false,
+  },
 };

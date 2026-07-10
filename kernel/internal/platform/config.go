@@ -29,6 +29,7 @@ type Config struct {
 	CookieSecure       bool   `json:"cookie_secure"`        // set Secure on session cookies
 	WebUIDir           string `json:"webui_dir"`            // dir of the built shell; empty => placeholder
 	PluginDir          string `json:"plugin_dir"`           // dir of dev-mode plugins; empty => none
+	DevPluginRemotes   string `json:"dev_plugin_remotes"`   // J3 `make dev`: "id=url,id=url" — advertise live dev-server remoteEntry URLs; empty in prod
 	MetricsAddr        string `json:"metrics_addr"`         // Prometheus /metrics bind; empty => mounted on API server
 	ClockSkewThreshold string `json:"clock_skew_threshold"` // e.g. "5m"; drift beyond stamps dq
 	ServeShell         bool   `json:"serve_shell"`          // serve the web shell at /; false => headless (API only)
@@ -59,19 +60,19 @@ type Config struct {
 
 func defaults() Config {
 	return Config{
-		DatabaseURL:        "postgres://llmobs:llmobs@localhost:5432/llmobs?sslmode=disable",
-		OTLPHTTPAddr:       ":4318",
-		OTLPGRPCAddr:       ":4317",
-		APIAddr:            ":8080",
-		LogLevel:           "info",
-		LogFormat:          "json",
-		MigrateOnBoot:      true,
-		BootstrapProject:   "default",
-		QueryMaxWindow:     "720h",
-		ServeShell:         true,
-		MetricsAddr:          ":9090",
-		ClockSkewThreshold:   "5m",
-		RedactPresets:        "email,secret,iban,credit_card,phone",
+		DatabaseURL:               "postgres://llmobs:llmobs@localhost:5432/llmobs?sslmode=disable",
+		OTLPHTTPAddr:              ":4318",
+		OTLPGRPCAddr:              ":4317",
+		APIAddr:                   ":8080",
+		LogLevel:                  "info",
+		LogFormat:                 "json",
+		MigrateOnBoot:             true,
+		BootstrapProject:          "default",
+		QueryMaxWindow:            "720h",
+		ServeShell:                true,
+		MetricsAddr:               ":9090",
+		ClockSkewThreshold:        "5m",
+		RedactPresets:             "email,secret,iban,credit_card,phone",
 		IngestQueueSize:           4096,
 		ShutdownDrainTimeout:      "20s",
 		PersistUnhealthyThreshold: 5,
@@ -107,6 +108,7 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("QUERY_MAX_WINDOW"), &c.QueryMaxWindow)
 	envStr(brand.Env("WEBUI_DIR"), &c.WebUIDir)
 	envStr(brand.Env("PLUGIN_DIR"), &c.PluginDir)
+	envStr(brand.Env("DEV_PLUGIN_REMOTES"), &c.DevPluginRemotes)
 	envStr(brand.Env("METRICS_ADDR"), &c.MetricsAddr)
 	envStr(brand.Env("CLOCK_SKEW_THRESHOLD"), &c.ClockSkewThreshold)
 	envStr(brand.Env("REDACT_PRESETS"), &c.RedactPresets)

@@ -1,7 +1,7 @@
-// The tracing plugin is a Module Federation REMOTE. It exposes "./plugin" (the
-// Traces surface) and shares the host's singletons — it must never bundle its own
-// react/router/sdk/design-system. PUBLIC_PATH is "auto" so the bundle works from
-// wherever the kernel serves it (registry asset path).
+// This plugin is a Module Federation REMOTE. It exposes "./plugin" (its surface) and
+// shares the host's singletons — it must never bundle its own react/router/sdk/
+// design-system. publicPath is "auto" so the bundle works from wherever the kernel
+// serves it (the registry asset path in prod, or this dev server under `make dev`).
 import { rspack } from "@rspack/core";
 import { ModuleFederationPlugin } from "@module-federation/enhanced/rspack";
 import { fileURLToPath } from "node:url";
@@ -64,4 +64,13 @@ export default {
   ],
   experiments: { css: true },
   optimization: { moduleIds: "deterministic" },
+  // `make dev`: this plugin runs its own rspack dev server serving remoteEntry.js with
+  // hot reload. The shell (a different origin) loads it, so CORS must allow it; point
+  // the kernel's LLMOBS_DEV_PLUGIN_REMOTES at http://localhost:<PLUGIN_PORT>/remoteEntry.js.
+  devServer: {
+    port: Number(process.env.PLUGIN_PORT ?? 3001),
+    hot: true,
+    headers: { "Access-Control-Allow-Origin": "*" },
+    static: false,
+  },
 };

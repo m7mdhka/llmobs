@@ -79,9 +79,21 @@ export default {
   ],
   experiments: { css: true },
   devServer: {
-    port: 3000,
+    port: Number(process.env.SHELL_PORT ?? 3000),
     historyApiFallback: true,
     hot: true,
+    // `make dev` (J3): the shell dev server runs on :3000 while the kernel API runs
+    // elsewhere (:8080 by default). Proxy the kernel-owned paths so the shell's
+    // same-origin fetches (auth, registry, query, plugin APIs) reach the kernel and
+    // the session cookie flows. Everything else is the SPA (historyApiFallback).
+    proxy: [
+      {
+        context: ["/v1alpha1", "/auth", "/api", "/readyz", "/healthz"],
+        target: process.env.KERNEL_URL ?? "http://localhost:8080",
+        changeOrigin: false,
+        cookieDomainRewrite: "",
+      },
+    ],
   },
   optimization: {
     // Deterministic module/chunk ids so the singleton check can compare builds.

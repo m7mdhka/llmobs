@@ -29,6 +29,27 @@ for _ in $(seq 1 60); do
 done
 if [ -z "$ready" ]; then echo "FAIL: kernel not ready"; "${COMPOSE[@]}" logs kernel; exit 1; fi
 
+echo ">> e2e-lite: auth smoke (login -> me -> logout)"
+COOKIES="$(mktemp)"
+LOGIN="$(curl -sf -c "$COOKIES" -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"admin-dev-password"}' ${API}/auth/login || true)"
+CSRF="$(printf '%s' "$LOGIN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["csrf_token"])' 2>/dev/null || echo '')"
+if [ -z "$CSRF" ]; then echo "FAIL: login did not return a csrf token"; echo "$LOGIN"; exit 1; fi
+ME="$(curl -sf -b "$COOKIES" ${API}/auth/me || true)"
+printf '%s' "$ME" | python3 -c 'import sys,json;assert json.load(sys.stdin)["user"]["email"]=="admin@example.com"' \
+  || { echo "FAIL: /auth/me did not return the admin"; echo "$ME"; exit 1; }
+# A session-authenticated query must work without any bearer key.
+SQ_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -b "$COOKIES" -H "Content-Type: application/json" \
+  -d '{"target":"spans","timeRange":{"from":"2020-01-01T00:00:00Z","to":"2020-01-02T00:00:00Z"}}' ${API}/v1alpha1/query)"
+[ "$SQ_STATUS" = "200" ] || { echo "FAIL: session-auth query returned $SQ_STATUS"; exit 1; }
+# Bad login is rejected.
+BAD_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"wrong"}' ${API}/auth/login)"
+[ "$BAD_STATUS" = "401" ] || { echo "FAIL: bad login returned $BAD_STATUS (want 401)"; exit 1; }
+curl -sf -b "$COOKIES" -X POST -H "X-CSRF-Token: $CSRF" ${API}/auth/logout >/dev/null || { echo "FAIL: logout"; exit 1; }
+rm -f "$COOKIES"
+echo "   assert OK: login/me/session-query/bad-login/logout"
+
 echo ">> e2e-lite: emitting an agent-shaped OTel trace"
 TRACE_ID="$(LLMOBS_API_KEY="$KEY" LLMOBS_OTLP_ENDPOINT=localhost:${LLMOBS_OTLP_PORT} go run ./examples/otel-genai-demo)"
 echo "   trace_id=$TRACE_ID"

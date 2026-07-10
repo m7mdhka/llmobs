@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/queryapi"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 )
@@ -39,6 +40,19 @@ func (s *Server) auth(r *http.Request, scope string) (controlplane.Identity, *Co
 	if bearer == "" {
 		bearer = r.Header.Get("X-LLMObs-Service-Token") // B2 wires the double-token model
 	}
+	// Browser callers (the shell + plugins) authenticate with a session cookie,
+	// not a bearer. A resolved session grants the admin full scopes on the
+	// selected project (single-admin lite; RBAC/project membership is future).
+	if bearer == "" {
+		if sess, ok := authhttp.SessionFrom(r.Context()); ok {
+			projectID, err := s.sessionProject(r)
+			if err != nil {
+				return controlplane.Identity{}, errf("unauthorized", 403, "no project available")
+			}
+			_ = sess
+			return controlplane.Identity{ProjectID: projectID, Scopes: []string{"ingest", "query"}}, nil
+		}
+	}
 	id, err := controlplane.Authenticate(r.Context(), s.pool, bearer)
 	if err != nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "invalid credentials")
@@ -47,6 +61,16 @@ func (s *Server) auth(r *http.Request, scope string) (controlplane.Identity, *Co
 		return controlplane.Identity{}, errf("unauthorized", 403, "missing scope %s", scope)
 	}
 	return id, nil
+}
+
+// sessionProject resolves the project a browser session operates on: the
+// X-LLMObs-Project header (the shell's project context) when present and valid,
+// else the single default project (single-project lite).
+func (s *Server) sessionProject(r *http.Request) (string, error) {
+	if p := r.Header.Get("X-LLMObs-Project"); p != "" {
+		return p, nil
+	}
+	return controlplane.DefaultProjectID(r.Context(), s.pool)
 }
 
 // RunQuery: POST /v1alpha1/query

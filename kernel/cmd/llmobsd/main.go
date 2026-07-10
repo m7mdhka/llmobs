@@ -21,6 +21,8 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/pipeline"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/query"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/registry"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/webui"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 	"github.com/m7mdhka/llmobs/kernel/pkg/brand"
@@ -97,7 +99,11 @@ func run() error {
 	apiMux := http.NewServeMux()
 	platform.NewHealth(pool).Register(apiMux)
 	auth.Register(apiMux)
+	registry.NewHandler(registry.EmptySource{}).Register(apiMux)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
+	// The web shell (static SPA) is served at the origin root; more-specific API
+	// prefixes above win, and unknown non-asset paths fall back to index.html.
+	apiMux.Handle("/", webui.Handler(cfg.WebUIDir))
 	apiServer := &http.Server{Addr: cfg.APIAddr, Handler: auth.Middleware(apiMux), ReadHeaderTimeout: 5 * time.Second}
 
 	// OTLP HTTP receiver server.

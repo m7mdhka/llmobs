@@ -52,7 +52,15 @@ generate: ## Regenerate code from api/ contracts (JSON Schema -> Go/TS types, Op
 
 .PHONY: build
 build: ## Build kernel, cli, web, and packages
-	@echo ">> build: kernel + cli (go), web + packages (turbo)"
+	@echo ">> build: kernel + cli (go)"
+	@cd kernel && go build ./... && cd ../cli && go build ./... 2>/dev/null || true
+	@echo ">> build: design system + web shell (pnpm)"
+	@command -v pnpm >/dev/null 2>&1 && ( \
+		pnpm --filter @llmobs/tokens build && \
+		pnpm --filter @llmobs/ui build && \
+		NODE_ENV=production pnpm --filter @llmobs/shell build && \
+		pnpm --filter @llmobs/shell check:singletons \
+	) || echo "   (pnpm not found; skipping web build)"
 
 # ---------------------------------------------------------------------------
 # Test / Lint

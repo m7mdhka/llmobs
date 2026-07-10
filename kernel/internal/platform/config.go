@@ -27,6 +27,7 @@ type Config struct {
 	BootstrapAdminPwd string `json:"bootstrap_admin_password"`
 	QueryMaxWindow    string `json:"query_max_window"` // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
 	CookieSecure      bool   `json:"cookie_secure"`    // set Secure on session cookies
+	WebUIDir          string `json:"webui_dir"`        // dir of the built shell; empty => placeholder
 }
 
 func defaults() Config {
@@ -67,6 +68,7 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("BOOTSTRAP_ADMIN_EMAIL"), &c.BootstrapAdminEml)
 	envStr(brand.Env("BOOTSTRAP_ADMIN_PASSWORD"), &c.BootstrapAdminPwd)
 	envStr(brand.Env("QUERY_MAX_WINDOW"), &c.QueryMaxWindow)
+	envStr(brand.Env("WEBUI_DIR"), &c.WebUIDir)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	return c, nil

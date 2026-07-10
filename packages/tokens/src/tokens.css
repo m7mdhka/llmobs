@@ -1,0 +1,191 @@
+/*
+ * LLMObs design tokens — the single source of truth for color, space, type.
+ * Consumers use var(--llmobs-*) only; never hardcode hex. Theme resolves from
+ * prefers-color-scheme, and a manual toggle wins via :root[data-theme=...].
+ *
+ * Identity: calm, data-dense, professional. Restrained neutral surfaces, one
+ * confident accent (iris), monospace for ids/values, tabular numerals for
+ * metrics. Dark mode is first-class — designed, not inverted.
+ */
+
+:root {
+  /* ---- Type ---- */
+  --llmobs-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --llmobs-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code",
+    "Cascadia Code", Menlo, Consolas, monospace;
+
+  --llmobs-text-2xs: 0.6875rem; /* 11px */
+  --llmobs-text-xs: 0.75rem; /* 12px */
+  --llmobs-text-sm: 0.8125rem; /* 13px — base for dense UI */
+  --llmobs-text-md: 0.875rem; /* 14px */
+  --llmobs-text-lg: 1rem; /* 16px */
+  --llmobs-text-xl: 1.25rem; /* 20px */
+  --llmobs-text-2xl: 1.5rem; /* 24px */
+
+  --llmobs-leading-tight: 1.25;
+  --llmobs-leading-normal: 1.5;
+  --llmobs-weight-normal: 400;
+  --llmobs-weight-medium: 500;
+  --llmobs-weight-semibold: 600;
+
+  /* ---- Space (4px base) ---- */
+  --llmobs-space-0: 0;
+  --llmobs-space-1: 0.25rem;
+  --llmobs-space-2: 0.5rem;
+  --llmobs-space-3: 0.75rem;
+  --llmobs-space-4: 1rem;
+  --llmobs-space-5: 1.5rem;
+  --llmobs-space-6: 2rem;
+  --llmobs-space-7: 3rem;
+  --llmobs-space-8: 4rem;
+
+  /* ---- Radii ---- */
+  --llmobs-radius-sm: 4px;
+  --llmobs-radius-md: 6px;
+  --llmobs-radius-lg: 10px;
+  --llmobs-radius-full: 9999px;
+
+  /* ---- Density (row heights for tables) ---- */
+  --llmobs-row-compact: 28px;
+  --llmobs-row-cozy: 34px;
+  --llmobs-row-comfortable: 42px;
+
+  /* ---- Motion ---- */
+  --llmobs-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --llmobs-dur-fast: 120ms;
+  --llmobs-dur-med: 200ms;
+
+  --llmobs-z-dropdown: 40;
+  --llmobs-z-overlay: 50;
+  --llmobs-z-modal: 60;
+  --llmobs-z-toast: 70;
+
+  /* ---- Fixed accent (iris) — same in both themes for brand continuity ---- */
+  --llmobs-accent-9: #5b57d1;
+  --llmobs-accent-10: #6a67e0;
+  --llmobs-accent-contrast: #ffffff;
+
+  /* Kind badge hues (semantic, theme-tuned below via alpha surfaces) */
+  --llmobs-hue-generation: #7c74ff;
+  --llmobs-hue-tool: #d98a34;
+  --llmobs-hue-agent: #3aa675;
+  --llmobs-hue-retrieval: #3c8fd0;
+  --llmobs-hue-span: #8a8f9c;
+  --llmobs-hue-error: #e5484d;
+}
+
+/* ---- Light (default) ---- */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --llmobs-bg: #fbfbfc;
+  --llmobs-surface: #ffffff;
+  --llmobs-surface-2: #f4f5f7;
+  --llmobs-surface-3: #eceef1;
+  --llmobs-overlay: rgba(17, 18, 23, 0.42);
+
+  --llmobs-border: #e4e6ea;
+  --llmobs-border-strong: #d3d6dc;
+
+  --llmobs-text: #1a1c22;
+  --llmobs-text-muted: #5c616d;
+  --llmobs-text-subtle: #868c98;
+  --llmobs-text-on-accent: var(--llmobs-accent-contrast);
+
+  --llmobs-accent: var(--llmobs-accent-9);
+  --llmobs-accent-hover: var(--llmobs-accent-10);
+  --llmobs-accent-soft: rgba(91, 87, 209, 0.1);
+  --llmobs-accent-border: rgba(91, 87, 209, 0.32);
+
+  --llmobs-danger: #d1373c;
+  --llmobs-danger-soft: rgba(209, 55, 60, 0.1);
+  --llmobs-warning: #b7791f;
+  --llmobs-warning-soft: rgba(183, 121, 31, 0.12);
+  --llmobs-success: #1a7f52;
+  --llmobs-success-soft: rgba(26, 127, 82, 0.12);
+
+  --llmobs-focus-ring: rgba(91, 87, 209, 0.5);
+  --llmobs-shadow-sm: 0 1px 2px rgba(17, 18, 23, 0.06), 0 1px 3px rgba(17, 18, 23, 0.05);
+  --llmobs-shadow-md: 0 4px 12px rgba(17, 18, 23, 0.1);
+  --llmobs-shadow-lg: 0 12px 40px rgba(17, 18, 23, 0.16);
+}
+
+/* ---- Dark (first-class) ---- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --llmobs-bg: #0d0e12;
+  --llmobs-surface: #14161c;
+  --llmobs-surface-2: #1a1d24;
+  --llmobs-surface-3: #22262f;
+  --llmobs-overlay: rgba(0, 0, 0, 0.6);
+
+  --llmobs-border: #262a33;
+  --llmobs-border-strong: #333846;
+
+  --llmobs-text: #e7e9ee;
+  --llmobs-text-muted: #9aa0ad;
+  --llmobs-text-subtle: #6b7280;
+  --llmobs-text-on-accent: #ffffff;
+
+  --llmobs-accent: #7d79e6;
+  --llmobs-accent-hover: #8c89ec;
+  --llmobs-accent-soft: rgba(125, 121, 230, 0.16);
+  --llmobs-accent-border: rgba(125, 121, 230, 0.4);
+
+  --llmobs-danger: #f0575c;
+  --llmobs-danger-soft: rgba(240, 87, 92, 0.16);
+  --llmobs-warning: #e0a13a;
+  --llmobs-warning-soft: rgba(224, 161, 58, 0.16);
+  --llmobs-success: #3ecf8e;
+  --llmobs-success-soft: rgba(62, 207, 142, 0.16);
+
+  --llmobs-focus-ring: rgba(125, 121, 230, 0.6);
+  --llmobs-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --llmobs-shadow-md: 0 6px 16px rgba(0, 0, 0, 0.5);
+  --llmobs-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+
+/* Auto dark when the user hasn't chosen and the OS prefers dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --llmobs-bg: #0d0e12;
+    --llmobs-surface: #14161c;
+    --llmobs-surface-2: #1a1d24;
+    --llmobs-surface-3: #22262f;
+    --llmobs-overlay: rgba(0, 0, 0, 0.6);
+
+    --llmobs-border: #262a33;
+    --llmobs-border-strong: #333846;
+
+    --llmobs-text: #e7e9ee;
+    --llmobs-text-muted: #9aa0ad;
+    --llmobs-text-subtle: #6b7280;
+
+    --llmobs-accent: #7d79e6;
+    --llmobs-accent-hover: #8c89ec;
+    --llmobs-accent-soft: rgba(125, 121, 230, 0.16);
+    --llmobs-accent-border: rgba(125, 121, 230, 0.4);
+
+    --llmobs-danger: #f0575c;
+    --llmobs-danger-soft: rgba(240, 87, 92, 0.16);
+    --llmobs-warning: #e0a13a;
+    --llmobs-warning-soft: rgba(224, 161, 58, 0.16);
+    --llmobs-success: #3ecf8e;
+    --llmobs-success-soft: rgba(62, 207, 142, 0.16);
+
+    --llmobs-focus-ring: rgba(125, 121, 230, 0.6);
+    --llmobs-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --llmobs-shadow-md: 0 6px 16px rgba(0, 0, 0, 0.5);
+    --llmobs-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* Metrics render with tabular, lined figures wherever this class is applied. */
+.llmobs-tabular {
+  font-variant-numeric: tabular-nums lining-nums;
+}

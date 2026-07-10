@@ -8,6 +8,12 @@ importers:
 
   .: {}
 
+  packages/brand:
+    devDependencies:
+      typescript:
+        specifier: 5.6.3
+        version: 5.6.3
+
   packages/plugin-sdk:
     dependencies:
       '@llmobs/query-client':
@@ -161,6 +167,9 @@ importers:
 
   web/shell:
     dependencies:
+      '@llmobs/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
       '@llmobs/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk

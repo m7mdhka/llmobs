@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { BrowserRouter } from "react-router-dom";
 import { LoadingState } from "@llmobs/ui";
+import { brand } from "@llmobs/brand";
 import { me, type Session } from "./api.js";
 import { LoginPage } from "./LoginPage.js";
 import { AppShell } from "./AppShell.js";
@@ -21,7 +22,7 @@ export function App(): React.ReactElement {
   }, []);
 
   if (auth.status === "loading") {
-    return <LoadingState title="Starting LLMObs…" />;
+    return <LoadingState title={`Starting ${brand.name}…`} />;
   }
   if (auth.status === "anon") {
     return <LoginPage onSignedIn={(session) => setAuth({ status: "authed", session })} />;

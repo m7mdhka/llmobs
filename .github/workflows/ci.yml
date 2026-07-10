@@ -60,6 +60,7 @@ jobs:
       - name: Build design system, SDK, shell (MF host), and tracing plugin (MF remote)
         run: |
           pnpm --filter @llmobs/query-client build
+          pnpm --filter @llmobs/brand build
           pnpm --filter @llmobs/tokens build
           pnpm --filter @llmobs/ui build
           pnpm --filter @llmobs/plugin-sdk build
@@ -72,6 +73,8 @@ jobs:
           pnpm --filter @llmobs/plugin-tracing typecheck
       - name: Shared singletons are declared (no plugin can bundle its own copy)
         run: pnpm --filter @llmobs/shell check:singletons
+      - name: Brand guard (display name only in @llmobs/brand)
+        run: bash scripts/check_brand.sh
 
   commit-lint:
     runs-on: ubuntu-latest

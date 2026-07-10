@@ -1,0 +1,16 @@
+{
+  "name": "@llmobs/brand",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The single source of the user-visible product identity (name, docs URL, logo slot). Mirror of kernel/pkg/brand: the display name lives ONLY here (D15), so white-labeling is a deployment concern, not a fork. A CI guard enforces it.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": { "typescript": "5.6.3" }
+}

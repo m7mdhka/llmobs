@@ -83,7 +83,7 @@ export function TracesListPage(): React.ReactElement {
       {traces.length === 0 ? (
         <EmptyState
           title="No traces in this window"
-          body="Emit a trace to your LLMObs endpoint and it will appear here."
+          body="Emit a trace to your ingestion endpoint and it will appear here."
         />
       ) : (
         <Table>

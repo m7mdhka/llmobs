@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Button, Field, Input } from "@llmobs/ui";
 import { login, ApiError, type Session } from "./api.js";
+import { brand } from "@llmobs/brand";
 
 export function LoginPage({ onSignedIn }: { onSignedIn: (s: Session) => void }): React.ReactElement {
   const [email, setEmail] = useState("");
@@ -31,7 +32,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (s: Session) => void }):
       <form className="shell-login__card" onSubmit={submit}>
         <div className="shell-login__brand">
           <span className="llm-brand__mark" aria-hidden />
-          <span>LLMObs</span>
+          <span>{brand.name}</span>
         </div>
         <p className="shell-login__tagline">Sign in to your observability workspace.</p>
         <Field label="Email" htmlFor="email">

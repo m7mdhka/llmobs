@@ -13,6 +13,7 @@ import {
 } from "@llmobs/ui";
 import { toggleTheme } from "@llmobs/tokens";
 import { fetchRegistry, logout, type RegistryPlugin, type Session } from "./api.js";
+import { brand } from "@llmobs/brand";
 import { registerPlugins } from "./remoteLoader.js";
 import { PluginRoute } from "./PluginRoute.js";
 
@@ -50,7 +51,7 @@ export function AppShell({ session, onSignedOut }: Props): React.ReactElement {
 
   return (
     <AppFrame>
-      <Topbar brand="LLMObs">
+      <Topbar brand={brand.name}>
         <Button size="sm" variant="ghost" onClick={() => toggleTheme()} aria-label="Toggle theme">
           Theme
         </Button>
@@ -113,7 +114,7 @@ function NoPlugins(): React.ReactElement {
   return (
     <EmptyState
       title="No plugins yet"
-      body="This LLMObs kernel has no plugins installed. Install a plugin (e.g. tracing) and it will appear here automatically — the shell discovers nav and routes from the registry."
+      body={`This ${brand.name} kernel has no plugins installed. Install a plugin (e.g. tracing) and it will appear here automatically — the shell discovers nav and routes from the registry.`}
     />
   );
 }

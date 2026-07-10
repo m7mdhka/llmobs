@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@llmobs/plugin-sdk": "workspace:*",
+    "@llmobs/brand": "workspace:*",
     "@llmobs/tokens": "workspace:*",
     "@llmobs/ui": "workspace:*",
     "react": "18.3.1",

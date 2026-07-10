@@ -13,20 +13,20 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/queryapi"
-	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
 // Server implements the generated Query API ServerInterface for the lite adapter.
 // B1 implements POST /v1alpha1/query (spans target) and GET /spans/{id}; the rest
 // return an honest 501 (documented as v-next in the OpenAPI).
 type Server struct {
-	store     *postgres.Store
+	store     storage.TelemetryStore
 	pool      *pgxpool.Pool
 	log       *slog.Logger
 	maxWindow time.Duration
 }
 
-func NewServer(store *postgres.Store, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration) *Server {
+func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration) *Server {
 	return &Server{store: store, pool: pool, log: log, maxWindow: maxWindow}
 }
 

@@ -1,0 +1,72 @@
+// Package storage defines the telemetry storage boundary the kernel dataplane
+// depends on (D7, 99-adapter-guidance.md). The lite adapter
+// (internal/storage/postgres) and any future adapter (ClickHouse, Timescale)
+// implement these interfaces; the dataplane (query, pipeline) depends only on
+// them, never on a concrete adapter. This is the seam the flexibility audit found
+// documented but absent in code.
+//
+// It is internal/ (not pkg/) by construction: adapters are a kernel-internal
+// concern — plugins never touch storage (invariant 3, D3). The neutral ingest
+// Event type lives here too, since it is a canonical-model concept, not a
+// Postgres one.
+//
+// Control-plane storage (users, api keys, projects, sessions) is deliberately
+// NOT part of this interface — it is a separate concern and is accessed directly
+// via the pool. Do not fuse the two.
+package storage
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+)
+
+// Op is an ingested event operation.
+type Op string
+
+const (
+	OpUpsert Op = "upsert"
+	OpDelete Op = "delete"
+)
+
+// Event is one ingested event targeting a single entity (05-update-semantics.md
+// §1). The dataplane builds these in the normalize stage; the adapter folds them.
+type Event struct {
+	Op      Op
+	EventTS time.Time
+	EventID string
+	Payload map[string]any
+}
+
+// TelemetryStore is the persistence + read surface the dataplane requires,
+// derived from the actual call sites in query/pipeline (interface-at-consumer,
+// kept in one named contract so an adapter author has a single thing to
+// implement). Query methods take a compiled predicate + args: the lite adapter's
+// DSL→SQL compiler emits Postgres SQL, which a Postgres-compatible adapter
+// (Timescale) reuses as-is. Relocating compilation behind an adapter-owned
+// compile step (ADR-0019) is the ClickHouse-driven follow-up, not this refactor.
+type TelemetryStore interface {
+	// PersistSpan applies one span event with merge-on-write (LM-5).
+	PersistSpan(ctx context.Context, ev Event) error
+	// QuerySpans runs a compiled spans predicate and returns folded span docs.
+	QuerySpans(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error)
+	// QueryTraces runs a compiled traces predicate over the synthesized trace
+	// projection and returns trace docs (DSL §4.1).
+	QueryTraces(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error)
+	// GetSpan returns a folded span doc by id, or nil if absent/deleted.
+	GetSpan(ctx context.Context, projectID, id string) (json.RawMessage, error)
+	// GetTraceSpans returns a trace's non-deleted spans in tree-buildable order.
+	GetTraceSpans(ctx context.Context, projectID, traceID string) ([]json.RawMessage, error)
+}
+
+// MergeConformer is the normative-merge surface an adapter exposes to the
+// conformance harness (tools/conformance). Every adapter MUST reproduce the fold
+// in 05-update-semantics.md; the harness asserts that with the spec's V-vectors
+// and the order-independence property. Fold is the pure ordered fold;
+// MergeIncremental applies events one-by-one (the read-modify-write path) and
+// MUST equal Fold over the same set regardless of arrival order.
+type MergeConformer interface {
+	Name() string
+	Fold(entityType string, events []Event) map[string]any
+	MergeIncremental(entityType string, events []Event) map[string]any
+}

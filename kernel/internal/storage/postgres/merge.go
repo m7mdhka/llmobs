@@ -16,23 +16,22 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
-// Op is an ingested event operation.
-type Op string
+// Op and Event are the neutral ingest types, owned by the storage package. They
+// are aliased here so the adapter's fold code reads naturally and external
+// callers use the neutral types.
+type Op = storage.Op
 
 const (
-	OpUpsert Op = "upsert"
-	OpDelete Op = "delete"
+	OpUpsert = storage.OpUpsert
+	OpDelete = storage.OpDelete
 )
 
 // Event is one ingested event targeting a single entity (05 §1).
-type Event struct {
-	Op      Op
-	EventTS time.Time
-	EventID string
-	Payload map[string]any
-}
+type Event = storage.Event
 
 // frozenFields per entity type (05 §5).
 var frozenFields = map[string]map[string]bool{

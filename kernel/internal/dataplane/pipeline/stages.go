@@ -10,7 +10,7 @@ import (
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
-	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
 // authenticate: resolve the bearer secret to an identity; require ingest scope.
@@ -64,8 +64,8 @@ func (s *normalizeStage) Process(_ context.Context, ing *Ingestion) error {
 	ctx := normalize.Context{ProjectID: ing.Identity.ProjectID}
 	for _, in := range ing.Spans {
 		canonical := s.reg.Normalize(in, ctx)
-		ing.Events = append(ing.Events, postgres.Event{
-			Op:      postgres.OpUpsert,
+		ing.Events = append(ing.Events, storage.Event{
+			Op:      storage.OpUpsert,
 			EventTS: eventTS(in),
 			EventID: in.SpanID,
 			Payload: canonical,
@@ -105,7 +105,7 @@ func (s *enrichStage) Name() string                                  { return "e
 func (s *enrichStage) Process(_ context.Context, _ *Ingestion) error { return nil }
 
 // persist: merge-on-write each canonical span event under the row lock.
-type persistStage struct{ store *postgres.Store }
+type persistStage struct{ store storage.TelemetryStore }
 
 func (s *persistStage) Name() string { return "persist" }
 func (s *persistStage) Process(ctx context.Context, ing *Ingestion) error {

@@ -15,7 +15,7 @@ decision history exists from the start:
 | ADR-0001 | Microkernel architecture (D1) |
 | ADR-0002 | Dogfood rule — first-party plugins use only the public API (D2) |
 | ADR-0003 | OTLP-canonical ingestion; normalizers vs. compat plugins (D3) |
-| ADR-0004 | Plugins are containers + manifest; MF 2.0 frontends (D4) |
+| ADR-0004 | Plugins are containers + manifest; MF 2.0 frontends (D4). **Amended (J1, see [ADR-0023](0023-plugin-protocol.md) "Frontend token"):** MF frontends share the shell's origin, so a frontend-only plugin is *trusted-at-install*; the frontend token is least-privilege-by-default, not a boundary. Origin isolation (cross-origin sandboxed iframe + postMessage) is the deferred real boundary. |
 | ADR-0005 | Double-token auth; permission intersection (D5) |
 | ADR-0006 | Declarative supervisor, pluggable executors (D6) |
 | ADR-0007 | Two deployment profiles: lite and scale (D7) |

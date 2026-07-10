@@ -15,6 +15,7 @@
     "jti": { "type": "string", "description": "Unique assertion id." },
     "projectId": { "type": "string", "description": "The tenant/project the request is scoped to." },
     "actor": { "type": "string", "description": "Audit actor, e.g. 'session:user@example.com' or 'apikey'." },
+    "purpose": { "type": "string", "enum": ["frontend"], "description": "Optional signed token-class marker (J1). Absent for the per-request proxy assertion and the jobs system assertion (both carry un-intersected scopes, confined downstream by the service-token intersection). 'frontend' marks a J1 frontend token whose scopes are ALREADY intersected (plugin-grant ∩ user ∩ project); only such tokens are accepted on the Query API frontend-token seam, so a proxy/jobs assertion cannot be replayed there." },
     "scopes": {
       "type": "array",
       "description": "The user's effective scopes (role/key ∩ project). Authoritative for the user half of the intersection.",

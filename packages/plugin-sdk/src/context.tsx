@@ -1,5 +1,5 @@
 import * as React from "react";
-import { DataClient } from "./client.js";
+import { DataClient, type FrontendTokenProvider } from "./client.js";
 
 // The runtime context the shell provides to every plugin surface: which project
 // is active, the gateway base URL, and the signed-in user. A plugin reads it via
@@ -18,6 +18,15 @@ export interface ProviderConfig {
   baseUrl?: string;
   projectId?: string;
   user?: { id: string; email: string; role: string };
+  /**
+   * Plugin frontend token provider (J1). The shell passes a getter that caches +
+   * refreshes this plugin's short-TTL frontend token; the SDK's data hooks present
+   * it transparently so the plugin's Query API calls run at least-privilege
+   * (plugin-grant ∩ session ∩ project) instead of the full session. Least-privilege
+   * by default — see the FrontendTokenProvider note; not a boundary against a
+   * hostile frontend.
+   */
+  frontendToken?: FrontendTokenProvider;
   /** Test seam. */
   fetchImpl?: typeof fetch;
 }
@@ -36,9 +45,14 @@ export function LLMObsPluginProvider({
       baseUrl,
       projectId: config.projectId,
       user: config.user,
-      client: new DataClient({ baseUrl, projectId: config.projectId, fetchImpl: config.fetchImpl }),
+      client: new DataClient({
+        baseUrl,
+        projectId: config.projectId,
+        fetchImpl: config.fetchImpl,
+        frontendToken: config.frontendToken,
+      }),
     };
-  }, [config.baseUrl, config.projectId, config.user, config.fetchImpl]);
+  }, [config.baseUrl, config.projectId, config.user, config.fetchImpl, config.frontendToken]);
 
   return <LLMObsContext.Provider value={value}>{children}</LLMObsContext.Provider>;
 }

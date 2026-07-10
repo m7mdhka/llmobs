@@ -28,6 +28,7 @@ metadata:
   version: 1.2.3
 spec:
   capabilities: [query]
+  permissions: [traces:read.metadata, scores:read]
   frontend:
     remoteName: demo
     exposedModule: ./plugin
@@ -64,6 +65,20 @@ func TestDirSourceScanAndServe(t *testing.T) {
 	}
 	if len(p.Nav) != 1 || p.Nav[0].Path != "/demo" {
 		t.Fatalf("nav not parsed: %+v", p.Nav)
+	}
+	// The manifest grant (J1) is populated so the frontend-token mint can look it up.
+	if len(p.Capabilities) != 1 || p.Capabilities[0] != "query" {
+		t.Fatalf("capabilities not parsed: %+v", p.Capabilities)
+	}
+	if len(p.Permissions) != 2 || p.Permissions[0] != "traces:read.metadata" {
+		t.Fatalf("permissions not parsed: %+v", p.Permissions)
+	}
+	caps, perms, ok := GrantFor(ds, "acme/demo")
+	if !ok || len(caps) != 1 || len(perms) != 2 {
+		t.Fatalf("GrantFor must return the manifest grant, got caps=%v perms=%v ok=%v", caps, perms, ok)
+	}
+	if _, _, ok := GrantFor(ds, "acme/nope"); ok {
+		t.Fatal("GrantFor must report false for an unknown plugin")
 	}
 
 	// The asset handler serves the bundle and refuses traversal.

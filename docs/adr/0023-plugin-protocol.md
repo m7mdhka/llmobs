@@ -255,6 +255,59 @@ two of which are contract changes made here:
   fully-live handshake is closed — a real Python `langfuse-compat` backend receives
   its token and operates end-to-end.
 
+## Frontend token — least-privilege-by-default, not a boundary (J1)
+
+Tier-3 gave **backends** a truly-confined identity (R3). Frontend plugins had none:
+the shell loads them via Module Federation into its **own origin and JS realm**
+(ADR-0004, shared react/sdk/ui singletons), and the SDK's data client sends the
+**session cookie**, so a frontend's Query API calls ran at the user's *full* session
+scope. J1 adds a frontend credential — and is deliberately honest about what it can
+and cannot do.
+
+- **Mechanism.** `POST /v1alpha1/plugin-frontend-token` (session-authed) mints a
+  per-plugin, per-session, short-TTL, audience-bound (`plugin:{id}`) identity
+  assertion whose scopes are **plugin-grant ∩ user-session ∩ project**, computed at
+  mint, and stamped with a signed **`purpose: "frontend"`** marker. The SDK presents
+  it as `X-LLMObs-Frontend-Token`; the Query API adds a frontend-token case that uses
+  those (already-intersected) scopes directly, ahead of the session case. Frontend
+  tokens carry **no capability markers**.
+
+- **Token-class separation (security-review fix).** The proxy per-request assertion
+  and the jobs system assertion share the identity-assertion claim shape but carry
+  *un-intersected* scopes (confined later by the service-token intersection at
+  `authPlugin`). Without a distinguishing marker, a backend plugin could replay the
+  full-scope assertion the proxy injects into it onto the frontend seam (no service
+  token ⇒ no intersection) and escalate to the user's full scopes — reading payloads
+  and reaching erasure. The signed `purpose` marker closes this: `MintFrontendToken`
+  is the only producer that sets it and `VerifyFrontendToken` is the only verifier
+  that accepts it; the generic `VerifyIdentityAssertion` now *rejects* it. Proven in
+  `pluginproto.TestFrontendTokenClassSeparation` +
+  `query.TestProxyAssertionCannotBeReplayedAsFrontendToken`.
+
+- **What it is: least-privilege by default.** For a *cooperating* SDK-using
+  frontend, its Query API access is now confined to the plugin's grant intersected
+  with the user — a metadata-only plugin cannot read payloads, cannot exceed the
+  user, cannot reach another project. Proven in
+  `query.TestFrontendTokenLeastPrivilege` + `frontendtoken.TestMintIntersectsGrantAndSession`.
+
+- **What it is NOT: a boundary against a hostile frontend.** Because the plugin
+  shares the shell's origin, it can bypass the SDK and call the Query API with the
+  ambient session cookie, getting full session scope. We **prove and name** this
+  rather than hide it: `query.TestFrontendTokenIsNotABoundary` demonstrates the
+  same-origin bypass succeeds. Labeling it "confinement" would be a false claim.
+
+- **Adopted v1 trust model.** A frontend-only plugin is **trusted-at-install** — the
+  same trust class as a browser/IDE extension. This is stated in the plugin-author
+  docs and surfaced at install. **Need hard confinement? Ship a backend** (R3
+  confines backends for real).
+
+- **Origin isolation is the future real boundary (paired follow-up).** A sandboxed
+  iframe on a distinct origin + a postMessage data bridge, with the frontend token
+  as the **sole** credential (no ambient cookie to bypass to), is specified as an
+  ADR-0004 amendment. **Trigger:** the first untrusted third-party frontend plugin
+  becoming a real requirement (marketplace or a specific customer) — not before.
+  Tracked as a deferred issue below.
+
 ## Consequences
 
 - The manifest gains an additive `spec.backend` (url, healthPath, infoPath,
@@ -268,4 +321,7 @@ two of which are contract changes made here:
 
 Compose/operator/GitOps executors; NATS scale event-bus backend; JWKS + key
 rotation; the browser SSE bridge; KMS secret backend; dedicated-DB `store` backend
-for scale. Each is tracked so the deferral is explicit, not silent.
+for scale; **frontend origin isolation** (the real boundary for untrusted frontend
+plugins — sandboxed cross-origin iframe + postMessage bridge + frontend-token-only
+auth; ADR-0004 amendment; trigger: first untrusted third-party frontend plugin).
+Each is tracked so the deferral is explicit, not silent.

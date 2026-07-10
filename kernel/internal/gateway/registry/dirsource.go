@@ -123,6 +123,8 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 		ExposedModule: m.Spec.Frontend.ExposedModule,
 		Integrity:     integrity,
 		Nav:           nav,
+		Capabilities:  m.Spec.Capabilities,
+		Permissions:   m.Spec.Permissions,
 	}
 	return p, distRoot, nil
 }

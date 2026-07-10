@@ -79,3 +79,20 @@ func (s *Signer) MintIdentityAssertion(pluginID, subject, projectID, actor strin
 func (s *Signer) VerifyIdentityAssertion(token, expectedAud string, now time.Time) (pluginproto.IdentityAssertionClaims, error) {
 	return pluginproto.VerifyIdentityAssertion(s.pub, token, expectedAud, now)
 }
+
+// MintFrontendToken issues a J1 frontend token — an identity assertion whose scopes
+// are already the plugin-grant ∩ user ∩ project intersection, stamped with the
+// signed PurposeFrontend marker so it cannot be confused with a proxy/jobs assertion.
+func (s *Signer) MintFrontendToken(pluginID, subject, projectID, actor string, scopes []string, now time.Time, ttl time.Duration) (string, pluginproto.IdentityAssertionClaims, error) {
+	jti, err := randomJTI()
+	if err != nil {
+		return "", pluginproto.IdentityAssertionClaims{}, fmt.Errorf("plugintoken: jti: %w", err)
+	}
+	return pluginproto.MintFrontendToken(s.priv, pluginID, subject, projectID, actor, scopes, now, ttl, jti)
+}
+
+// VerifyFrontendToken verifies a J1 frontend token against the current key,
+// requiring the signed PurposeFrontend marker (rejecting proxy/jobs assertions).
+func (s *Signer) VerifyFrontendToken(token string, now time.Time) (pluginproto.IdentityAssertionClaims, error) {
+	return pluginproto.VerifyFrontendToken(s.pub, token, now)
+}

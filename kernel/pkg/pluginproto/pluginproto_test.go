@@ -91,6 +91,41 @@ func TestIdentityAssertionAudienceConfusion(t *testing.T) {
 	}
 }
 
+// TestFrontendTokenClassSeparation proves the J1 token-class marker: a frontend
+// token verifies only via VerifyFrontendToken, and the two verifiers reject each
+// other's class — so a proxy/jobs-minted identity assertion (no purpose) cannot be
+// replayed on the frontend seam, and a frontend token cannot be replayed on the
+// backend identity path.
+func TestFrontendTokenClassSeparation(t *testing.T) {
+	pub, priv := keypair(t)
+	now := time.Unix(1_700_000_000, 0)
+
+	frontendTok, _, _ := MintFrontendToken(priv, "acme/a", "u@x", "proj_default", "frontend:u@x", []string{"traces:read.metadata"}, now, time.Minute, "jti-f")
+	proxyTok, _, _ := MintIdentityAssertion(priv, "acme/a", "u@x", "proj_default", "session:u@x", []string{"traces:read.metadata"}, now, time.Minute, "jti-p")
+
+	// Frontend token: accepted by the frontend verifier, carries the marker.
+	fc, err := VerifyFrontendToken(pub, frontendTok, now)
+	if err != nil {
+		t.Fatalf("frontend token must verify on its own path: %v", err)
+	}
+	if fc.Purpose != PurposeFrontend {
+		t.Fatalf("frontend token must carry purpose marker, got %q", fc.Purpose)
+	}
+	// ...and REJECTED on the generic identity-assertion path (even for its own aud).
+	if _, err := VerifyIdentityAssertion(pub, frontendTok, PluginSubject("acme/a"), now); err != ErrBadPurpose {
+		t.Fatalf("frontend token must be rejected as an identity assertion, got %v", err)
+	}
+
+	// Proxy/jobs assertion: accepted on the identity path, REJECTED on the frontend
+	// seam (this is the escalation the review caught).
+	if _, err := VerifyIdentityAssertion(pub, proxyTok, PluginSubject("acme/a"), now); err != nil {
+		t.Fatalf("proxy assertion must verify on the identity path: %v", err)
+	}
+	if _, err := VerifyFrontendToken(pub, proxyTok, now); err != ErrBadPurpose {
+		t.Fatalf("proxy assertion must be rejected on the frontend seam, got %v", err)
+	}
+}
+
 func TestMalformedToken(t *testing.T) {
 	pub, _ := keypair(t)
 	for _, tok := range []string{"", "nope", "v2.a.b", "v1.@@@.bbb", "v1.only-two"} {

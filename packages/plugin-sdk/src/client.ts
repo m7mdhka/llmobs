@@ -46,6 +46,20 @@ export class SdkError extends Error {
   }
 }
 
+/**
+ * FrontendTokenProvider yields the current plugin frontend token (J1). The shell
+ * supplies this; it caches a per-plugin, per-session, short-TTL token minted by the
+ * kernel and refreshes it before expiry. Returning `undefined` means "no token" —
+ * the client then falls back to the session cookie (Case 2) unchanged.
+ *
+ * NOTE — least-privilege-by-default, NOT a boundary. Presenting this token confines
+ * a COOPERATING SDK-using frontend to plugin-grant ∩ session ∩ project. It does not
+ * contain a hostile frontend: a plugin running in the shell's origin can bypass the
+ * SDK and call the gateway with the ambient cookie directly. Hard confinement needs
+ * a backend (H3) or origin isolation (future). See docs/plugin-authors/trust-model.
+ */
+export type FrontendTokenProvider = () => string | undefined | Promise<string | undefined>;
+
 export interface ClientConfig {
   /** Gateway base URL. Empty string = same origin (the shell's origin). */
   baseUrl: string;
@@ -53,6 +67,12 @@ export interface ClientConfig {
   projectId?: string;
   /** Optional fetch override (tests). */
   fetchImpl?: typeof fetch;
+  /**
+   * Plugin frontend token provider (J1). When set and it yields a token, the
+   * client presents it as X-LLMObs-Frontend-Token and the kernel scopes the call
+   * to the plugin's least-privilege grant instead of the full user session.
+   */
+  frontendToken?: FrontendTokenProvider;
 }
 
 export class DataClient {
@@ -65,17 +85,24 @@ export class DataClient {
     return f.bind(globalThis);
   }
 
-  private headers(json: boolean): Record<string, string> {
+  private async headers(json: boolean): Promise<Record<string, string>> {
     const h: Record<string, string> = { Accept: "application/json" };
     if (json) h["Content-Type"] = "application/json";
     if (this.cfg.projectId) h["X-LLMObs-Project"] = this.cfg.projectId;
+    // J1: present the plugin frontend token when the shell provides one. The kernel
+    // prefers it over the session cookie (Case 1b before Case 2), confining a
+    // cooperating frontend to its least-privilege grant.
+    if (this.cfg.frontendToken) {
+      const tok = await this.cfg.frontendToken();
+      if (tok) h["X-LLMObs-Frontend-Token"] = tok;
+    }
     return h;
   }
 
   private async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const res = await this.doFetch(`${this.cfg.baseUrl}${path}`, {
       method,
-      headers: this.headers(body !== undefined),
+      headers: await this.headers(body !== undefined),
       credentials: "same-origin",
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,

@@ -176,7 +176,12 @@ the `kv` primitive made frontend-reachable and schema-aware — not a new primit
 - **Endpoints:** `POST /v1alpha1/plugin/settings/get` and `/set`, POST-only, capped
   body. Authed by the **J1 frontend token** (§6): the plugin id + project come from
   the token, never the body — a frontend reaches only its own settings in its own
-  tenant. (No capability marker is required; the token's audience + tenant bound it.)
+  tenant.
+- **Reads are open; writes require configuration authority.** Settings are
+  **project-shared** plugin config, so `set` additionally requires the caller's
+  **session role** to carry a write scope (admins today, #21 RBAC seam) — a read-only
+  viewer with a valid frontend token gets `403` on `set` but may `get`. This keeps a
+  viewer from overwriting shared config or a stored secret.
 - **`get`** returns `{ "values": {…non-secret fields…}, "secrets": { "<field>":
   true|false } }` — for each secret field, only whether a value is stored.
 - **`set`** takes `{ "values": { "<field>": <value>, … } }`, validated server-side

@@ -26,6 +26,10 @@ const settingsSchemaJSON = `{
 }`
 
 func settingsSetup(t *testing.T) (*Settings, *plugintoken.Signer) {
+	return settingsSetupAuthz(t, func(*http.Request) bool { return true })
+}
+
+func settingsSetupAuthz(t *testing.T, canWrite func(*http.Request) bool) (*Settings, *plugintoken.Signer) {
 	t.Helper()
 	signer, err := plugintoken.NewSigner()
 	if err != nil {
@@ -42,7 +46,7 @@ func settingsSetup(t *testing.T) (*Settings, *plugintoken.Signer) {
 		}
 		return nil, false
 	}
-	return NewSettings(pluginauth.New(signer, nil), store, schema), signer
+	return NewSettings(pluginauth.New(signer, nil), store, schema, canWrite), signer
 }
 
 func frontendTok(t *testing.T, signer *plugintoken.Signer, pluginID, projectID string) string {
@@ -125,6 +129,19 @@ func TestSettingsRejections(t *testing.T) {
 		// missing required endpoint
 		if rec := callSettings(h, "set", tok, `{"values":{"apiKey":"k"}}`); rec.Code != http.StatusBadRequest {
 			t.Fatalf("want 400, got %d %s", rec.Code, rec.Body.String())
+		}
+	})
+	t.Run("read-only viewer cannot write settings -> 403", func(t *testing.T) {
+		// canWrite=false models a viewer (no configuration authority). The token is a
+		// valid frontend token, so plugin/tenant scoping passes — only the write
+		// authority gate stops it. Reads are still allowed.
+		h, signer := settingsSetupAuthz(t, func(*http.Request) bool { return false })
+		tok := frontendTok(t, signer, "acme/dash", "projA")
+		if rec := callSettings(h, "set", tok, `{"values":{"endpoint":"https://x","apiKey":"k"}}`); rec.Code != http.StatusForbidden {
+			t.Fatalf("a viewer must not write settings, want 403 got %d", rec.Code)
+		}
+		if rec := callSettings(h, "get", tok, `{}`); rec.Code != http.StatusOK {
+			t.Fatalf("a viewer may still READ settings, want 200 got %d", rec.Code)
 		}
 	})
 	t.Run("a backend double token is NOT accepted on the frontend settings seam", func(t *testing.T) {

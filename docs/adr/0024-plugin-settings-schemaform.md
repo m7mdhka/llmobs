@@ -36,6 +36,15 @@ specialized and exposed on a **frontend-reachable** endpoint. The eight primitiv
   come from the token (audience + `projectId`), never the request body, so a plugin
   can only read/write **its own** settings in **its own** tenant. (A backend may also
   manage settings via the same store; the frontend path is the new seam.)
+- **Writes require configuration authority.** Settings are **project-shared** plugin
+  config (including secrets), so a state-changing `set` must not be allowed to a
+  read-only viewer who happens to hold a frontend token. The token proves *which*
+  plugin/tenant; a second check — the caller's **session role** carrying a write
+  scope — proves *may they administer it*. This is the same split the supervisor uses
+  for enable/disable: **admins today, refined by the #21 RBAC seam**. Reads (`get`)
+  are open to any valid frontend token for the plugin (config is low-sensitivity and
+  secrets are never returned). Per-user (rather than project-shared) settings are a
+  future dimension, not needed to close B9.
 - **Storage:** the plugin `kv` store, under a single reserved document key per
   `(plugin_id, project_id)`. No new table, no new infra — lite and scale identical.
 

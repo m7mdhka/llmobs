@@ -83,11 +83,16 @@ a `writeOnly` `exportApiKey`).
 
 Settings calls are authed by the **frontend token**: the plugin id and project come
 from the token, so a plugin reads/writes only **its own** settings in the **current**
-tenant. This is least-privilege by default — but, like all frontend-token access, it
-is **not a boundary against a hostile same-origin frontend** (see
-[trust-model.md](trust-model.md)). Secrets are safe regardless: they are encrypted at
-rest and never returned to any client. Settings that must be tamper-proof against the
-plugin's own code belong in a backend.
+tenant. Settings are **project-shared**, so **writes require configuration authority**
+— a read-only viewer can `get` (to render the tab) but gets `403` on `set`, so they
+cannot overwrite shared config or a stored secret. (Admins today; the finer RBAC is
+the #21 seam.) Your form can still render for everyone — a viewer's save surfaces the
+`403` via `saveError`; hide the Save button for read-only users if you prefer.
+
+Like all frontend-token access, this is **not a boundary against a hostile same-origin
+frontend** (see [trust-model.md](trust-model.md)). Secrets are safe regardless: they
+are encrypted at rest and never returned to any client. Settings that must be
+tamper-proof against the plugin's own code belong in a backend.
 
 ## Endpoints (reference)
 

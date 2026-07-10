@@ -20,6 +20,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/bus"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/supervisor"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingest"
@@ -236,7 +237,15 @@ func run() error {
 	// returned. The schema comes from the registry (loaded from the manifest).
 	settingsStore := pluginsettings.NewStore(postgres.NewPluginKV(pool), secretBox)
 	settingsSchema := func(pluginID string) (json.RawMessage, bool) { return registry.SchemaFor(regSource, pluginID) }
-	pluginapi.NewSettings(pluginAuthz, settingsStore, settingsSchema).Register(apiMux, "/v1alpha1/plugin/settings")
+	// Settings WRITES require configuration authority (admins today, #21 seam): the
+	// session role must carry a write scope. The frontend token already bounded the
+	// plugin + tenant; this is the "who may administer" half so a viewer cannot
+	// overwrite project-shared config/secrets.
+	canWriteSettings := func(r *http.Request) bool {
+		sess, ok := authhttp.SessionFrom(r.Context())
+		return ok && perm.HasWriteAuthority(perm.RoleScopes(sess.User.Role))
+	}
+	pluginapi.NewSettings(pluginAuthz, settingsStore, settingsSchema, canWriteSettings).Register(apiMux, "/v1alpha1/plugin/settings")
 	// Events: durable subscribe (poll/ack) over the Postgres event bus.
 	pluginapi.NewEvents(pluginAuthz, eventBus).Register(apiMux, "/v1alpha1/plugin/events")
 	// Ingest: a compat plugin (cap:ingest) pushes OTLP spans through the SAME

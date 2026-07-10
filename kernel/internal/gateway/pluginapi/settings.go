@@ -24,13 +24,23 @@ type SchemaSource func(pluginID string) (json.RawMessage, bool)
 // plugin id + project come from the token, never the body. Settings is `kv` made
 // frontend-reachable and schema-aware (ADR-0024).
 type Settings struct {
-	authz  *pluginauth.Authorizer
-	store  SettingsStore
-	schema SchemaSource
+	authz    *pluginauth.Authorizer
+	store    SettingsStore
+	schema   SchemaSource
+	canWrite func(*http.Request) bool
 }
 
-func NewSettings(authz *pluginauth.Authorizer, store SettingsStore, schema SchemaSource) *Settings {
-	return &Settings{authz: authz, store: store, schema: schema}
+// NewSettings builds the handler. canWrite gates state-changing writes on the
+// caller's CONFIGURATION authority (settings are project-shared plugin config, so a
+// write must not be allowed to a read-only viewer): the frontend token proves which
+// plugin/tenant, and canWrite (session role) proves the caller may administer it —
+// the same split the supervisor uses (admins today, #21 RBAC seam). Reads are open
+// to any valid frontend token for the plugin. A nil canWrite denies all writes.
+func NewSettings(authz *pluginauth.Authorizer, store SettingsStore, schema SchemaSource, canWrite func(*http.Request) bool) *Settings {
+	if canWrite == nil {
+		canWrite = func(*http.Request) bool { return false }
+	}
+	return &Settings{authz: authz, store: store, schema: schema, canWrite: canWrite}
 }
 
 // Register mounts get/set under prefix (e.g. /v1alpha1/plugin/settings).
@@ -82,6 +92,13 @@ type settingsSetReq struct {
 }
 
 func (h *Settings) set(w http.ResponseWriter, r *http.Request, c pluginauth.Caller, m *pluginsettings.Model) {
+	// Writing project-shared plugin config (and its secrets) requires configuration
+	// authority — a read-only viewer must not overwrite it. Plugin/tenant scoping came
+	// from the token; this is the "who may administer" half.
+	if !h.canWrite(r) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "settings write requires configuration authority"})
+		return
+	}
 	var req settingsSetReq
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})

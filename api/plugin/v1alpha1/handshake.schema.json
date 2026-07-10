@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.dev/schemas/plugin/v1alpha1/handshake.schema.json",
+  "title": "Plugin handshake info (v1alpha1)",
+  "description": "Response body of GET /plugin/v1/info — the plugin's self-report at registration and every (re)start. The kernel checks id-match, protocol compatibility, and capability subset before issuing a service token.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "pluginApiVersion", "capabilities"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$",
+      "description": "Namespaced plugin id; MUST equal manifest metadata.id."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+].+)?$",
+      "description": "The plugin's own semver."
+    },
+    "pluginApiVersion": {
+      "type": "string",
+      "pattern": "^v[0-9]+(alpha[0-9]+|beta[0-9]+)?$",
+      "description": "The plugin-protocol maturity the plugin implements, e.g. 'v1alpha1'. The kernel checks this is one it supports."
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "Capabilities the plugin believes it was granted; the kernel asserts this is a subset of the manifest's approved capabilities.",
+      "items": { "enum": ["ingest", "query", "write", "events", "jobs", "kv", "secrets", "surface"] },
+      "uniqueItems": true
+    },
+    "displayName": { "type": "string", "description": "Optional human name for ops surfaces." }
+  }
+}

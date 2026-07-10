@@ -16,6 +16,15 @@ export interface PluginFrontend {
   nav: PluginNavItem[];
 }
 
+// Tier-3 backend service (external-URL executor, ADR-0023/R2). The operator runs
+// the service; the kernel handshakes, supervises, and proxies /api/plugins/{id}/*.
+export interface PluginBackend {
+  url: string;
+  healthPath: string;
+  infoPath?: string;
+  watermarkBudget?: string; // e.g. "30s"
+}
+
 export interface PluginManifest {
   apiVersion: "llmobs.dev/v1alpha1";
   kind: "Plugin";
@@ -30,5 +39,6 @@ export interface PluginManifest {
     permissions?: string[];
     frontend?: PluginFrontend;
     settingsSchema?: string;
+    backend?: PluginBackend;
   };
 }

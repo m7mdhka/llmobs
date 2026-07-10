@@ -90,6 +90,34 @@
         "settingsSchema": {
           "type": "string",
           "description": "Optional path to a JSON Schema for the plugin's settings (rendered by SchemaForm; future arc)."
+        },
+        "backend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url", "healthPath"],
+          "description": "Tier-3 backend service (external-URL executor, ADR-0023/R2). The operator runs the service; the kernel handshakes, supervises, and proxies /api/plugins/{id}/* to it. The kernel never gets a DB connection string — the plugin uses the SDK primitives.",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Base URL the kernel reaches the plugin backend at, e.g. http://langfuse-compat:8080. Operator-configurable at install."
+            },
+            "healthPath": {
+              "type": "string",
+              "pattern": "^/.+",
+              "description": "Path of the plugin health endpoint (GET), e.g. /plugin/v1/health."
+            },
+            "infoPath": {
+              "type": "string",
+              "pattern": "^/.+",
+              "description": "Path of the handshake info endpoint (GET). Defaults to /plugin/v1/info."
+            },
+            "watermarkBudget": {
+              "type": "string",
+              "pattern": "^[0-9]+(ms|s|m|h)$",
+              "description": "Max functional-watermark staleness before the plugin is considered degraded (e.g. '30s'). Absent => watermark not used for the running/degraded decision."
+            }
+          }
         }
       }
     }

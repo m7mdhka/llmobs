@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.dev/schemas/plugin/v1alpha1/service-token.schema.json",
+  "title": "Service-token claims (v1alpha1)",
+  "description": "Claims of the kernel-issued service token that proves which plugin is calling and what it may do. Carried in the JSON body of a compact 'v1.<base64url(claims)>.<base64url(ed25519sig)>' token. The plugin half of the double-token intersection.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["iss", "sub", "aud", "iat", "exp", "jti", "pluginId", "scopes"],
+  "properties": {
+    "iss": { "const": "llmobs-kernel", "description": "Issuer." },
+    "sub": { "type": "string", "pattern": "^plugin:[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$", "description": "Subject: 'plugin:{id}'." },
+    "aud": { "const": "llmobs-kernel", "description": "Audience: the kernel verifies this token on the return path." },
+    "iat": { "type": "integer", "description": "Issued-at, unix seconds." },
+    "exp": { "type": "integer", "description": "Expiry, unix seconds (short TTL; refreshed while running)." },
+    "jti": { "type": "string", "description": "Unique token id." },
+    "pluginId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$", "description": "The plugin id." },
+    "scopes": {
+      "type": "array",
+      "description": "The plugin's approved scopes (manifest capabilities/permissions ∩ operator approval). Authoritative for the plugin half of the intersection.",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  }
+}

@@ -1,0 +1,78 @@
+"""langfuse-compat backend — a Python plugin proving the language-agnostic claim.
+
+An UNMODIFIED Langfuse SDK client points LANGFUSE_HOST at this service; it accepts
+Langfuse-wire ingestion, translates to OTLP (translate.py), and pushes through the
+kernel `ingest` capability (llmobs_plugin.KernelClient). The whole contract is
+spoken over HTTP via the public protocol — no kernel internals.
+
+Config (env):
+  LLMOBS_KERNEL_URL      kernel base URL (e.g. http://kernel:8080)
+  LLMOBS_SERVICE_TOKEN   this plugin's service token. NOTE (finding #4): the
+                         kernel mints this at handshake but the delivery mechanism
+                         to the plugin is not yet specified — for now the operator
+                         provides it out of band; a kernel->plugin token push is
+                         the proposed fix (see language-agnostic-findings.md).
+"""
+
+from __future__ import annotations
+
+import os
+
+from fastapi import FastAPI, Request, Response
+
+from llmobs_plugin import KernelClient
+from translate import batch_to_otlp
+
+PLUGIN_ID = "llmobs/langfuse-compat"
+app = FastAPI()
+
+_last_progress = {"unix": 0}
+
+
+def _kernel() -> KernelClient:
+    return KernelClient(os.environ["LLMOBS_KERNEL_URL"], os.environ.get("LLMOBS_SERVICE_TOKEN", ""))
+
+
+@app.get("/plugin/v1/info")
+def info():
+    # Handshake self-report (api/plugin/v1alpha1/handshake.schema.json).
+    return {
+        "id": PLUGIN_ID,
+        "version": "0.1.0",
+        "pluginApiVersion": "v1alpha1",
+        "capabilities": ["ingest", "surface"],
+        "displayName": "Langfuse compatibility",
+    }
+
+
+@app.get("/plugin/v1/health")
+def health():
+    import time
+
+    # Two-signal health: live/ready + a functional watermark (last accepted event).
+    return {
+        "live": True,
+        "ready": bool(os.environ.get("LLMOBS_KERNEL_URL")),
+        "watermark": {"lastProgressUnix": _last_progress["unix"], "detail": "last langfuse batch"},
+    }
+
+
+@app.post("/api/public/ingestion")
+async def ingestion(request: Request):
+    """The Langfuse public ingestion endpoint an unmodified SDK posts to."""
+    import time
+
+    payload = await request.json()
+    batch = payload.get("batch", [])
+    otlp_json, skipped = batch_to_otlp(batch)
+    _kernel().ingest_otlp(otlp_json)
+    _last_progress["unix"] = int(time.time())
+    # Langfuse SDK expects a 207-ish body listing per-event results; a 200 with
+    # successes/errors is accepted by the client.
+    return {"successes": [{"id": e.get("id"), "status": 201} for e in batch], "errors": [], "skipped": skipped}
+
+
+@app.post("/plugin/v1/job")
+def job(_: Request):
+    # Placeholder job endpoint (the scheduler POSTs here); no-op for the demo.
+    return Response(status_code=200)

@@ -1,0 +1,6 @@
+{
+  "comment": "Deterministic (all-zero Ed25519 seed) identity-assertion vector, minted by the Go kernel pluginproto. Pinned by kernel/pkg/pluginproto/golden_test.go; verified here by the Python backend to prove cross-language token interop. If either side drifts, both fail.",
+  "pubkey_hex": "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29",
+  "token": "v1.eyJpc3MiOiJsbG1vYnMta2VybmVsIiwic3ViIjoidXNlci0xIiwiYXVkIjoicGx1Z2luOmFjbWUvdyIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAwMzAwLCJqdGkiOiJqdGktMSIsInByb2plY3RJZCI6InByb2pBIiwiYWN0b3IiOiJzZXNzaW9uOnVAeCIsInNjb3BlcyI6WyJ0cmFjZXM6cmVhZC5tZXRhZGF0YSJdfQ.lgNwOJeZ78MGb3tcLNJJErDEkBuBUEjD4gcETZWL8XKLjCWVOP5WjAMTQd4gPrJeAyYqquxpd-YItGgkvSeFCA",
+  "expected": { "aud": "plugin:acme/w", "projectId": "projA", "scopes": ["traces:read.metadata"] }
+}

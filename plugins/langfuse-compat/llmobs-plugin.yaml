@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../api/schemas/manifest/v1alpha1/llmobs-plugin.schema.json
+apiVersion: llmobs.dev/v1alpha1
+kind: Plugin
+metadata:
+  id: llmobs/langfuse-compat
+  name: Langfuse compatibility
+  version: 0.1.0
+  description: >
+    Accepts Langfuse-wire ingestion (point LANGFUSE_HOST here) and translates it to
+    OTLP through the ingest capability — the migration path from Langfuse. A Python
+    backend proving the plugin contract is language-agnostic.
+spec:
+  capabilities:
+    - ingest
+  permissions:
+    - traces:write
+  backend:
+    url: http://langfuse-compat:8080
+    healthPath: /plugin/v1/health
+    infoPath: /plugin/v1/info
+    watermarkBudget: 60s

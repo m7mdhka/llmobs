@@ -75,6 +75,11 @@ test: ## Run unit tests (Go + TS)
 	@cd kernel && go test ./...
 	@echo ">> test: (TS) turbo run test — wired as packages land"
 
+.PHONY: plugin-python-test
+plugin-python-test: ## Python plugin backend tests (cross-language interop + Langfuse translation)
+	@echo ">> plugin-python: Python verifies a Go-signed token vector + Langfuse->OTLP translation"
+	@cd plugins/langfuse-compat/backend && python3 interop_test.py && python3 translate_test.py
+
 .PHONY: lint
 lint: ## Run all linters (Go + TS + boundary/import checks)
 	@echo ">> lint: golangci-lint, eslint, prettier, import-boundary checks"

@@ -44,6 +44,9 @@ type Config struct {
 	// not-ready and the receivers shed with 503 (G2). >1 avoids flapping on a
 	// single transient error; recovery is immediate on the first success.
 	PersistUnhealthyThreshold int `json:"persist_unhealthy_threshold"`
+	// ErasureSuppressionTTL: how long a GDPR-erasure tombstone blocks re-delivery
+	// of an erased span (G3). Need only outlast plausible redelivery, not forever.
+	ErasureSuppressionTTL string `json:"erasure_suppression_ttl"` // e.g. "720h"
 }
 
 func defaults() Config {
@@ -64,6 +67,7 @@ func defaults() Config {
 		IngestQueueSize:           4096,
 		ShutdownDrainTimeout:      "20s",
 		PersistUnhealthyThreshold: 5,
+		ErasureSuppressionTTL:     "720h",
 	}
 }
 
@@ -100,6 +104,7 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("SHUTDOWN_DRAIN_TIMEOUT"), &c.ShutdownDrainTimeout)
 	envInt(brand.Env("INGEST_QUEUE_SIZE"), &c.IngestQueueSize)
 	envInt(brand.Env("PERSIST_UNHEALTHY_THRESHOLD"), &c.PersistUnhealthyThreshold)
+	envStr(brand.Env("ERASURE_SUPPRESSION_TTL"), &c.ErasureSuppressionTTL)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)

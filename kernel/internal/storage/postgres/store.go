@@ -7,14 +7,31 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
 // Store is the lite-profile storage adapter.
 type Store struct {
-	pool *pgxpool.Pool
+	pool           *pgxpool.Pool
+	suppressionTTL time.Duration // erasure-tombstone retention (G3)
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+// defaultSuppressionTTL retains erasure tombstones long enough to outlast
+// plausible redelivery (Collector/Kafka replay), then they may be reaped.
+const defaultSuppressionTTL = 720 * time.Hour // 30 days
+
+func NewStore(pool *pgxpool.Pool) *Store {
+	return &Store{pool: pool, suppressionTTL: defaultSuppressionTTL}
+}
+
+// SetErasureSuppressionTTL overrides how long erasure tombstones block
+// re-delivery of an erased span (G3). Non-positive values are ignored.
+func (s *Store) SetErasureSuppressionTTL(d time.Duration) {
+	if d > 0 {
+		s.suppressionTTL = d
+	}
+}
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
@@ -72,14 +89,23 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 		return err
 	}
 	c := extractSpanColumns(merged, ev.EventTS)
-	_, err = tx.Exec(ctx, `
+	// Erasure suppression (G3): the write is guarded by NOT EXISTS against an
+	// unexpired tombstone, so a re-delivery of a GDPR-erased span inserts zero rows
+	// (detected below) instead of resurrecting it. The guard is atomic with the
+	// upsert, and the spans row lock (held from the SELECT ... FOR UPDATE above)
+	// serializes against a concurrent erasure's DELETE — either the span is deleted
+	// after this write, or this write sees the committed tombstone and no-ops.
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO spans (project_id, id, trace_id, parent_span_id, kind, raw_kind, name,
 			start_time, end_time, completion_start_time, status_code, environment, release, version, session_id, user_id,
 			model, provider, total_cost, attributes, usage_details, cost_details,
 			provided_usage_details, provided_cost_details, prompt_ref, pricing_snapshot_ref,
 			is_deleted, event_ts, doc, provenance, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30, now())
+		SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30, now()
+		WHERE NOT EXISTS (
+			SELECT 1 FROM erasure_suppression es
+			WHERE es.project_id=$1 AND es.id=$2 AND es.expires_at > now())
 		ON CONFLICT (project_id, id) DO UPDATE SET
 			trace_id=EXCLUDED.trace_id, parent_span_id=EXCLUDED.parent_span_id, kind=EXCLUDED.kind,
 			raw_kind=EXCLUDED.raw_kind, name=EXCLUDED.name, start_time=EXCLUDED.start_time,
@@ -99,6 +125,12 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 		c.isDeleted, ev.EventTS.UTC(), doc, provJSON)
 	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		// The NOT EXISTS guard fired: an unexpired erasure tombstone suppresses this
+		// key. Report it as the expected sentinel (not a storage failure) so the
+		// caller drops the span and does not mark persistence unhealthy.
+		return storage.ErrSuppressedByErasure
 	}
 	return tx.Commit(ctx)
 }

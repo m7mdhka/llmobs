@@ -305,4 +305,46 @@ LEFT="$(curl -sf -H "Authorization: Bearer $KEY" -H "Content-Type: application/j
 rm -f "$CK"
 echo "   assert OK: key issued, score written (201) + bad-score 422, scores target, QD-9 +/- , revocation 403, GDPR erasure + audit"
 
+echo ">> e2e-lite: G3 erasure-suppression (re-delivery must NOT resurrect an erased span)"
+G3CK="$(mktemp)"
+curl -sf -c "$G3CK" -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"admin-dev-password"}' ${API}/auth/login >/dev/null
+OTLP="http://localhost:${LLMOBS_OTLP_PORT}/v1/traces"
+G3TRACE="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01"
+G3SPAN="bbbbbbbbbbbbbb01"
+G3NS="$(python3 -c 'import time;print(int(time.time()*1e9))')"
+G3END="$((G3NS+1000000))"
+G3BODY="{\"resourceSpans\":[{\"scopeSpans\":[{\"spans\":[{\"traceId\":\"$G3TRACE\",\"spanId\":\"$G3SPAN\",\"name\":\"g3-span\",\"startTimeUnixNano\":\"$G3NS\",\"endTimeUnixNano\":\"$G3END\",\"attributes\":[{\"key\":\"user.id\",\"value\":{\"stringValue\":\"g3-user\"}}]}]}]}]}"
+post_g3() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d "$G3BODY" "$OTLP"; }
+g3_count() { curl -sf -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d "{\"target\":\"spans\",\"timeRange\":{\"from\":\"$FROM\",\"to\":\"$TO\"},\"filters\":[{\"field\":\"trace_id\",\"op\":\"eq\",\"value\":\"$G3TRACE\"}]}" \
+  ${API}/v1alpha1/query | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("data",[])))' 2>/dev/null || echo 0; }
+demo_count() { curl -sf -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d "$QUERY" \
+  ${API}/v1alpha1/query | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("data",[])))' 2>/dev/null || echo 0; }
+SIB_BEFORE="$(demo_count)"
+# 1) deliver the g3 span and confirm it persisted
+[ "$(post_g3)" = "200" ] || { echo "FAIL: G3 initial ingest not 200"; exit 1; }
+present=""; for _ in $(seq 1 20); do [ "$(g3_count)" -ge 1 ] && { present=1; break; }; sleep 1; done
+[ -n "$present" ] || { echo "FAIL: G3 span never persisted"; exit 1; }
+# 2) erase g3-user (records the suppression tombstone)
+G3ER="$(curl -sf -b "$G3CK" -X DELETE "${API}/v1alpha1/spans?user_id=g3-user&from=${FROM}&to=${TO}")"
+printf '%s' "$G3ER" | python3 -c 'import sys,json;d=json.load(sys.stdin);assert d.get("erased",0)>=1,d;assert d.get("audit_id","").startswith("era_"),d' \
+  || { echo "FAIL: G3 erase"; echo "$G3ER"; exit 1; }
+gone=""; for _ in $(seq 1 10); do [ "$(g3_count)" = "0" ] && { gone=1; break; }; sleep 1; done
+[ -n "$gone" ] || { echo "FAIL: G3 erase did not remove the span"; exit 1; }
+# 3) re-deliver the identical OTLP (client retry / Collector replay)
+[ "$(post_g3)" = "200" ] || { echo "FAIL: G3 re-delivery not acked"; exit 1; }
+# 4) it must NOT reappear (give the async worker several cycles to try)
+for _ in $(seq 1 8); do sleep 1; done
+FINAL="$(g3_count)"
+[ "$FINAL" = "0" ] || { echo "FAIL: G3 erased span resurrected by re-delivery ($FINAL present)"; exit 1; }
+# 5) the suppression was counted, and a DIFFERENT trace is untouched (precise, not collateral)
+curl -sf ${METRICS}/metrics | grep -q 'llmobs_ingest_suppressed_by_erasure_total' \
+  || { echo "FAIL: G3 suppression metric missing"; exit 1; }
+SIB_AFTER="$(demo_count)"
+[ "$SIB_AFTER" = "$SIB_BEFORE" ] && [ "$SIB_AFTER" -ge 1 ] \
+  || { echo "FAIL: G3 suppression harmed the sibling trace (before=$SIB_BEFORE after=$SIB_AFTER)"; exit 1; }
+rm -f "$G3CK"
+echo "   assert OK: erased span stays erased across re-delivery; suppression counted; sibling trace ($SIB_AFTER spans) intact"
+
 echo "E2E_LITE_OK"

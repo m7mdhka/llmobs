@@ -211,6 +211,16 @@ func (s *persistStage) Process(ctx context.Context, ing *Ingestion) error {
 	}
 	for _, ev := range ing.Events {
 		err := s.store.PersistSpan(ctx, ev)
+		if errors.Is(err, storage.ErrSuppressedByErasure) {
+			// Expected: a GDPR-erased key was re-delivered and refused (G3). Not a
+			// storage failure — count it and move on, never touching persist health.
+			if s.metrics != nil {
+				s.metrics.CounterAdd("llmobs_ingest_suppressed_by_erasure_total",
+					"Spans dropped at ingest because an erasure tombstone suppresses their key.",
+					map[string]string{"project_id": proj}, 1)
+			}
+			continue
+		}
 		s.signal.RecordPersist(err) // nil-safe; drives readiness + backpressure
 		if err != nil {
 			return err

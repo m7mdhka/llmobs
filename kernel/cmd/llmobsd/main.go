@@ -108,6 +108,9 @@ func run() error {
 		})
 
 	store := postgres.NewStore(pool)
+	if ttl, terr := time.ParseDuration(cfg.ErasureSuppressionTTL); terr == nil {
+		store.SetErasureSuppressionTTL(ttl) // G3 tombstone retention
+	}
 	reg := normalize.Default()
 	skew, _ := time.ParseDuration(cfg.ClockSkewThreshold)
 	presets, customRules := parseRedactConfig(cfg.RedactPresets, cfg.RedactCustomJSON)

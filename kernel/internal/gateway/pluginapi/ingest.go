@@ -31,12 +31,16 @@ type Ingester interface {
 // It cannot bypass the pipeline: it is the pipeline, minus the api-key
 // authenticate stage (replaced by the cap:ingest double-token gate).
 type Ingest struct {
-	authz *pluginauth.Authorizer
-	pipe  Ingester
+	authz   *pluginauth.Authorizer
+	pipe    Ingester
+	project string // the plugin's target project (lite: the default project)
 }
 
-func NewIngest(authz *pluginauth.Authorizer, pipe Ingester) *Ingest {
-	return &Ingest{authz: authz, pipe: pipe}
+// NewIngest builds the ingest handler. project is the tenant plugin telemetry
+// lands in — resolved by the kernel (lite: the default project), NEVER from the
+// request, so a plugin cannot write outside its project.
+func NewIngest(authz *pluginauth.Authorizer, pipe Ingester, project string) *Ingest {
+	return &Ingest{authz: authz, pipe: pipe, project: project}
 }
 
 // Register mounts POST {prefix} (e.g. /v1alpha1/plugin/ingest/traces).
@@ -49,7 +53,8 @@ func (h *Ingest) traces(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	caller, status, err := h.authz.Require(r, "ingest")
+	// Cold-path ingest is plugin-initiated (no user) — service-token-only (H7 #3).
+	pluginID, status, err := h.authz.RequirePluginToken(r, "ingest")
 	if err != nil {
 		writeJSON(w, status, map[string]any{"error": err.Error()})
 		return
@@ -63,10 +68,10 @@ func (h *Ingest) traces(w http.ResponseWriter, r *http.Request) {
 		Body:        body,
 		ContentType: r.Header.Get("Content-Type"),
 		ReceivedAt:  time.Now(),
-		// Project comes from the assertion (caller), NEVER the body. Source is
+		// Project is the plugin's own (kernel-resolved), NEVER the body. Source is
 		// kernel-stamped so it cannot be forged.
-		Identity: controlplane.Identity{ProjectID: caller.ProjectID},
-		Source:   pluginproto.PluginSubject(caller.PluginID),
+		Identity: controlplane.Identity{ProjectID: h.project},
+		Source:   pluginproto.PluginSubject(pluginID),
 	}
 	if err := h.pipe.RunPreauth(r.Context(), ing); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})

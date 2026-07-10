@@ -1,0 +1,43 @@
+"""Your first Python plugin backend.
+
+Speaks the plugin protocol over HTTP using only `llmobs_plugin` (the public
+protocol library) — no kernel internals. Fill in your own logic; the handshake +
+health below are the minimum a supervised plugin needs. See
+docs/plugin-authors/ and plugins/langfuse-compat for a full working example.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+
+from fastapi import FastAPI
+
+from llmobs_plugin import KernelClient  # noqa: F401 — use for kv/store/secrets/ingest
+
+PLUGIN_ID = "owner/plugin-name"  # MUST match llmobs-plugin.yaml metadata.id
+app = FastAPI()
+_started = int(time.time())
+
+
+@app.get("/plugin/v1/info")
+def info():
+    return {
+        "id": PLUGIN_ID,
+        "version": "0.1.0",
+        "pluginApiVersion": "v1alpha1",
+        "capabilities": [],  # declare only what llmobs-plugin.yaml grants
+        "displayName": "My Plugin",
+    }
+
+
+@app.get("/plugin/v1/health")
+def health():
+    # Two-signal health: live/ready + a functional watermark (advance it whenever
+    # your plugin does real work, so 'busy' is never mistaken for 'stuck').
+    return {"live": True, "ready": True, "watermark": {"lastProgressUnix": _started}}
+
+
+def kernel() -> KernelClient:
+    """A kernel client authenticated with this plugin's service token."""
+    return KernelClient(os.environ["LLMOBS_KERNEL_URL"], os.environ.get("LLMOBS_SERVICE_TOKEN", ""))

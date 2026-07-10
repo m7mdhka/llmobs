@@ -86,3 +86,16 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: cz check --message "$PR_TITLE"
+
+  # The language-agnostic proof (H7): a Python backend verifies a Go-kernel-signed
+  # token vector, and the Langfuse->OTLP translation is exercised. Enforces that the
+  # plugin contract stays speakable from a non-Go backend.
+  plugin-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cryptography
+      - run: make plugin-python-test

@@ -15,7 +15,6 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/pipeline"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginauth"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
-	"github.com/m7mdhka/llmobs/kernel/pkg/pluginproto"
 )
 
 // captureStore records persisted events so the test can inspect what the pipeline
@@ -48,34 +47,28 @@ func ingestSetup(t *testing.T) (*Ingest, *captureStore, *plugintoken.Signer) {
 	}
 	cs := &captureStore{}
 	pipe := pipeline.New(nil, cs, normalize.Default(), pipeline.NoopBus{}, pipeline.Config{})
-	return NewIngest(pluginauth.New(signer, nil), pipe), cs, signer
+	// The kernel resolves the target project ("projA" here) — NOT the plugin/body.
+	return NewIngest(pluginauth.New(signer, nil), pipe, "projA"), cs, signer
 }
 
-func ingTokens(t *testing.T, signer *plugintoken.Signer, pluginID, projectID string, caps ...string) (svc, asr string) {
+// ingToken mints the plugin SERVICE TOKEN (cold-path ingest is service-token-only).
+func ingToken(t *testing.T, signer *plugintoken.Signer, pluginID string, caps ...string) string {
 	t.Helper()
-	now := time.Now()
 	if len(caps) == 0 {
 		caps = []string{perm.CapMarker("ingest")}
 	}
-	svc, _, err := signer.MintServiceToken(pluginID, caps, now, 10*time.Minute)
+	svc, _, err := signer.MintServiceToken(pluginID, caps, time.Now(), 10*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	asr, _, err = signer.MintIdentityAssertion(pluginID, "u", projectID, "s", perm.All(), now, 5*time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return svc, asr
+	return svc
 }
 
-func postIngest(h *Ingest, svc, asr, body string) *httptest.ResponseRecorder {
+func postIngest(h *Ingest, svc, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "/v1alpha1/plugin/ingest/traces", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	if svc != "" {
 		r.Header.Set("X-LLMObs-Service-Token", svc)
-	}
-	if asr != "" {
-		r.Header.Set(pluginproto.IdentityAssertionHeader, asr)
 	}
 	mux := http.NewServeMux()
 	h.Register(mux, "/v1alpha1/plugin/ingest")
@@ -91,9 +84,9 @@ func postIngest(h *Ingest, svc, asr, body string) *httptest.ResponseRecorder {
 // to the canonical shape. Positive control: the span persists.
 func TestIngestProveTheNegative(t *testing.T) {
 	h, cs, signer := ingestSetup(t)
-	svc, asr := ingTokens(t, signer, "acme/w", "projA")
+	svc := ingToken(t, signer, "acme/w")
 
-	if rec := postIngest(h, svc, asr, forgedOTLP); rec.Code != http.StatusAccepted {
+	if rec := postIngest(h, svc, forgedOTLP); rec.Code != http.StatusAccepted {
 		t.Fatalf("ingest should accept, got %d: %s", rec.Code, rec.Body.String())
 	}
 	cs.mu.Lock()
@@ -120,19 +113,17 @@ func TestIngestProveTheNegative(t *testing.T) {
 func TestIngestRequiresCapability(t *testing.T) {
 	h, _, signer := ingestSetup(t)
 	// A plugin without cap:ingest (only cap:query) is forbidden.
-	svc, asr := ingTokens(t, signer, "acme/w", "projA", perm.CapMarker("query"))
-	if rec := postIngest(h, svc, asr, forgedOTLP); rec.Code != http.StatusForbidden {
+	svc := ingToken(t, signer, "acme/w", perm.CapMarker("query"))
+	if rec := postIngest(h, svc, forgedOTLP); rec.Code != http.StatusForbidden {
 		t.Fatalf("missing cap:ingest must be 403, got %d", rec.Code)
 	}
 }
 
-func TestIngestRequiresDoubleToken(t *testing.T) {
-	h, _, signer := ingestSetup(t)
-	svc, asr := ingTokens(t, signer, "acme/w", "projA")
-	if rec := postIngest(h, svc, "", forgedOTLP); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("missing assertion must be 401, got %d", rec.Code)
-	}
-	if rec := postIngest(h, "", asr, forgedOTLP); rec.Code != http.StatusUnauthorized {
+func TestIngestRequiresServiceToken(t *testing.T) {
+	h, _, _ := ingestSetup(t)
+	// Cold-path ingest is plugin-initiated: the service token is required (and a
+	// forged/absent one is rejected). No user assertion is involved.
+	if rec := postIngest(h, "", forgedOTLP); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("missing service token must be 401, got %d", rec.Code)
 	}
 }

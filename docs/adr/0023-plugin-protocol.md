@@ -228,6 +228,26 @@ Prove-the-negative (H3/H4/H5/H6 family) — a plugin CANNOT:
 - **bypass the pipeline** — the endpoint *is* the pipeline; spans are normalized,
   redacted, validated, and merged with dq exactly like OTLP.
 
+## Language-agnostic falsification (H7b) — contract changes it forced
+
+Building `plugins/langfuse-compat` as a real **Python** backend was the
+falsification test of the "language-agnostic contract" claim. It surfaced four
+findings (full report + migration-fidelity table:
+[`docs/plugin-authors/language-agnostic-findings.md`](../plugin-authors/language-agnostic-findings.md)),
+two of which are contract changes made here:
+
+- **Kernel public-key endpoint** `GET /v1alpha1/plugin/kernel-key` — the handshake
+  is kernel→plugin, so a plugin had no way to obtain the key to verify assertions
+  (a Go plugin hid this in-process). Additive; the minimal single-key form (JWKS +
+  rotation deferred).
+- **Cold-path ingest is service-token-only** — an external client hits the compat
+  plugin directly, so there is no user assertion; `ingest` no longer requires the
+  double token, and the target project is kernel-resolved (strengthening tenant
+  isolation). Also: token segments are documented as **unpadded** base64url (a
+  naive non-Go decoder fails). One gap remains surfaced-not-fixed: **service-token
+  delivery to the plugin** (the supervisor mints it but nothing pushes it to the
+  plugin) — tracked, with a proposed kernel→plugin token push.
+
 ## Consequences
 
 - The manifest gains an additive `spec.backend` (url, healthPath, infoPath,

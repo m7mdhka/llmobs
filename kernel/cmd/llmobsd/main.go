@@ -205,6 +205,9 @@ func run() error {
 	// Plugin data primitives (H4+): a plugin backend reaches these with its double
 	// token; each is capability-gated and tenant-scoped from the assertion.
 	pluginAuthz := pluginauth.New(pluginSigner, nil)
+	// Publish the kernel public key so a plugin backend (any language) can verify
+	// kernel-signed assertions (H7 finding #2). Unauthenticated — the key is public.
+	pluginapi.NewKernelKey(pluginSigner.Public()).Register(apiMux, "/v1alpha1/plugin/kernel-key")
 	pluginapi.NewKV(pluginAuthz, postgres.NewPluginKV(pool)).Register(apiMux, "/v1alpha1/plugin/kv")
 	// Secrets: envelope-encrypted with the kernel master key (in-memory for lite,
 	// ADR-0023). The plaintext is never persisted/logged and returned only to the
@@ -223,7 +226,7 @@ func run() error {
 	pluginapi.NewEvents(pluginAuthz, eventBus).Register(apiMux, "/v1alpha1/plugin/events")
 	// Ingest: a compat plugin (cap:ingest) pushes OTLP spans through the SAME
 	// pipeline as native OTLP — kernel-stamped source, project from the assertion.
-	pluginapi.NewIngest(pluginAuthz, pipe).Register(apiMux, "/v1alpha1/plugin/ingest")
+	pluginapi.NewIngest(pluginAuthz, pipe, defaultProject).Register(apiMux, "/v1alpha1/plugin/ingest")
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is

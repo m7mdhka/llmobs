@@ -69,3 +69,28 @@ func (a *Authorizer) Require(r *http.Request, capability string) (Caller, int, e
 	}
 	return Caller{PluginID: stc.PluginID, ProjectID: ac.ProjectID, Actor: ac.Actor}, http.StatusOK, nil
 }
+
+// RequirePluginToken verifies the SERVICE TOKEN ALONE (no user assertion) and the
+// capability — the auth model for PLUGIN-INITIATED operations like cold-path
+// ingest (H7 finding #3). Cold-path ingest arrives from an external source
+// directly at the plugin, so there is no user whose permissions to intersect; the
+// plugin's service token proves which plugin it is, and the caller scopes the
+// target project itself (the plugin's own project, never the request body).
+func (a *Authorizer) RequirePluginToken(r *http.Request, capability string) (pluginID string, status int, err error) {
+	if a.signer == nil {
+		return "", http.StatusServiceUnavailable, errors.New("plugin auth unavailable")
+	}
+	svc := r.Header.Get("X-LLMObs-Service-Token")
+	if svc == "" {
+		return "", http.StatusUnauthorized, errors.New("service token required")
+	}
+	stc, err := a.signer.VerifyServiceToken(svc, a.now())
+	if err != nil {
+		return "", http.StatusUnauthorized, fmt.Errorf("invalid service token: %w", err)
+	}
+	caps, _ := perm.SplitCapsAndPerms(stc.Scopes)
+	if !perm.Has(caps, perm.CapMarker(capability)) {
+		return "", http.StatusForbidden, fmt.Errorf("plugin lacks capability %q", capability)
+	}
+	return stc.PluginID, http.StatusOK, nil
+}

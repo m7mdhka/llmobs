@@ -127,12 +127,17 @@ v1.<base64url(claimsJSON)>.<base64url(ed25519-signature)>
 ```
 
 - Signature is `Ed25519.Sign(kernelPrivateKey, "v1." + base64url(claimsJSON))`.
+- **`base64url` here is UNPADDED** (RFC 4648 §5 without `=` padding — Go
+  `base64.RawURLEncoding`). A non-Go verifier whose base64 decoder requires padding
+  (e.g. Python `urlsafe_b64decode`) MUST re-pad each segment to a multiple of 4
+  before decoding. (Cross-language finding, H7.)
 - Claims are UTF-8 JSON with the fields in the respective schema; times are unix
   seconds. Verification checks the Ed25519 signature, then `exp` (not past) and
   `aud` (expected audience). Ed25519 is asymmetric so a plugin can verify a
   kernel-minted assertion **without** holding a signing secret.
-- Key distribution is out of band for v1alpha1 (kernel public key delivered at
-  handshake / config); JWKS endpoint + rotation is a deferred hardening pass
-  (ADR-0023, issue).
+- **The kernel publishes its public key at `GET /v1alpha1/plugin/kernel-key`**
+  (`{algorithm, public_key_hex, public_key_base64}`) — the handshake is
+  kernel→plugin, so a plugin obtains the key here (H7 finding #2). JWKS endpoint +
+  rotation is a deferred hardening pass (ADR-0023, issue).
 
 The canonical types + `Sign`/`Verify` helpers live in `kernel/pkg/pluginproto`.

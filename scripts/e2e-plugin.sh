@@ -73,14 +73,17 @@ for _ in $(seq 1 30); do
   [ "$COUNT" -ge 2 ] && break || sleep 1
 done
 [ "$COUNT" -ge 2 ] || { echo "FAIL: migrated trace not visible (got $COUNT spans)"; echo "$RESP"; "${COMPOSE[@]}" logs langfuse-compat | tail -30; exit 1; }
-# The spans are kernel-stamped with the plugin as source (cold-path ingest, H7a).
+# Assert the migration FIDELITY on promoted fields (visible without payload scope):
+# the generation's model + usage and the trace's user round-tripped Langfuse->canonical.
 printf '%s' "$RESP" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)['data']
-srcs={s.get('attributes',{}).get('llmobs.source') for s in d}
-assert 'plugin:llmobs/langfuse-compat' in srcs, srcs
-print('   assert OK: %d spans migrated via LANGFUSE_HOST->us, source-stamped %s'%(len(d), 'plugin:llmobs/langfuse-compat'))
-" || { echo "FAIL: source stamp"; echo "$RESP"; exit 1; }
+gen=[s for s in d if s.get('model')=='gpt-4o']
+assert gen, 'generation model did not migrate: %r'%[s.get('model') for s in d]
+assert gen[0].get('provided_usage_details',{}).get('input')==10, gen[0].get('provided_usage_details')
+assert any(s.get('user_id')=='u-1' for s in d), 'trace user did not migrate'
+print('   assert OK: %d spans migrated via LANGFUSE_HOST->us (model=gpt-4o, usage.input=10, user=u-1 round-tripped)'%len(d))
+" || { echo "FAIL: migration fidelity"; echo "$RESP"; exit 1; }
 rm -f "$CK"
 
 echo "E2E_PLUGIN_OK"

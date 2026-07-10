@@ -1,0 +1,72 @@
+/* Shell-only chrome, on top of @llmobs/tokens + @llmobs/ui. */
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--llmobs-bg);
+  color: var(--llmobs-text);
+  font-family: var(--llmobs-font-sans);
+}
+
+.shell-user {
+  font-size: var(--llmobs-text-xs);
+  color: var(--llmobs-text-muted);
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-nav-loading,
+.shell-nav-empty {
+  padding: var(--llmobs-space-3) var(--llmobs-space-2);
+  font-size: var(--llmobs-text-xs);
+  color: var(--llmobs-text-subtle);
+}
+
+/* ---- Login ---- */
+.shell-login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, var(--llmobs-accent-soft), transparent 70%),
+    var(--llmobs-bg);
+  padding: var(--llmobs-space-4);
+}
+.shell-login__card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--llmobs-space-4);
+  padding: var(--llmobs-space-6);
+  background: var(--llmobs-surface);
+  border: 1px solid var(--llmobs-border);
+  border-radius: var(--llmobs-radius-lg);
+  box-shadow: var(--llmobs-shadow-md);
+}
+.shell-login__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--llmobs-space-2);
+  font-size: var(--llmobs-text-xl);
+  font-weight: var(--llmobs-weight-semibold);
+  letter-spacing: -0.02em;
+}
+.shell-login__tagline {
+  margin: 0;
+  font-size: var(--llmobs-text-sm);
+  color: var(--llmobs-text-muted);
+}
+.shell-login__error {
+  font-size: var(--llmobs-text-sm);
+  color: var(--llmobs-danger);
+  background: var(--llmobs-danger-soft);
+  padding: var(--llmobs-space-2) var(--llmobs-space-3);
+  border-radius: var(--llmobs-radius-md);
+}

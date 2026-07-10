@@ -1,0 +1,29 @@
+{
+  "name": "@llmobs/shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The LLMObs web shell: a pure Module Federation 2.0 host. It owns login, the app frame, and the dynamic remote loader — and zero plugins. Nav and routes are built from the registry API at runtime.",
+  "type": "module",
+  "scripts": {
+    "build": "rspack build",
+    "dev": "rspack serve",
+    "typecheck": "tsc --noEmit",
+    "check:singletons": "node scripts/check-singletons.mjs"
+  },
+  "dependencies": {
+    "@llmobs/tokens": "workspace:*",
+    "@llmobs/ui": "workspace:*",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "6.28.0"
+  },
+  "devDependencies": {
+    "@module-federation/enhanced": "0.8.4",
+    "@rspack/cli": "1.1.6",
+    "@rspack/core": "1.1.6",
+    "@types/node": "22.9.0",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "typescript": "5.6.3"
+  }
+}

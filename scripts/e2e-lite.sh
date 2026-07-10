@@ -29,6 +29,19 @@ for _ in $(seq 1 60); do
 done
 if [ -z "$ready" ]; then echo "FAIL: kernel not ready"; "${COMPOSE[@]}" logs kernel; exit 1; fi
 
+echo ">> e2e-lite: web shell served at the origin root"
+ROOT_HTML="$(curl -sf ${API}/ || true)"
+printf '%s' "$ROOT_HTML" | grep -q '<div id="root">' \
+  || { echo "FAIL: shell index.html not served at /"; printf '%s\n' "$ROOT_HTML" | head -5; exit 1; }
+# SPA fallback: an unknown client route returns the app HTML, not a 404.
+DEEP_STATUS="$(curl -s -o /dev/null -w '%{http_code}' ${API}/traces)"
+[ "$DEEP_STATUS" = "200" ] || { echo "FAIL: SPA deep-link /traces returned $DEEP_STATUS"; exit 1; }
+# The registry endpoint the shell's loader consumes exists and is empty in D2.
+REG="$(curl -sf ${API}/v1alpha1/registry/plugins || true)"
+printf '%s' "$REG" | python3 -c 'import sys,json;d=json.load(sys.stdin);assert d.get("plugins")==[]' \
+  || { echo "FAIL: registry endpoint not empty-list"; echo "$REG"; exit 1; }
+echo "   assert OK: shell HTML at /, SPA fallback, empty registry"
+
 echo ">> e2e-lite: auth smoke (login -> me -> logout)"
 COOKIES="$(mktemp)"
 LOGIN="$(curl -sf -c "$COOKIES" -H "Content-Type: application/json" \

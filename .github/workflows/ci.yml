@@ -51,6 +51,22 @@ jobs:
       - name: Merge vectors in the spec stay machine-parseable
         run: python3 scripts/check_merge_vectors.py
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: pnpm install --frozen-lockfile --filter @llmobs/shell...
+      - name: Build design system + shell (Module Federation host)
+        run: |
+          pnpm --filter @llmobs/tokens build
+          pnpm --filter @llmobs/ui build
+          NODE_ENV=production pnpm --filter @llmobs/shell build
+      - name: Typecheck the shell
+        run: pnpm --filter @llmobs/shell typecheck
+      - name: Shared singletons are declared (no plugin can bundle its own copy)
+        run: pnpm --filter @llmobs/shell check:singletons
+
   commit-lint:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'

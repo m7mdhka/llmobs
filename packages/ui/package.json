@@ -1,0 +1,35 @@
+{
+  "name": "@llmobs/ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LLMObs design system: clone-and-own Radix/React components styled entirely from @llmobs/tokens. Never add shadcn via its CLI — components are copied in and owned here.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./ui.css": "./src/ui.css"
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "dependencies": {
+    "@llmobs/tokens": "workspace:*",
+    "@radix-ui/react-dialog": "1.1.2",
+    "@radix-ui/react-tabs": "1.1.1",
+    "@radix-ui/react-slot": "1.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "typescript": "5.6.3"
+  }
+}

@@ -221,6 +221,9 @@ func run() error {
 	pluginapi.NewStore(pluginAuthz, pluginStore).Register(apiMux, "/v1alpha1/plugin/store")
 	// Events: durable subscribe (poll/ack) over the Postgres event bus.
 	pluginapi.NewEvents(pluginAuthz, eventBus).Register(apiMux, "/v1alpha1/plugin/events")
+	// Ingest: a compat plugin (cap:ingest) pushes OTLP spans through the SAME
+	// pipeline as native OTLP — kernel-stamped source, project from the assertion.
+	pluginapi.NewIngest(pluginAuthz, pipe).Register(apiMux, "/v1alpha1/plugin/ingest")
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is

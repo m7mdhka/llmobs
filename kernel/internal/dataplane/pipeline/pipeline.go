@@ -12,6 +12,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,6 +32,11 @@ type Ingestion struct {
 	Body        []byte
 	ContentType string
 	ReceivedAt  time.Time
+	// Source, when set, is stamped onto every canonical span as llmobs.source by
+	// the normalize stage. The kernel sets it for plugin ingest ("plugin:{id}") so
+	// a plugin cannot forge a different source — the body's own source is
+	// overwritten (H7). Empty for OTLP (unstamped).
+	Source string
 
 	// derived
 	Identity controlplane.Identity
@@ -107,7 +113,29 @@ func New(pool *pgxpool.Pool, store storage.TelemetryStore, reg *normalize.Regist
 // Run executes the chain in order, stopping at the first error. Per-stage latency
 // is recorded when metrics are enabled.
 func (p *Pipeline) Run(ctx context.Context, ing *Ingestion) error {
+	return p.run(ctx, ing, false)
+}
+
+// RunPreauth runs the pipeline for an ALREADY-AUTHENTICATED ingestion — the plugin
+// ingest capability (H7). The caller sets ing.Identity (project from the double
+// token) and ing.Source ("plugin:{id}", stamped by the kernel), and the
+// authenticate stage is skipped. Everything else — decode, normalize, redact,
+// sample, enrich, persist, publish — runs identically, so plugin-pushed spans go
+// through the SAME validation/merge/dq as OTLP, land ONLY in the caller's project,
+// and carry the kernel-stamped source. A plugin cannot bypass the pipeline, forge
+// its source, or write outside its project.
+func (p *Pipeline) RunPreauth(ctx context.Context, ing *Ingestion) error {
+	if ing.Identity.ProjectID == "" {
+		return errors.New("pipeline: RunPreauth requires a resolved identity")
+	}
+	return p.run(ctx, ing, true)
+}
+
+func (p *Pipeline) run(ctx context.Context, ing *Ingestion, skipAuth bool) error {
 	for _, s := range p.stages {
+		if skipAuth && s.Name() == "authenticate" {
+			continue
+		}
 		start := time.Now()
 		err := s.Process(ctx, ing)
 		if p.metrics != nil {

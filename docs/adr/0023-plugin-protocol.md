@@ -209,6 +209,25 @@ scores-write leak), is pinned to the plugin's project, and is tagged system —
 i.e. a job cannot exceed the plugin's capabilities or reach another project. This
 did not force a change to how the runner mints assertions.
 
+## `ingest` — the cold-path plugin write seam (H7a)
+
+The `ingest` capability (enum-only until now) becomes a real kernel write seam: a
+compat plugin (`cap:ingest`) pushes OTLP-format spans through its own endpoint, and
+the kernel runs them through the **same** pipeline as native OTLP —
+normalize/redact/validate/merge/dq — via `pipeline.RunPreauth` (the pipeline minus
+the api-key authenticate stage, replaced by the `cap:ingest` double-token gate).
+This is the seam #35 (n8n) reuses.
+
+Prove-the-negative (H3/H4/H5/H6 family) — a plugin CANNOT:
+
+- **write outside its project** — the project is the caller's, resolved from the
+  assertion, and `normalize` scopes every span by `identity.ProjectID`, never the
+  body;
+- **forge its source** — the kernel stamps `llmobs.source = plugin:{id}` in
+  `normalize`, overwriting any source the body carried;
+- **bypass the pipeline** — the endpoint *is* the pipeline; spans are normalized,
+  redacted, validated, and merged with dq exactly like OTLP.
+
 ## Consequences
 
 - The manifest gains an additive `spec.backend` (url, healthPath, infoPath,

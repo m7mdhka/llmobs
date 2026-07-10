@@ -29,6 +29,10 @@ export type { StoreConfig, StoreQuery, StoreFilter, StoreOp, StorePage } from ".
 export { EventsClient } from "./events.js";
 export type { EventsConfig, Event } from "./events.js";
 
+// Capability: `ingest` (compat plugins push OTLP through the kernel pipeline).
+export { IngestClient } from "./ingest.js";
+export type { IngestConfig } from "./ingest.js";
+
 // Manifest types (mirror of the JSON Schema contract).
 export type {
   PluginManifest,

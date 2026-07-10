@@ -9,6 +9,11 @@ const EMAIL = process.env.LLMOBS_ADMIN_EMAIL ?? "admin@example.com";
 const PASSWORD = process.env.LLMOBS_ADMIN_PASSWORD ?? "admin-dev-password";
 
 test("login → manifest nav → traces list → span tree → span panel", async ({ page }) => {
+  const logs: string[] = [];
+  page.on("console", (m) => logs.push(`[console.${m.type()}] ${m.text()}`));
+  page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
+  page.on("requestfailed", (r) => logs.push(`[requestfailed] ${r.url()} ${r.failure()?.errorText ?? ""}`));
+
   await page.goto("/");
 
   // Login form (shell owns auth).
@@ -23,7 +28,14 @@ test("login → manifest nav → traces list → span tree → span panel", asyn
   await tracesNav.click();
 
   // The traces list (DSL traces target) renders the seeded trace.
-  await expect(page.getByRole("heading", { name: "Traces" })).toBeVisible();
+  try {
+    await expect(page.getByRole("heading", { name: "Traces" })).toBeVisible();
+  } catch (e) {
+    const body = await page.locator("#root").innerText().catch(() => "(no #root)");
+    console.log("=== DIAGNOSTIC: visible text after nav ===\n" + body);
+    console.log("=== DIAGNOSTIC: page events ===\n" + logs.join("\n"));
+    throw e;
+  }
   const firstRow = page.locator("table tbody tr").first();
   await expect(firstRow).toBeVisible();
 

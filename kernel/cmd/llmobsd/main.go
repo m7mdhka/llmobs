@@ -99,6 +99,7 @@ func run() error {
 	apiMux := http.NewServeMux()
 	platform.NewHealth(pool).Register(apiMux)
 	auth.Register(apiMux)
+	auth.RegisterKeys(apiMux)
 	var regSource registry.Source = registry.EmptySource{}
 	if cfg.PluginDir != "" {
 		regSource = registry.NewDirSource(cfg.PluginDir, "/v1alpha1/registry/plugins", log)

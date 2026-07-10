@@ -33,11 +33,10 @@ paths:
       operationId: runQuery
       summary: Execute a query DSL document.
       description: >
-        Row queries for target `spans` and `traces` are implemented. Traces are
-        derived from spans at query time (00-dsl-spec.md §4.1). The `scores`
-        target, aggregation queries, and the `traces` score semi-join (QD-9, §8)
-        return `not_implemented` (501) in this maturity — the score write path is
-        a later arc.
+        Row queries for `spans`, `traces`, and `scores` are implemented, as is the
+        `traces` score semi-join (QD-9, §8). Traces are derived from spans at query
+        time (00-dsl-spec.md §4.1). Aggregation queries (`aggregations`) remain
+        `not_implemented` (501) in this maturity.
       requestBody:
         required: true
         content:
@@ -128,22 +127,33 @@ paths:
       tags: [scores]
       operationId: writeScore
       summary: >
-        The score write path for plugins holding the `write` capability. Enforces
+        The score write path (requires the `scores:write` scope). Enforces
         LM-3/LM-8: measurement-only value model and (subject_type, subject_id)
-        subjects, including plugin-namespaced subject types.
+        subjects, including plugin-namespaced subject types. Accepts a single
+        score or a batch array; writes are synchronous so validation is
+        observable (04-score.md §7). A batch is all-or-nothing.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "../../model/v1alpha1/schema/score.schema.json" }
+            schema:
+              oneOf:
+                - $ref: "../../model/v1alpha1/schema/score.schema.json"
+                - type: array
+                  items: { $ref: "../../model/v1alpha1/schema/score.schema.json" }
       responses:
         "201":
-          description: The written score.
+          description: The number of scores written.
           content:
             application/json:
-              schema: { $ref: "../../model/v1alpha1/schema/score.schema.json" }
+              schema:
+                type: object
+                required: [written]
+                properties:
+                  written: { type: integer }
         "400": { $ref: "#/components/responses/InvalidQuery" }
         "403": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/OverLimit" }
 
 components:
   securitySchemes:

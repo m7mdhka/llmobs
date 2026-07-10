@@ -63,14 +63,43 @@ func TestTracesOrderable(t *testing.T) {
 	}
 }
 
-// The score semi-join (QD-9) is not implemented in this maturity -> 501.
-func TestTracesScoresNotImplemented(t *testing.T) {
+// The score semi-join (QD-9) compiles to an EXISTS over the scores table.
+func TestTracesScoresSemiJoin(t *testing.T) {
 	doc := traceDoc()
 	doc["scores"] = []any{map[string]any{"name": "hallucination", "data_type": "numeric", "op": "lt", "value": 0.5}}
+	c := compileTr(t, doc)
+	if !strings.Contains(c.Where, "EXISTS (SELECT 1 FROM scores sc") {
+		t.Fatalf("semi-join did not compile to EXISTS: %s", c.Where)
+	}
+	if !strings.Contains(c.Where, "sc.subject_id = trace_proj.id") || !strings.Contains(c.Where, "sc.value_numeric <") {
+		t.Fatalf("semi-join predicate wrong: %s", c.Where)
+	}
+}
+
+// data_type drives validation: a wrong-typed value is score_type_mismatch (422).
+func TestScoreConditionTypeMismatch(t *testing.T) {
+	doc := traceDoc()
+	doc["scores"] = []any{map[string]any{"name": "h", "data_type": "numeric", "op": "lt", "value": "0.5"}}
 	_, err := CompileTraces(doc, "p", 30*24*time.Hour)
 	ce, _ := err.(*CompileError)
-	if ce == nil || ce.Status != 501 {
-		t.Fatalf("scores should be 501 on traces, got %v", err)
+	if ce == nil || ce.Code != "score_type_mismatch" || ce.Status != 422 {
+		t.Fatalf("string value on numeric score should be score_type_mismatch, got %v", err)
+	}
+}
+
+// The scores DSL target compiles over the scores projection (timestamp anchor).
+func TestCompileScoresTarget(t *testing.T) {
+	doc := map[string]any{
+		"target":    "scores",
+		"timeRange": map[string]any{"from": "2026-01-01T00:00:00Z", "to": "2026-01-02T00:00:00Z"},
+		"filters":   []any{map[string]any{"field": "name", "op": "eq", "value": "hallucination"}},
+	}
+	c, err := CompileScores(doc, "p", 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("scores target compile: %v", err)
+	}
+	if !strings.Contains(c.Where, "timestamp >=") {
+		t.Fatalf("scores time anchor should be timestamp: %s", c.Where)
 	}
 }
 

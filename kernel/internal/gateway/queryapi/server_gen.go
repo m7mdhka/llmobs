@@ -97,13 +97,21 @@ type Unauthorized = Error
 type RunQueryJSONBody = map[string]interface{}
 
 // WriteScoreJSONBody defines parameters for WriteScore.
-type WriteScoreJSONBody = map[string]interface{}
+type WriteScoreJSONBody struct {
+	union json.RawMessage
+}
+
+// WriteScoreJSONBody0 defines parameters for WriteScore.
+type WriteScoreJSONBody0 = map[string]interface{}
+
+// WriteScoreJSONBody1 defines parameters for WriteScore.
+type WriteScoreJSONBody1 = []map[string]interface{}
 
 // RunQueryJSONRequestBody defines body for RunQuery for application/json ContentType.
 type RunQueryJSONRequestBody = RunQueryJSONBody
 
 // WriteScoreJSONRequestBody defines body for WriteScore for application/json ContentType.
-type WriteScoreJSONRequestBody = WriteScoreJSONBody
+type WriteScoreJSONRequestBody WriteScoreJSONBody
 
 // Getter for additional properties for QueryResponse_Stats. Returns the specified
 // element and whether it was found
@@ -206,7 +214,7 @@ type ServerInterface interface {
 	// Execute a query DSL document.
 	// (POST /v1alpha1/query)
 	RunQuery(w http.ResponseWriter, r *http.Request)
-	// The score write path for plugins holding the `write` capability. Enforces LM-3/LM-8: measurement-only value model and (subject_type, subject_id) subjects, including plugin-namespaced subject types.
+	// The score write path (requires the `scores:write` scope). Enforces LM-3/LM-8: measurement-only value model and (subject_type, subject_id) subjects, including plugin-namespaced subject types. Accepts a single score or a batch array; writes are synchronous so validation is observable (04-score.md §7). A batch is all-or-nothing.
 	// (POST /v1alpha1/scores)
 	WriteScore(w http.ResponseWriter, r *http.Request)
 	// Fetch a single score by id.

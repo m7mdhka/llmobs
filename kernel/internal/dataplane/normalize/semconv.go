@@ -115,6 +115,22 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 		if usage := providedUsage(in.Attributes); len(usage) > 0 {
 			out["provided_usage_details"] = usage
 		}
+		// Provided cost (LM-4 provided-wins): when the client sends cost, preserve
+		// it verbatim as provided_cost_details, stamp cost_source=provided, and
+		// populate the promoted total_cost so dashboards work unchanged even before
+		// kernel derivation exists (#13). This is Dmitri's GPU-seconds path.
+		if cost := providedCost(in.Attributes); len(cost) > 0 {
+			out["provided_cost_details"] = cost
+			out["cost_source"] = "provided"
+			if total, ok := cost["total"].(float64); ok {
+				out["total_cost"] = total
+			}
+		}
+		// completion_start_time — time to first token (02-span.md §5), when the
+		// source provides it. Enables the DSL `ttft` computed field (§4.2).
+		if cst, present := firstAttr(in, "gen_ai.response.completion_start_time"); present {
+			out["completion_start_time"] = cst
+		}
 	}
 
 	// span events
@@ -192,6 +208,26 @@ func providedUsage(a map[string]any) map[string]any {
 	return out
 }
 
+// providedCost maps client-sent cost into provided_cost_details (LM-4). Amounts
+// are decimals; total is summed from input+output when not sent explicitly.
+func providedCost(a map[string]any) map[string]any {
+	out := map[string]any{}
+	if v, ok := toFloat(a["gen_ai.usage.input_cost"]); ok {
+		out["input"] = v
+	}
+	if v, ok := toFloat(a["gen_ai.usage.output_cost"]); ok {
+		out["output"] = v
+	}
+	if v, ok := toFloat(a["gen_ai.usage.cost"]); ok {
+		out["total"] = v
+	} else if in, iok := out["input"].(float64); iok {
+		if o, ook := out["output"].(float64); ook {
+			out["total"] = in + o
+		}
+	}
+	return out
+}
+
 func isRequestParam(k string) bool {
 	for _, p := range requestParamKeys {
 		if p == k {
@@ -243,6 +279,19 @@ func toInt(v any) (int64, bool) {
 		return int64(t), true
 	case float64:
 		return int64(t), true
+	default:
+		return 0, false
+	}
+}
+
+func toFloat(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case int64:
+		return float64(t), true
+	case int:
+		return float64(t), true
 	default:
 		return 0, false
 	}

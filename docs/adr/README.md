@@ -37,3 +37,5 @@ order). New decisions continue the numbering:
 | [ADR-0017](0017-score-model.md) | Score model (LM-3 + LM-8) |
 | [ADR-0018](0018-span-taxonomy-and-payload-shapes.md) | Span taxonomy and payload shapes (LM-1 + LM-2) |
 | [ADR-0019](0019-query-dsl.md) | Query DSL (QD-1..QD-10) |
+| [ADR-0020](0020-indexed-attribute-keys.md) | Indexed attribute keys — per-project custom dimensions (audit) |
+| [ADR-0021](0021-explicit-clear-sentinel.md) | Explicit-clear sentinel — one merge algorithm survives (audit) |

@@ -171,6 +171,36 @@ func (s *Server) GetSpan(w http.ResponseWriter, r *http.Request, id string) {
 	_, _ = w.Write(doc)
 }
 
+// EraseSpans: DELETE /v1alpha1/spans — GDPR erasure (requires the `delete`
+// scope). Bounded, synchronous, audited.
+func (s *Server) EraseSpans(w http.ResponseWriter, r *http.Request, params queryapi.EraseSpansParams) {
+	ident, aerr := s.auth(r, "delete")
+	if aerr != nil {
+		writeErr(w, aerr)
+		return
+	}
+	if params.UserId == "" {
+		writeErr(w, errf("schema_invalid", 400, "user_id is required"))
+		return
+	}
+	if !params.From.Before(params.To) {
+		writeErr(w, errf("schema_invalid", 400, "from must be before to"))
+		return
+	}
+	actor := "apikey"
+	if sess, ok := authhttp.SessionFrom(r.Context()); ok {
+		actor = "session:" + sess.User.Email
+	}
+	erased, auditID, err := s.store.EraseSpans(r.Context(), ident.ProjectID, params.UserId, actor, params.From, params.To)
+	if err != nil {
+		s.log.Error("erase spans", "err", err.Error())
+		writeErr(w, errf("internal", 500, "erasure failed"))
+		return
+	}
+	s.log.Warn("erasure executed", "actor", actor, "user_id", params.UserId, "erased", erased, "audit_id", auditID)
+	writeJSON(w, http.StatusOK, map[string]any{"erased": erased, "audit_id": auditID})
+}
+
 // GetScore: GET /v1alpha1/scores/{id}.
 func (s *Server) GetScore(w http.ResponseWriter, r *http.Request, id string) {
 	ident, aerr := s.auth(r, "query")

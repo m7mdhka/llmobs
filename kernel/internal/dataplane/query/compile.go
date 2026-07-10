@@ -79,14 +79,19 @@ type queryFields struct {
 
 var spanFields = queryFields{
 	fields: map[string]fieldDef{
-		"id":                   {"id", classString},
-		"trace_id":             {"trace_id", classString},
-		"parent_span_id":       {"parent_span_id", classString},
-		"kind":                 {"kind", classEnum},
-		"raw_kind":             {"raw_kind", classString},
-		"name":                 {"name", classString},
-		"start_time":           {"start_time", classTimestamp},
-		"end_time":             {"end_time", classTimestamp},
+		"id":                    {"id", classString},
+		"trace_id":              {"trace_id", classString},
+		"parent_span_id":        {"parent_span_id", classString},
+		"kind":                  {"kind", classEnum},
+		"raw_kind":              {"raw_kind", classString},
+		"name":                  {"name", classString},
+		"start_time":            {"start_time", classTimestamp},
+		"end_time":              {"end_time", classTimestamp},
+		"completion_start_time": {"completion_start_time", classTimestamp},
+		// Computed numeric fields (DSL §4.2): SQL expressions over the timestamps,
+		// in seconds. NULL when the underlying timestamp is null (open span / no TTFT).
+		"duration":             {"EXTRACT(EPOCH FROM (end_time - start_time))", classNumeric},
+		"ttft":                 {"EXTRACT(EPOCH FROM (completion_start_time - start_time))", classNumeric},
 		"status.code":          {"status_code", classEnum},
 		"environment":          {"environment", classString},
 		"release":              {"release", classString},
@@ -103,7 +108,8 @@ var spanFields = queryFields{
 		"pricing_snapshot_ref": {"pricing_snapshot_ref", classReference},
 	},
 	orderable: map[string]bool{
-		"id": true, "trace_id": true, "name": true, "start_time": true, "end_time": true, "total_cost": true,
+		"id": true, "trace_id": true, "name": true, "start_time": true, "end_time": true,
+		"completion_start_time": true, "duration": true, "ttft": true, "total_cost": true,
 	},
 	timeAnchor: "start_time",
 }

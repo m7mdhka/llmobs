@@ -5,8 +5,10 @@ import "@llmobs/ui/ui.css";
 import "./shell.css";
 import { App } from "./App.js";
 import { initTheme } from "./theme.js";
+import { brand } from "@llmobs/brand";
 
 initTheme();
+document.title = brand.name;
 
 const el = document.getElementById("root");
 if (el) {

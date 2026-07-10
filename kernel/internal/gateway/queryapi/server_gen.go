@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
@@ -106,6 +107,13 @@ type WriteScoreJSONBody0 = map[string]interface{}
 
 // WriteScoreJSONBody1 defines parameters for WriteScore.
 type WriteScoreJSONBody1 = []map[string]interface{}
+
+// EraseSpansParams defines parameters for EraseSpans.
+type EraseSpansParams struct {
+	UserId string    `form:"user_id" json:"user_id"`
+	From   time.Time `form:"from" json:"from"`
+	To     time.Time `form:"to" json:"to"`
+}
 
 // RunQueryJSONRequestBody defines body for RunQuery for application/json ContentType.
 type RunQueryJSONRequestBody = RunQueryJSONBody
@@ -220,6 +228,9 @@ type ServerInterface interface {
 	// Fetch a single score by id.
 	// (GET /v1alpha1/scores/{id})
 	GetScore(w http.ResponseWriter, r *http.Request, id string)
+	// GDPR erasure (requires the `delete` scope). Hard-deletes every span matching a mandatory, bounded filter — `user_id` plus a `timeRange` — and records an erasure audit row (actor, filter, count, time). Synchronous: the filter is bounded and the caller needs the proven count.
+	// (DELETE /v1alpha1/spans)
+	EraseSpans(w http.ResponseWriter, r *http.Request, params EraseSpansParams)
 	// Fetch a single span by id.
 	// (GET /v1alpha1/spans/{id})
 	GetSpan(w http.ResponseWriter, r *http.Request, id string)
@@ -308,6 +319,78 @@ func (siw *ServerInterfaceWrapper) GetScore(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetScore(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EraseSpans operation middleware
+func (siw *ServerInterfaceWrapper) EraseSpans(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, ServiceTokenScopes, []string{})
+
+	ctx = context.WithValue(ctx, UserAssertionScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params EraseSpansParams
+
+	// ------------- Required query parameter "user_id" -------------
+
+	if paramValue := r.URL.Query().Get("user_id"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "user_id"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "user_id", r.URL.Query(), &params.UserId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		return
+	}
+
+	// ------------- Required query parameter "from" -------------
+
+	if paramValue := r.URL.Query().Get("from"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "from", r.URL.Query(), &params.From)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	if paramValue := r.URL.Query().Get("to"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "to", r.URL.Query(), &params.To)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EraseSpans(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -539,6 +622,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/v1alpha1/query", wrapper.RunQuery)
 	m.HandleFunc("POST "+options.BaseURL+"/v1alpha1/scores", wrapper.WriteScore)
 	m.HandleFunc("GET "+options.BaseURL+"/v1alpha1/scores/{id}", wrapper.GetScore)
+	m.HandleFunc("DELETE "+options.BaseURL+"/v1alpha1/spans", wrapper.EraseSpans)
 	m.HandleFunc("GET "+options.BaseURL+"/v1alpha1/spans/{id}", wrapper.GetSpan)
 	m.HandleFunc("GET "+options.BaseURL+"/v1alpha1/traces/{id}", wrapper.GetTrace)
 	m.HandleFunc("GET "+options.BaseURL+"/v1alpha1/traces/{trace_id}/tree", wrapper.GetTraceTree)

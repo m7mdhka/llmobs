@@ -56,6 +56,7 @@ func main() {
 			attribute.String("gen_ai.operation.name", "invoke_agent"),
 			attribute.String("gen_ai.agent.name", "support-agent"),
 			attribute.String("gen_ai.conversation.id", "conv-789"),
+			attribute.String("user.id", "user-42"),
 		))
 	traceID := agent.SpanContext().TraceID().String()
 

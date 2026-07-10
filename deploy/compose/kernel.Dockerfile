@@ -17,6 +17,7 @@ RUN pnpm install --frozen-lockfile --filter @llmobs/shell... --filter @llmobs/pl
 # Build shared deps, the shell, and the first-party tracing plugin (a MF remote).
 # Fail the build if the host's shared singletons regress.
 RUN pnpm --filter @llmobs/query-client build \
+ && pnpm --filter @llmobs/brand build \
  && pnpm --filter @llmobs/tokens build \
  && pnpm --filter @llmobs/ui build \
  && pnpm --filter @llmobs/plugin-sdk build \

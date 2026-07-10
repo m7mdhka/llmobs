@@ -74,6 +74,33 @@ paths:
         "403": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1alpha1/spans:
+    delete:
+      tags: [entities]
+      operationId: eraseSpans
+      summary: >
+        GDPR erasure (requires the `delete` scope). Hard-deletes every span
+        matching a mandatory, bounded filter — `user_id` plus a `timeRange` — and
+        records an erasure audit row (actor, filter, count, time). Synchronous:
+        the filter is bounded and the caller needs the proven count.
+      parameters:
+        - { name: user_id, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: The erasure result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [erased, audit_id]
+                properties:
+                  erased: { type: integer }
+                  audit_id: { type: string }
+        "400": { $ref: "#/components/responses/InvalidQuery" }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+
   /v1alpha1/spans/{id}:
     get:
       tags: [entities]

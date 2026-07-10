@@ -1,7 +1,7 @@
 // TypeScript mirror of api/schemas/manifest/v1alpha1/llmobs-plugin.schema.json.
 // Kept in sync with that schema (the schema is the contract; this is DX sugar).
 
-export type Capability = "query" | "write" | "events" | "jobs" | "kv" | "secrets" | "surface";
+export type Capability = "ingest" | "query" | "write" | "events" | "jobs" | "kv" | "secrets" | "surface";
 
 export interface PluginNavItem {
   path: string;

@@ -17,7 +17,7 @@ type spanColumns struct {
 	traceID, parentSpanID, kind, rawKind, name *string
 	statusCode, environment, release, version  *string
 	sessionID, userID, model, provider         *string
-	startTime, endTime                         *time.Time
+	startTime, endTime, completionStartTime    *time.Time
 	totalCost                                  *float64
 	attributes, usageDetails, costDetails      []byte
 	providedUsageDetails, providedCostDetails  []byte
@@ -41,6 +41,7 @@ func extractSpanColumns(m map[string]any, _ time.Time) spanColumns {
 		provider:             strPtr(m, "provider"),
 		startTime:            timePtr(m, "start_time"),
 		endTime:              timePtr(m, "end_time"),
+		completionStartTime:  timePtr(m, "completion_start_time"),
 		totalCost:            floatPtr(m, "total_cost"),
 		attributes:           jsonbOr(m, "attributes", "{}"),
 		usageDetails:         jsonbOr(m, "usage_details", "{}"),

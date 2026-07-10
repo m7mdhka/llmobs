@@ -74,16 +74,17 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 	c := extractSpanColumns(merged, ev.EventTS)
 	_, err = tx.Exec(ctx, `
 		INSERT INTO spans (project_id, id, trace_id, parent_span_id, kind, raw_kind, name,
-			start_time, end_time, status_code, environment, release, version, session_id, user_id,
+			start_time, end_time, completion_start_time, status_code, environment, release, version, session_id, user_id,
 			model, provider, total_cost, attributes, usage_details, cost_details,
 			provided_usage_details, provided_cost_details, prompt_ref, pricing_snapshot_ref,
 			is_deleted, event_ts, doc, provenance, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-			$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29, now())
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30, now())
 		ON CONFLICT (project_id, id) DO UPDATE SET
 			trace_id=EXCLUDED.trace_id, parent_span_id=EXCLUDED.parent_span_id, kind=EXCLUDED.kind,
 			raw_kind=EXCLUDED.raw_kind, name=EXCLUDED.name, start_time=EXCLUDED.start_time,
-			end_time=EXCLUDED.end_time, status_code=EXCLUDED.status_code, environment=EXCLUDED.environment,
+			end_time=EXCLUDED.end_time, completion_start_time=EXCLUDED.completion_start_time,
+			status_code=EXCLUDED.status_code, environment=EXCLUDED.environment,
 			release=EXCLUDED.release, version=EXCLUDED.version, session_id=EXCLUDED.session_id,
 			user_id=EXCLUDED.user_id, model=EXCLUDED.model, provider=EXCLUDED.provider,
 			total_cost=EXCLUDED.total_cost, attributes=EXCLUDED.attributes, usage_details=EXCLUDED.usage_details,
@@ -92,7 +93,7 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 			pricing_snapshot_ref=EXCLUDED.pricing_snapshot_ref, is_deleted=EXCLUDED.is_deleted,
 			event_ts=EXCLUDED.event_ts, doc=EXCLUDED.doc, provenance=EXCLUDED.provenance, updated_at=now()`,
 		projectID, id, c.traceID, c.parentSpanID, c.kind, c.rawKind, c.name,
-		c.startTime, c.endTime, c.statusCode, c.environment, c.release, c.version, c.sessionID, c.userID,
+		c.startTime, c.endTime, c.completionStartTime, c.statusCode, c.environment, c.release, c.version, c.sessionID, c.userID,
 		c.model, c.provider, c.totalCost, c.attributes, c.usageDetails, c.costDetails,
 		c.providedUsageDetails, c.providedCostDetails, c.promptRef, c.pricingSnapshotRef,
 		c.isDeleted, ev.EventTS.UTC(), doc, provJSON)

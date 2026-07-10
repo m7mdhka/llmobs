@@ -67,7 +67,6 @@ export default {
   plugins: [
     new rspack.HtmlRspackPlugin({
       template: "./src/index.html",
-      title: "LLMObs",
     }),
     new rspack.DefinePlugin({
       "process.env.NODE_ENV": JSON.stringify(isProd ? "production" : "development"),

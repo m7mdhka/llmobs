@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
 // GetTraceTree: GET /v1alpha1/traces/{trace_id}/tree — the trace and its spans in
@@ -31,7 +33,7 @@ func (s *Server) GetTraceTree(w http.ResponseWriter, r *http.Request, traceID st
 
 	// Field-level redaction (DSL §10): a metadata-scoped caller never receives span
 	// payloads in the tree — the exact "an assistant never ingests PII" guarantee.
-	if !ident.HasScope("query:payloads") {
+	if !ident.HasScope(perm.TracesReadPayloads) {
 		for _, sp := range ordered {
 			for _, f := range payloadFields {
 				delete(sp, f)
@@ -63,7 +65,7 @@ func (s *Server) GetTrace(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	trace := synthesizeTrace(ident.ProjectID, id, treeOrder(decodeSpans(rows)))
-	if !ident.HasScope("query:payloads") {
+	if !ident.HasScope(perm.TracesReadPayloads) {
 		delete(trace, "attributes")
 	}
 	writeJSON(w, http.StatusOK, trace)

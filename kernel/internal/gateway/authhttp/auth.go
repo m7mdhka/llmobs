@@ -142,7 +142,7 @@ func (h *Handler) Middleware(next http.Handler) http.Handler {
 				// Forward-looking seam: this is where a per-request kernel-signed
 				// identity assertion will be minted for plugin→kernel calls.
 				// mintIdentityAssertion(sess) — not built in D1.
-				r = r.WithContext(context.WithValue(r.Context(), sessionKey, sess))
+				r = r.WithContext(WithSession(r.Context(), sess))
 			}
 		}
 		next.ServeHTTP(w, r)
@@ -170,6 +170,12 @@ func (h *Handler) RequireAuth(next http.Handler) http.Handler {
 func SessionFrom(ctx context.Context) (controlplane.Session, bool) {
 	s, ok := ctx.Value(sessionKey).(controlplane.Session)
 	return s, ok
+}
+
+// WithSession returns a context carrying a resolved session — the single binding
+// point used by the middleware and by tests that exercise session-gated handlers.
+func WithSession(ctx context.Context, s controlplane.Session) context.Context {
+	return context.WithValue(ctx, sessionKey, s)
 }
 
 func (h *Handler) checkCSRF(r *http.Request, sess controlplane.Session) bool {

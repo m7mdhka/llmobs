@@ -11,10 +11,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/plugintoken"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/queryapi"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
+	"github.com/m7mdhka/llmobs/kernel/pkg/pluginproto"
 )
 
 // Server implements the generated Query API ServerInterface for the lite adapter.
@@ -26,10 +29,11 @@ type Server struct {
 	log       *slog.Logger
 	maxWindow time.Duration
 	metrics   *metrics.Registry
+	signer    *plugintoken.Signer // verifies plugin service tokens + user assertions (H3)
 }
 
-func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration, reg *metrics.Registry) *Server {
-	return &Server{store: store, pool: pool, log: log, maxWindow: maxWindow, metrics: reg}
+func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration, reg *metrics.Registry, signer *plugintoken.Signer) *Server {
+	return &Server{store: store, pool: pool, log: log, maxWindow: maxWindow, metrics: reg, signer: signer}
 }
 
 // Handler returns the routed Query API handler (generated routing).
@@ -37,32 +41,93 @@ func (s *Server) Handler() http.Handler { return queryapi.Handler(s) }
 
 var _ queryapi.ServerInterface = (*Server)(nil)
 
-func (s *Server) auth(r *http.Request, scope string) (controlplane.Identity, *CompileError) {
-	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if bearer == "" {
-		bearer = r.Header.Get("X-LLMObs-Service-Token") // B2 wires the double-token model
+// auth resolves the caller and enforces the computed double-token intersection
+// (ADR-0023/R3). The returned Identity.Scopes are the caller's EFFECTIVE canonical
+// permissions (perm.*), so downstream payload-scope checks intersect losslessly.
+// `op` is the historical coarse operation name at the call site; it is translated
+// to the required canonical permission here.
+//
+// NOTE (inert generated stubs): the generated queryapi.server_gen.go declares
+// ServiceTokenScopes/UserAssertionScopes security-context values but leaves them
+// empty; they are deliberately IGNORED. The real intersection is computed below
+// from the verified token + assertion headers — do not wire the generated
+// context values up thinking they are authoritative (they never are).
+func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *CompileError) {
+	reqPerm := perm.RequiredPermForOp(op)
+	svcTok := r.Header.Get("X-LLMObs-Service-Token")
+	assertion := r.Header.Get(pluginproto.IdentityAssertionHeader)
+
+	// Case 1 — a plugin acting on behalf of a user (the double token). Effective
+	// access is the intersection of the plugin's grant and the user's grant, on the
+	// user's project. Never trust a plugin-supplied identity.
+	if svcTok != "" && assertion != "" {
+		return s.authPlugin(r, op, reqPerm, svcTok, assertion)
 	}
-	// Browser callers (the shell + plugins) authenticate with a session cookie,
-	// not a bearer. A resolved session grants the admin full scopes on the
-	// selected project (single-admin lite; RBAC/project membership is future).
-	if bearer == "" {
+
+	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+
+	// Case 2 — a browser session (shell). Effective = the user's role permissions ∩
+	// project. Admin => the full permission set, DERIVED from the role (the #21 RBAC
+	// seam), not a hardcoded verb list.
+	if bearer == "" && svcTok == "" {
 		if sess, ok := authhttp.SessionFrom(r.Context()); ok {
 			projectID, err := s.sessionProject(r)
 			if err != nil {
 				return controlplane.Identity{}, errf("unauthorized", 403, "no project available")
 			}
-			_ = sess
-			return controlplane.Identity{ProjectID: projectID, Scopes: []string{"ingest", "query", "query:payloads", "scores:write", "delete"}}, nil
+			userPerms := perm.RoleScopes(sess.User.Role)
+			if !perm.Has(userPerms, reqPerm) {
+				return controlplane.Identity{}, errf("unauthorized", 403, "missing permission %s", reqPerm)
+			}
+			return controlplane.Identity{ProjectID: projectID, Scopes: userPerms}, nil
 		}
+	}
+
+	// Case 3 — a machine api key. A bare service token with no assertion cannot act
+	// (no user) and will fail Authenticate — a plugin MUST forward the assertion.
+	if bearer == "" {
+		bearer = svcTok
 	}
 	id, err := controlplane.Authenticate(r.Context(), s.pool, bearer)
 	if err != nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "invalid credentials")
 	}
-	if !id.HasScope(scope) {
-		return controlplane.Identity{}, errf("unauthorized", 403, "missing scope %s", scope)
+	id.Scopes = perm.ExpandCoarse(id.Scopes) // translate coarse key scopes UP to canonical
+	if !perm.Has(id.Scopes, reqPerm) {
+		return controlplane.Identity{}, errf("unauthorized", 403, "missing permission %s", reqPerm)
 	}
 	return id, nil
+}
+
+// authPlugin computes the double-token intersection for a plugin→kernel call.
+func (s *Server) authPlugin(_ *http.Request, op, reqPerm, svcTok, assertion string) (controlplane.Identity, *CompileError) {
+	if s.signer == nil {
+		return controlplane.Identity{}, errf("unauthorized", 403, "plugin auth unavailable")
+	}
+	now := time.Now()
+	stc, err := s.signer.VerifyServiceToken(svcTok, now)
+	if err != nil {
+		return controlplane.Identity{}, errf("unauthorized", 403, "invalid service token")
+	}
+	// The assertion MUST have been minted for THIS plugin's audience — an assertion
+	// for another plugin is rejected (token-confusion defence).
+	ac, err := s.signer.VerifyIdentityAssertion(assertion, pluginproto.PluginSubject(stc.PluginID), now)
+	if err != nil {
+		return controlplane.Identity{}, errf("unauthorized", 403, "invalid identity assertion")
+	}
+	// Capability gate: the plugin must hold the capability for this op (delete has
+	// none — plugins may not erase).
+	caps, pluginPerms := perm.SplitCapsAndPerms(stc.Scopes)
+	if !perm.Has(caps, perm.CapMarker(perm.CapForOp(op))) {
+		return controlplane.Identity{}, errf("unauthorized", 403, "plugin lacks capability for %s", op)
+	}
+	// The computed intersection: effective = plugin data perms ∩ user perms.
+	effective := pluginproto.Intersect(pluginPerms, ac.Scopes)
+	if !perm.Has(effective, reqPerm) {
+		return controlplane.Identity{}, errf("unauthorized", 403, "outside the permission intersection for %s", reqPerm)
+	}
+	// Project comes from the assertion; the plugin cannot pick a different tenant.
+	return controlplane.Identity{ProjectID: ac.ProjectID, Scopes: effective}, nil
 }
 
 // sessionProject resolves the project a browser session operates on: the
@@ -142,10 +207,12 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	// the payload scope. Cursor keying happened above from promoted anchors, so it
 	// never leaks payloads and paging is unaffected.
 	strip := payloadFields
+	payloadPerm := perm.TracesReadPayloads
 	if target == "scores" {
 		strip = scorePayloadFields
+		payloadPerm = perm.ScoresReadPayloads
 	}
-	rows = projectRows(rows, strip, id.HasScope("query:payloads"))
+	rows = projectRows(rows, strip, id.HasScope(payloadPerm))
 
 	data := make([]json.RawMessage, len(rows))
 	copy(data, rows)
@@ -217,7 +284,7 @@ func (s *Server) Whoami(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"project_id":    id.ProjectID,
 		"scopes":        id.Scopes,
-		"read_payloads": id.HasScope("query:payloads"),
+		"read_payloads": id.HasScope(perm.TracesReadPayloads),
 	})
 }
 
@@ -237,7 +304,7 @@ func (s *Server) GetSpan(w http.ResponseWriter, r *http.Request, id string) {
 		writeErr(w, errf("not_found", 404, "no such span"))
 		return
 	}
-	if !ident.HasScope("query:payloads") {
+	if !ident.HasScope(perm.TracesReadPayloads) {
 		doc = stripPayloadFields(doc, payloadFields)
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -291,7 +358,7 @@ func (s *Server) GetScore(w http.ResponseWriter, r *http.Request, id string) {
 		writeErr(w, errf("not_found", 404, "no such score"))
 		return
 	}
-	if !ident.HasScope("query:payloads") {
+	if !ident.HasScope(perm.ScoresReadPayloads) {
 		doc = stripPayloadFields(doc, scorePayloadFields)
 	}
 	w.Header().Set("Content-Type", "application/json")

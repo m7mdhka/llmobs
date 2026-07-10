@@ -94,6 +94,33 @@ faults (proved by `TestKernelRestartReHandshakeIsNotAFault`). This is a known,
 accepted lite-profile property; the scale profile's persisted/shared key removes
 it (deferred).
 
+## Scope vocabulary — canonical is the fine-grained noun set (H3)
+
+The double-token intersection needs one currency, and two vocabularies exist:
+coarse api-key/session **verbs** (`query`, `query:payloads`, `scores:write`,
+`delete`, `ingest`) and fine-grained manifest-permission **nouns**
+(`traces:read.metadata`, `traces:read.payloads`, …). **The fine-grained noun
+vocabulary is canonical; the coarse verbs translate UP into it** (`perm.
+ExpandCoarse`). The direction is load-bearing: "capabilities are nouns about data,
+never verbs about features" is a founding invariant, and translating toward the
+richer vocabulary is lossless and additively extensible — a new permission
+(`scores:read` distinct from write, a future `store:read.collection_x`) just gets
+named. Collapsing down to the five verbs would be a one-way door capping the
+permission model at today's operations. A plugin's service token carries data
+permissions (nouns) plus prefixed **capability markers** (`cap:query`) — two axes,
+never conflated: capabilities gate the endpoint, permissions gate the data.
+
+## Inert generated stubs (H3, documented not deleted)
+
+The generated `queryapi.server_gen.go` declares `ServiceTokenScopes`/
+`UserAssertionScopes` security-context values but leaves them empty. They are
+**deliberately ignored**: the real intersection is computed in `query.auth()` from
+the verified token + assertion headers. We do **not** hand-edit generated code
+(the rule) nor regenerate merely to delete cosmetically-dead stubs (churn). A
+one-line note at the `auth()` computation site explains *why* they're ignored so a
+future reader does not wire them up thinking they are authoritative. Inert-and-
+documented, not inert-and-mysterious.
+
 ## Consequences
 
 - The manifest gains an additive `spec.backend` (url, healthPath, infoPath,

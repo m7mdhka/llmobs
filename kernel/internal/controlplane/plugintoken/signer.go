@@ -62,3 +62,20 @@ func (s *Signer) MintServiceToken(pluginID string, scopes []string, now time.Tim
 func (s *Signer) VerifyServiceToken(token string, now time.Time) (pluginproto.ServiceTokenClaims, error) {
 	return pluginproto.VerifyServiceToken(s.pub, token, now)
 }
+
+// MintIdentityAssertion issues a per-request identity assertion for a plugin
+// audience carrying the user's effective (canonical) permissions. Short-TTL,
+// audience-bound; the gateway proxy injects it and strips the session cookie.
+func (s *Signer) MintIdentityAssertion(pluginID, subject, projectID, actor string, scopes []string, now time.Time, ttl time.Duration) (string, pluginproto.IdentityAssertionClaims, error) {
+	jti, err := randomJTI()
+	if err != nil {
+		return "", pluginproto.IdentityAssertionClaims{}, fmt.Errorf("plugintoken: jti: %w", err)
+	}
+	return pluginproto.MintIdentityAssertion(s.priv, pluginID, subject, projectID, actor, scopes, now, ttl, jti)
+}
+
+// VerifyIdentityAssertion verifies an assertion bound to expectedAud (the calling
+// plugin's `plugin:{id}` audience) against the current key.
+func (s *Signer) VerifyIdentityAssertion(token, expectedAud string, now time.Time) (pluginproto.IdentityAssertionClaims, error) {
+	return pluginproto.VerifyIdentityAssertion(s.pub, token, expectedAud, now)
+}

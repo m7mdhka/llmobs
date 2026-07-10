@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.dev/schemas/plugin/v1alpha1/health.schema.json",
+  "title": "Plugin health report (v1alpha1)",
+  "description": "Response body of GET /plugin/v1/health. Two-signal model: live/ready for liveness/readiness, plus an optional functional watermark so 'process alive' is not mistaken for 'work happening' (the Wave-1 lesson). A busy long-running job reports progress via the watermark and MUST NOT read as degraded merely for being busy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["live", "ready"],
+  "properties": {
+    "live": { "type": "boolean", "description": "The process is up (liveness)." },
+    "ready": { "type": "boolean", "description": "Dependencies wired; can serve (readiness). Only ready plugins are proxied user traffic." },
+    "watermark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lastProgressUnix"],
+      "description": "Functional progress signal. Stale past the plugin's declared watermarkBudget => degraded, even when ready:true.",
+      "properties": {
+        "lastProgressUnix": { "type": "integer", "description": "Unix seconds of the last real progress (event accepted, job succeeded)." },
+        "detail": { "type": "string", "description": "Optional human detail for ops surfaces." }
+      }
+    },
+    "reason": { "type": "string", "description": "Optional reason when not ready (surfaced by the supervisor)." }
+  }
+}

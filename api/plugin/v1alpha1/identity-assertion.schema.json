@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.dev/schemas/plugin/v1alpha1/identity-assertion.schema.json",
+  "title": "Identity-assertion claims (v1alpha1)",
+  "description": "Claims of the kernel-signed identity assertion injected on each proxied user request (X-LLMObs-Identity-Assertion). Audience-bound to a single plugin and short-lived. Carried in a compact 'v1.<base64url(claims)>.<base64url(ed25519sig)>' token. The user half of the double-token intersection; never self-asserted by the plugin.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["iss", "sub", "aud", "iat", "exp", "jti", "projectId", "scopes"],
+  "properties": {
+    "iss": { "const": "llmobs-kernel", "description": "Issuer." },
+    "sub": { "type": "string", "description": "The end user/subject the request acts as (session or api-key identity)." },
+    "aud": { "type": "string", "pattern": "^plugin:[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$", "description": "Audience: 'plugin:{id}'. An assertion for one plugin MUST be rejected by another (token-confusion defence)." },
+    "iat": { "type": "integer", "description": "Issued-at, unix seconds." },
+    "exp": { "type": "integer", "description": "Expiry, unix seconds (short TTL)." },
+    "jti": { "type": "string", "description": "Unique assertion id." },
+    "projectId": { "type": "string", "description": "The tenant/project the request is scoped to." },
+    "actor": { "type": "string", "description": "Audit actor, e.g. 'session:user@example.com' or 'apikey'." },
+    "scopes": {
+      "type": "array",
+      "description": "The user's effective scopes (role/key ∩ project). Authoritative for the user half of the intersection.",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  }
+}

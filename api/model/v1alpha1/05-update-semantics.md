@@ -114,6 +114,35 @@ span events is idempotent (§2). Span events are never removed by an update in
 - A tombstoned entity (`is_deleted = true`) MUST NOT be returned by default Query
   API reads.
 
+## 4a. Soft deletion vs. erasure suppression (Normative)
+
+Two different mechanisms both keep data from being read; they MUST NOT be
+conflated — they have opposite guarantees:
+
+- **Soft delete (`is_deleted`, §4)** is an *in-model, mergeable* state. It is a
+  field-group carried by a `delete` event, folds by greatest `(event_ts,
+  event_id)`, and is **revivable**: a later `upsert` with a greater stamp
+  legitimately un-deletes the entity. The row and its payload still exist; they are
+  merely hidden from default reads. This is normal update semantics.
+- **Erasure suppression (GDPR)** is an *out-of-band, ingest-blocking* mechanism. An
+  erasure hard-deletes the matching rows (payloads removed, not hidden) and records
+  a **suppression tombstone** keyed by `(project_id, id)`. The persist path MUST
+  refuse any re-delivered event whose key matches an unexpired suppression — a
+  re-delivery **does not** fold and **does not** revive; it is dropped (and SHOULD
+  be counted). Suppression therefore does **not** obey the greatest-stamp rule: it
+  is not a merge state at all, and no later `upsert`, however high its stamp, can
+  resurrect an erased entity while the tombstone stands.
+- **Tombstone lifetime.** A suppression tombstone need only outlive plausible
+  redelivery (retry, Collector/Kafka replay), not persist forever; an adapter MAY
+  reap tombstones after a bounded retention window. After reaping, the erased key
+  is once again a first-sight id — acceptable because redelivery of long-erased
+  data is not a realistic vector.
+
+In short: `is_deleted` answers "is this currently deleted?" (and can flip back);
+erasure suppression answers "was this key erased for compliance?" (and must not
+come back). An adapter that treats a GDPR erasure as a soft delete is
+non-conformant.
+
 ## 5. Frozen fields (Normative) — LM-5, LM-6
 
 The following fields are **frozen**: their value is fixed by the **first** event

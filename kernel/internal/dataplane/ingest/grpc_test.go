@@ -21,7 +21,7 @@ import (
 // write would nil-deref rather than return a nil error + a queued job.
 func TestGRPCExportDoesNotTouchStorage(t *testing.T) {
 	pipe := pipeline.New(nil, nil, nil, pipeline.NoopBus{}, pipeline.Config{})
-	r := NewReceiver(pipe, slog.New(slog.NewTextHandler(io.Discard, nil)), 8, 1)
+	r := NewReceiver(pipe, slog.New(slog.NewTextHandler(io.Discard, nil)), 8, 1, nil)
 	svc := &grpcTraceService{r: r}
 
 	ctx := metadata.NewIncomingContext(context.Background(),
@@ -43,10 +43,11 @@ func TestGRPCExportDoesNotTouchStorage(t *testing.T) {
 	}
 }
 
-// TestGRPCBackpressure: a full queue returns ResourceExhausted so clients retry.
+// TestGRPCBackpressure: a saturated queue returns UNAVAILABLE so clients back off
+// and retry into the idempotent merge (the gRPC mirror of the HTTP 503 envelope).
 func TestGRPCBackpressure(t *testing.T) {
 	pipe := pipeline.New(nil, nil, nil, pipeline.NoopBus{}, pipeline.Config{})
-	r := NewReceiver(pipe, slog.New(slog.NewTextHandler(io.Discard, nil)), 1, 1)
+	r := NewReceiver(pipe, slog.New(slog.NewTextHandler(io.Discard, nil)), 1, 1, nil)
 	svc := &grpcTraceService{r: r}
 	req := ptraceotlp.NewExportRequestFromTraces(ptrace.NewTraces())
 
@@ -54,7 +55,7 @@ func TestGRPCBackpressure(t *testing.T) {
 		t.Fatalf("first export should succeed: %v", err)
 	}
 	_, err := svc.Export(context.Background(), req)
-	if status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("full queue should return ResourceExhausted, got: %v", err)
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("saturated queue should return Unavailable, got: %v", err)
 	}
 }

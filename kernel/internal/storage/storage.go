@@ -18,8 +18,16 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+// ErrSuppressedByErasure is returned by PersistSpan when an incoming span matches
+// an unexpired erasure-suppression tombstone (G3): the span was GDPR-erased and a
+// re-delivery must NOT resurrect it. It is an expected outcome, not a storage
+// failure — the persist stage counts it and moves on, and it MUST NOT be folded
+// into persist-health (it is not a sign the adapter is unwell).
+var ErrSuppressedByErasure = errors.New("span suppressed by erasure tombstone")
 
 // Op is an ingested event operation.
 type Op string

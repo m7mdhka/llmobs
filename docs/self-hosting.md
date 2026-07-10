@@ -113,6 +113,57 @@ producer-derived `event_ts`, so a re-consumed span folds to the identical state 
 *receiver* inside the kernel is a possible future addition (the receiver→pipeline
 seam is clean); until then the bridge pattern needs no kernel changes.
 
+## Durability & shutdown (the async-ack promise)
+
+Ingestion is **async-ack**: the OTLP receiver reads the request, enqueues it in an
+in-process buffer, and returns `200/OK` — the database write happens on a worker a
+moment later. This keeps ack latency off the database, but it means an acked span
+lives only in memory until it is persisted. The honest question is: *is that ack a
+promise we can keep?*
+
+- **Rolling deploys / SIGTERM: the queue is drained, not dropped.** On shutdown the
+  receivers immediately shed new requests with a retryable `503`/`UNAVAILABLE`,
+  stop the listeners, then drain the in-flight queue to Postgres before exiting.
+  A normal deploy loses nothing.
+- **The one residual loss window is bounded and counted.** If a forced termination
+  outlives the drain deadline (`LLMOBS_SHUTDOWN_DRAIN_TIMEOUT`, default `20s`), the
+  jobs still queued at that instant are the unavoidable floor of an in-memory
+  queue. They are **counted** (`llmobs_ingest_queue_dropped_on_shutdown_total`) and
+  logged at error — observable, never silent.
+- **Set the grace period accordingly.** `LLMOBS_SHUTDOWN_DRAIN_TIMEOUT` must be
+  shorter than your orchestrator's `terminationGracePeriodSeconds` (K8s default
+  `30s`) with headroom for the ~5s server shutdown; the `20s` default fits the
+  default grace comfortably. Raising the drain timeout shrinks the loss window at
+  the cost of a slower shutdown.
+- **Crash (SIGKILL/OOM) is the same floor, uncounted.** A hard kill cannot drain;
+  recovery is client retry into the idempotent merge (redelivery folds to the same
+  state). The **lite** profile accepts this bounded window by design; the **scale**
+  profile's durable ingest path (S3/WAL spool) closes it entirely and is tracked
+  separately — lite makes the window honest and bounded, it does not eliminate it.
+
+### Backpressure when persistence is failing
+
+If Postgres becomes unwritable (disk full, failover) the kernel must not keep
+acking `200` into a queue that cannot drain — that would grow the loss window
+without bound. Instead:
+
+- **Persist health feeds readiness.** A run of persist failures
+  (`LLMOBS_PERSIST_UNHEALTHY_THRESHOLD`, default `5`) flips `/readyz` to not-ready.
+  A connectable-but-unwritable database still answers a ping, so readiness checks
+  the *write* signal, not just connectivity.
+- **The receivers shed, not lie.** While unhealthy — or when the queue passes its
+  high-water mark (80% of capacity) — the OTLP endpoints return a retryable `503`
+  with `Retry-After` (HTTP) / `UNAVAILABLE` (gRPC). Clients back off and retry into
+  the idempotent merge; nobody gets a `200` for a span that won't be stored.
+- **Diagnose from `/metrics`.** `llmobs_persist_healthy`, `llmobs_ingest_queue_depth`
+  / `_capacity`, and `llmobs_ingest_backpressure_shed_total{reason=…}` (plus the
+  per-project `llmobs_ingest_spans_total`) show saturation and the noisy-tenant
+  case building before it bites.
+- **Single-replica is honest backpressure, not a bug.** With one replica there is
+  nowhere to shed to, so it reports not-ready and rejects new ingest while
+  persistence is down. That is correct: clients retry, no data is lost to a false
+  ack. It is also the signal to run more replicas or move to the scale profile.
+
 ## GDPR erasure
 
 Delete every span for a user, provably:

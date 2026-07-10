@@ -1,0 +1,13 @@
+{
+  "name": "@llmobs/e2e-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lean Playwright smoke for the platform slice: login -> manifest-driven nav -> traces list -> span tree -> span panel. A gate, not a suite.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.0"
+  }
+}

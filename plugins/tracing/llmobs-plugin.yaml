@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../api/schemas/manifest/v1alpha1/llmobs-plugin.schema.json
+apiVersion: llmobs.dev/v1alpha1
+kind: Plugin
+metadata:
+  id: llmobs/tracing
+  name: Tracing
+  version: 0.1.0
+  description: >
+    Browse traces and their span trees. A Tier-2 (frontend-only) plugin that
+    reads everything through the plugin SDK's query primitive.
+spec:
+  capabilities:
+    - query
+  permissions:
+    - traces:read.metadata
+    - traces:read.payloads
+  frontend:
+    remoteName: tracing
+    exposedModule: ./plugin
+    entry: remoteEntry.js
+    nav:
+      - path: /traces
+        label: Traces
+        section: Observe

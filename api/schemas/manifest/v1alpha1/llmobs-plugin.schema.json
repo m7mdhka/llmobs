@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.dev/schemas/manifest/v1alpha1/llmobs-plugin.schema.json",
+  "title": "LLMObs plugin manifest (v1alpha1)",
+  "description": "llmobs-plugin.yaml — the contract for how the kernel runs a plugin. Additive-only at this maturity. Tier-2 (frontend-only) plugins declare a frontend surface and request only data capabilities.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "const": "llmobs.dev/v1alpha1",
+      "description": "Manifest maturity version (K8s-style)."
+    },
+    "kind": { "const": "Plugin" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$",
+          "description": "Namespaced id 'owner/plugin-name'."
+        },
+        "name": { "type": "string", "minLength": 1, "description": "Human display name." },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([-+].+)?$",
+          "description": "Semver."
+        },
+        "description": { "type": "string" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capabilities"],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "description": "Requested data primitives. Only the seven SDK primitives are permitted — capabilities are nouns about data, never verbs about features.",
+          "items": {
+            "enum": ["query", "write", "events", "jobs", "kv", "secrets", "surface"]
+          },
+          "uniqueItems": true
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Fine-grained data scopes the plugin requests (e.g. traces:read.metadata). Enforced by the Query API permission intersection.",
+          "items": { "type": "string", "pattern": "^[a-z_]+:[a-z_.]+$" },
+          "uniqueItems": true
+        },
+        "frontend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["remoteName", "exposedModule", "entry", "nav"],
+          "description": "Module Federation frontend surface (Tier-2). SHA-pinned at install.",
+          "properties": {
+            "remoteName": {
+              "type": "string",
+              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+              "description": "MF remote container name (matches the plugin's MF config 'name')."
+            },
+            "exposedModule": {
+              "type": "string",
+              "pattern": "^\\./.+",
+              "description": "The exposed module to load, e.g. './plugin'."
+            },
+            "entry": {
+              "type": "string",
+              "description": "The MF remote entry filename produced by the build, e.g. 'remoteEntry.js'."
+            },
+            "nav": {
+              "type": "array",
+              "minItems": 1,
+              "description": "Nav items the shell renders; each mounts the surface at a route.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "label"],
+                "properties": {
+                  "path": { "type": "string", "pattern": "^/[a-z0-9-]*$" },
+                  "label": { "type": "string", "minLength": 1 },
+                  "section": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "settingsSchema": {
+          "type": "string",
+          "description": "Optional path to a JSON Schema for the plugin's settings (rendered by SchemaForm; future arc)."
+        }
+      }
+    }
+  }
+}

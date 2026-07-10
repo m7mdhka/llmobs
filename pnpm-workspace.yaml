@@ -3,6 +3,7 @@
 # so they participate in the same workspace during development.
 packages:
   - "web/shell"
+  - "web/e2e"
   - "packages/*"
   - "plugins/*/frontend"
   - "templates/*/frontend"

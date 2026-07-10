@@ -99,7 +99,11 @@ func run() error {
 	apiMux := http.NewServeMux()
 	platform.NewHealth(pool).Register(apiMux)
 	auth.Register(apiMux)
-	registry.NewHandler(registry.EmptySource{}).Register(apiMux)
+	var regSource registry.Source = registry.EmptySource{}
+	if cfg.PluginDir != "" {
+		regSource = registry.NewDirSource(cfg.PluginDir, "/v1alpha1/registry/plugins", log)
+	}
+	registry.NewHandler(regSource).Register(apiMux)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root; more-specific API
 	// prefixes above win, and unknown non-asset paths fall back to index.html.

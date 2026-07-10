@@ -28,6 +28,8 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/query"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/redact"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginapi"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginauth"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginproxy"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/registry"
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/webui"
@@ -179,6 +181,10 @@ func run() error {
 		return controlplane.DefaultProjectID(r.Context(), pool)
 	}
 	apiMux.Handle("/api/plugins/", pluginproxy.New(sup, pluginSigner, projectResolver, log).Handler("/api/plugins/"))
+	// Plugin data primitives (H4+): a plugin backend reaches these with its double
+	// token; each is capability-gated and tenant-scoped from the assertion.
+	pluginAuthz := pluginauth.New(pluginSigner, nil)
+	pluginapi.NewKV(pluginAuthz, postgres.NewPluginKV(pool)).Register(apiMux, "/v1alpha1/plugin/kv")
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is

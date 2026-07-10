@@ -13,6 +13,10 @@ export type { AsyncState, TracesParams } from "./hooks.js";
 export { DataClient, SdkError } from "./client.js";
 export type { QueryResponse, TraceTree, ClientConfig, QueryInput } from "./client.js";
 
+// Data primitive: `kv` (per-plugin, tenant-scoped key/value; backend double-token).
+export { KvClient } from "./kv.js";
+export type { KvConfig } from "./kv.js";
+
 // Manifest types (mirror of the JSON Schema contract).
 export type {
   PluginManifest,

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
+	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingesthealth"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/redact"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
@@ -56,6 +57,9 @@ type Config struct {
 	SkewThreshold time.Duration
 	// Metrics is the shared registry; nil disables instrumentation.
 	Metrics *metrics.Registry
+	// Signal is the shared persist-health gate (G2); nil disables health-driven
+	// readiness + backpressure (the persist stage still runs).
+	Signal *ingesthealth.Signal
 	// RedactPresets/RedactCustom configure built-in payload redaction (#11). Empty
 	// presets + no custom rules disables it. This is a global default today; the
 	// redact stage is structured for per-project resolution (the seam is present,
@@ -94,7 +98,7 @@ func New(pool *pgxpool.Pool, store storage.TelemetryStore, reg *normalize.Regist
 			&redactStage{resolve: resolve},
 			&sampleStage{}, // no-op (issue: kernel-ingestion sampling)
 			&enrichStage{}, // no-op (issue: cost derivation / price table)
-			&persistStage{store: store, metrics: cfg.Metrics},
+			&persistStage{store: store, metrics: cfg.Metrics, signal: cfg.Signal},
 			&publishStage{bus: bus}, // no-op in-proc bus (issue: Redis Streams bus)
 		},
 	}

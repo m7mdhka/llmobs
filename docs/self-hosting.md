@@ -141,6 +141,29 @@ promise we can keep?*
   profile's durable ingest path (S3/WAL spool) closes it entirely and is tracked
   separately — lite makes the window honest and bounded, it does not eliminate it.
 
+### Backpressure when persistence is failing
+
+If Postgres becomes unwritable (disk full, failover) the kernel must not keep
+acking `200` into a queue that cannot drain — that would grow the loss window
+without bound. Instead:
+
+- **Persist health feeds readiness.** A run of persist failures
+  (`LLMOBS_PERSIST_UNHEALTHY_THRESHOLD`, default `5`) flips `/readyz` to not-ready.
+  A connectable-but-unwritable database still answers a ping, so readiness checks
+  the *write* signal, not just connectivity.
+- **The receivers shed, not lie.** While unhealthy — or when the queue passes its
+  high-water mark (80% of capacity) — the OTLP endpoints return a retryable `503`
+  with `Retry-After` (HTTP) / `UNAVAILABLE` (gRPC). Clients back off and retry into
+  the idempotent merge; nobody gets a `200` for a span that won't be stored.
+- **Diagnose from `/metrics`.** `llmobs_persist_healthy`, `llmobs_ingest_queue_depth`
+  / `_capacity`, and `llmobs_ingest_backpressure_shed_total{reason=…}` (plus the
+  per-project `llmobs_ingest_spans_total`) show saturation and the noisy-tenant
+  case building before it bites.
+- **Single-replica is honest backpressure, not a bug.** With one replica there is
+  nowhere to shed to, so it reports not-ready and rejects new ingest while
+  persistence is down. That is correct: clients retry, no data is lost to a false
+  ack. It is also the signal to run more replicas or move to the scale profile.
+
 ## GDPR erasure
 
 Delete every span for a user, provably:

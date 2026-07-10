@@ -19,6 +19,7 @@ import (
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingest"
+	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingesthealth"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/pipeline"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/query"
@@ -94,15 +95,29 @@ func run() error {
 	mreg.SampledGauge("llmobs_db_pool_idle_conns", "Idle DB pool connections.", func() float64 { return float64(pool.Stat().IdleConns()) })
 	mreg.SampledGauge("llmobs_db_pool_acquired_conns", "Acquired DB pool connections.", func() float64 { return float64(pool.Stat().AcquiredConns()) })
 
+	// Persist-health signal (G2): the persist stage folds each outcome into it; the
+	// receivers read it for backpressure and /readyz reads it for readiness, so all
+	// three agree on "can storage accept writes right now?".
+	persistHealth := ingesthealth.New(cfg.PersistUnhealthyThreshold)
+	mreg.SampledGauge("llmobs_persist_healthy", "1 when the storage adapter is accepting writes, else 0.",
+		func() float64 {
+			if persistHealth.Healthy() {
+				return 1
+			}
+			return 0
+		})
+
 	store := postgres.NewStore(pool)
 	reg := normalize.Default()
 	skew, _ := time.ParseDuration(cfg.ClockSkewThreshold)
 	presets, customRules := parseRedactConfig(cfg.RedactPresets, cfg.RedactCustomJSON)
 	pipe := pipeline.New(pool, store, reg, pipeline.NoopBus{}, pipeline.Config{
 		Metrics: mreg, SkewThreshold: skew, RedactPresets: presets, RedactCustom: customRules,
+		Signal: persistHealth,
 	})
 
 	receiver := ingest.NewReceiver(pipe, log, cfg.IngestQueueSize, 4, mreg)
+	receiver.SetPersistSignal(persistHealth) // shed 503/UNAVAILABLE when persistence is unhealthy
 	receiver.Start(rootCtx)
 	// Ingest queue occupancy is scrape-sampled so an operator can see saturation
 	// (the A1/A3 diagnosis) approaching the high-water backpressure mark.
@@ -118,7 +133,7 @@ func run() error {
 	// resolved session is available to every downstream handler.
 	auth := authhttp.New(pool, log, cfg.CookieSecure)
 	apiMux := http.NewServeMux()
-	platform.NewHealth(pool).Register(apiMux)
+	platform.NewHealth(pool, persistHealth).Register(apiMux)
 	auth.Register(apiMux)
 	auth.RegisterKeys(apiMux)
 	var regSource registry.Source = registry.EmptySource{}

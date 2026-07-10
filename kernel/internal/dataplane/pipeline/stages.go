@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
+	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingesthealth"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/redact"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
@@ -191,10 +192,14 @@ func (s *enrichStage) Name() string                                  { return "e
 func (s *enrichStage) Process(_ context.Context, _ *Ingestion) error { return nil }
 
 // persist: merge-on-write each canonical span event under the row lock, and emit
-// the data-derived ingest metrics (per project; never per-span-id labels).
+// the data-derived ingest metrics (per project; never per-span-id labels). Each
+// persist outcome is folded into the shared persist-health signal (G2) so a run
+// of storage failures flips /readyz not-ready and the receivers shed with a
+// retryable 503 instead of acking into a queue that cannot drain.
 type persistStage struct {
 	store   storage.TelemetryStore
 	metrics *metrics.Registry
+	signal  *ingesthealth.Signal
 }
 
 func (s *persistStage) Name() string { return "persist" }
@@ -205,7 +210,9 @@ func (s *persistStage) Process(ctx context.Context, ing *Ingestion) error {
 			map[string]string{"project_id": proj}, float64(len(ing.Body)))
 	}
 	for _, ev := range ing.Events {
-		if err := s.store.PersistSpan(ctx, ev); err != nil {
+		err := s.store.PersistSpan(ctx, ev)
+		s.signal.RecordPersist(err) // nil-safe; drives readiness + backpressure
+		if err != nil {
 			return err
 		}
 		if s.metrics != nil {

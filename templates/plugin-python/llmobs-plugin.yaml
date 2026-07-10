@@ -13,4 +13,3 @@ spec:
     url: http://my-plugin:8080
     healthPath: /plugin/v1/health
     infoPath: /plugin/v1/info
-    watermarkBudget: 60s

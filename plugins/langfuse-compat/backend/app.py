@@ -26,7 +26,13 @@ from translate import batch_to_otlp
 PLUGIN_ID = "llmobs/langfuse-compat"
 app = FastAPI()
 
-_last_progress = {"unix": 0}
+import time as _time
+
+# Seed the watermark to startup so it is informative rather than a misleading 0.
+# NOTE: langfuse-compat is idle-until-triggered (it makes no progress until a
+# Langfuse client sends traffic), so its manifest declares NO watermarkBudget — an
+# event-driven ingest plugin must not be degraded for being idle (the B3 lesson).
+_last_progress = {"unix": int(_time.time())}
 # The service token is DELIVERED by the kernel (H7c) — the plugin does not fetch
 # it. Seed from env only as a fallback for local dev.
 _token = {"value": os.environ.get("LLMOBS_SERVICE_TOKEN", "")}

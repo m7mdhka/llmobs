@@ -27,10 +27,12 @@ real Python author hits, each caught at the cheapest possible moment.
 | **3** | **Cold-path ingest can't present the double token.** A Langfuse client hits the plugin *directly* (not through the kernel proxy), so there is **no user assertion** — but `ingest` required service token **+** assertion. | **Fixed (contract change).** Ingest is now **service-token-only** (`pluginauth.RequirePluginToken`): the plugin writes telemetry into its own project, no user to intersect. Project is kernel-resolved, so "can't write outside its project" is *strengthened* (not header-controllable). |
 | **4** | **Service-token delivery to the plugin is unspecified.** The supervisor *mints* the token at handshake, but nothing delivers it to the plugin — again hidden in-process for a Go plugin. | **Fixed in H7c (contract change).** The kernel PUSHES the token to the plugin's own registered URL (`POST /plugin/v1/token`) at handshake completion + on refresh; delivery is part of readiness (no token → degraded, never `running`); **no plugin-pull path** (obtaining another plugin's token isn't expressible). The Python backend receives its token and the fully-live handshake is closed. |
 
-**Two of four were real contract changes** made in this PR (#2, #3); one is a
-documented format caveat (#1); one is a surfaced gap with a proposed fix (#4).
-That is the expected shape of a first cross-language integration — not zero
-friction.
+| **5** | **The functional-watermark *budget* degrades an idle plugin.** The fully-live e2e (H7c) auto-disabled langfuse-compat with "watermark stale past budget": handshake + token delivery *succeeded*, but the plugin is idle until a Langfuse client sends traffic, so a staleness budget faulted a perfectly healthy plugin (the B3 lesson, hit live). | **Fixed + documented (H7c).** An **idle-until-triggered** plugin declares **no `watermarkBudget`** (the watermark is then informational, not a degrade signal); a budget is only for *continuously-progressing* plugins (a poller/stream). The plugin seeds its watermark to startup so it's not a misleading `0`. |
+
+**Real contract changes:** #2, #3 (H7b) and #4, #5 (H7c). #1 is a documented
+format caveat. That is the expected shape of a first cross-language integration —
+not zero friction. Notably #5 was surfaced only by the *fully-live* e2e, not by
+any unit test — the whole reason to run both services together.
 
 ## Migration fidelity — Langfuse wire → canonical model
 

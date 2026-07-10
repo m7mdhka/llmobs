@@ -56,14 +56,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - run: pnpm install --frozen-lockfile --filter @llmobs/shell...
-      - name: Build design system + shell (Module Federation host)
+      - run: pnpm install --frozen-lockfile --filter @llmobs/shell... --filter @llmobs/plugin-tracing...
+      - name: Build design system, SDK, shell (MF host), and tracing plugin (MF remote)
         run: |
           pnpm --filter @llmobs/tokens build
           pnpm --filter @llmobs/ui build
+          pnpm --filter @llmobs/plugin-sdk build
           NODE_ENV=production pnpm --filter @llmobs/shell build
-      - name: Typecheck the shell
-        run: pnpm --filter @llmobs/shell typecheck
+          NODE_ENV=production pnpm --filter @llmobs/plugin-tracing build
+      - name: Typecheck the shell + SDK + tracing plugin
+        run: |
+          pnpm --filter @llmobs/shell typecheck
+          pnpm --filter @llmobs/plugin-sdk typecheck
+          pnpm --filter @llmobs/plugin-tracing typecheck
       - name: Shared singletons are declared (no plugin can bundle its own copy)
         run: pnpm --filter @llmobs/shell check:singletons
 

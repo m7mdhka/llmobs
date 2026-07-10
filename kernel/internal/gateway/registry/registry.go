@@ -52,6 +52,11 @@ func NewHandler(src Source) *Handler {
 	return &Handler{src: src}
 }
 
+// assetServer is optionally implemented by a source that serves plugin bundles.
+type assetServer interface {
+	AssetHandler() http.Handler
+}
+
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/v1alpha1/registry/plugins", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -65,4 +70,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plugins})
 	})
+	// Serve plugin frontend bundles when the source provides them. The trailing
+	// slash makes this a subtree so /v1alpha1/registry/plugins/<key>/assets/* is
+	// served, while the exact path above returns the JSON list.
+	if as, ok := h.src.(assetServer); ok {
+		mux.Handle("/v1alpha1/registry/plugins/", as.AssetHandler())
+	}
 }

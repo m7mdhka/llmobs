@@ -12,12 +12,16 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/ ./packages/
 COPY web/ ./web/
-RUN pnpm install --frozen-lockfile --filter @llmobs/shell...
-# Build shared deps then the shell, and fail the build if singletons regress.
+COPY plugins/ ./plugins/
+RUN pnpm install --frozen-lockfile --filter @llmobs/shell... --filter @llmobs/plugin-tracing...
+# Build shared deps, the shell, and the first-party tracing plugin (a MF remote).
+# Fail the build if the host's shared singletons regress.
 RUN pnpm --filter @llmobs/tokens build \
  && pnpm --filter @llmobs/ui build \
+ && pnpm --filter @llmobs/plugin-sdk build \
  && NODE_ENV=production pnpm --filter @llmobs/shell build \
- && pnpm --filter @llmobs/shell check:singletons
+ && pnpm --filter @llmobs/shell check:singletons \
+ && NODE_ENV=production pnpm --filter @llmobs/plugin-tracing build
 
 # ---- Stage 2: build the kernel ----
 FROM golang:1.24 AS build
@@ -30,6 +34,11 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/llmobsd ./cmd/llmobsd
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/llmobsd /llmobsd
 COPY --from=web /app/web/shell/dist /webui
+# First-party tracing plugin, laid out as the dev-mode registry expects:
+# <plugin-dir>/<name>/{llmobs-plugin.yaml, dist/}.
+COPY --from=web /app/plugins/tracing/llmobs-plugin.yaml /plugins/tracing/llmobs-plugin.yaml
+COPY --from=web /app/plugins/tracing/frontend/dist /plugins/tracing/dist
 ENV LLMOBS_WEBUI_DIR=/webui
+ENV LLMOBS_PLUGIN_DIR=/plugins
 EXPOSE 4317 4318 8080
 ENTRYPOINT ["/llmobsd"]

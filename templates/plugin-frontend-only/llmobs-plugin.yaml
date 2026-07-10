@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../api/schemas/manifest/v1alpha1/llmobs-plugin.schema.json
+apiVersion: llmobs.dev/v1alpha1
+kind: Plugin
+metadata:
+  id: your-org/your-plugin
+  name: Your Plugin
+  version: 0.1.0
+  description: A Tier-2 (frontend-only) LLMObs plugin.
+spec:
+  capabilities:
+    - query
+  frontend:
+    remoteName: your_plugin
+    exposedModule: ./plugin
+    entry: remoteEntry.js
+    nav:
+      - path: /your-plugin
+        label: Your Plugin
+        section: Observe

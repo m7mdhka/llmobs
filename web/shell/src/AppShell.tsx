@@ -96,7 +96,9 @@ export function AppShell({ session, onSignedOut }: Props): React.ReactElement {
             />
             {plugins.flatMap((p) =>
               p.nav.map((n) => (
-                <Route key={n.path} path={n.path} element={<PluginRoute plugin={p} />} />
+                // Mount as a subtree so the plugin owns its internal routes
+                // (e.g. /traces and /traces/:id).
+                <Route key={n.path} path={`${n.path}/*`} element={<PluginRoute plugin={p} session={session} />} />
               )),
             )}
             <Route path="*" element={<NoPlugins />} />

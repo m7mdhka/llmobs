@@ -9,7 +9,7 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const manifestPath = path.resolve(__dirname, "../dist/mf-manifest.json");
 
-const REQUIRED = ["react", "react-dom", "react-router-dom", "@llmobs/tokens", "@llmobs/ui"];
+const REQUIRED = ["react", "react-dom", "react-router-dom", "@llmobs/tokens", "@llmobs/ui", "@llmobs/plugin-sdk"];
 
 if (!existsSync(manifestPath)) {
   console.error(`check:singletons — MF manifest not found at ${manifestPath}. Run 'rspack build' first.`);

@@ -1,13 +1,15 @@
 import React, { Component, Suspense, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { LoadingState, PluginUnavailable } from "@llmobs/ui";
+import { LLMObsPluginProvider } from "@llmobs/plugin-sdk";
 import { loadPluginSurface } from "./remoteLoader.js";
-import type { RegistryPlugin } from "./api.js";
+import type { RegistryPlugin, Session } from "./api.js";
 
-// Mounts a plugin's federated surface. A failure to load the remote (network,
+// Mounts a plugin's federated surface inside the SDK provider (which supplies the
+// project + user + data client). A failure to load the remote (network,
 // integrity, missing export) degrades to the standard unavailable state — a
 // broken plugin never takes down the shell (the dogfood / graceful-degradation
 // rule). Each render of a route gets a fresh boundary keyed by plugin id.
-export function PluginRoute({ plugin }: { plugin: RegistryPlugin }): React.ReactElement {
+export function PluginRoute({ plugin, session }: { plugin: RegistryPlugin; session: Session }): React.ReactElement {
   const [surface, setSurface] = useState<ComponentType<Record<string, never>> | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -33,7 +35,9 @@ export function PluginRoute({ plugin }: { plugin: RegistryPlugin }): React.React
   return (
     <PluginErrorBoundary pluginName={plugin.name}>
       <Suspense fallback={<LoadingState title={`Loading ${plugin.name}…`} />}>
-        <Surface />
+        <LLMObsPluginProvider config={{ user: session.user }}>
+          <Surface />
+        </LLMObsPluginProvider>
       </Suspense>
     </PluginErrorBoundary>
   );

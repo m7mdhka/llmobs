@@ -25,6 +25,7 @@ const singletons = {
   "react-router-dom": { singleton: true, requiredVersion: pkg.dependencies["react-router-dom"], eager: true },
   "@llmobs/tokens": { singleton: true, eager: true },
   "@llmobs/ui": { singleton: true, eager: true },
+  "@llmobs/plugin-sdk": { singleton: true, eager: true },
 };
 
 export default {

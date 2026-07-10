@@ -25,6 +25,8 @@ services:
     environment:
       LLMOBS_DATABASE_URL: "postgres://llmobs:llmobs@postgres:5432/llmobs?sslmode=disable"
       LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:-sk-e2e-demo-key}"
+      LLMOBS_BOOTSTRAP_ADMIN_EMAIL: "${LLMOBS_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
+      LLMOBS_BOOTSTRAP_ADMIN_PASSWORD: "${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:-admin-dev-password}"
       LLMOBS_LOG_FORMAT: "text"
       LLMOBS_OTLP_HTTP_ADDR: ":4318"
       LLMOBS_OTLP_GRPC_ADDR: ":4317"

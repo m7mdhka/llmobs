@@ -55,14 +55,24 @@ func NewRegistry(fallback Normalizer, ns ...Normalizer) *Registry {
 	return &Registry{normalizers: ns, fallback: fallback}
 }
 
-// Normalize picks the first matching normalizer (else the fallback) and maps.
+// Normalize picks the first matching normalizer (else the fallback), maps, and
+// runs the shared post-map passes every transport must share (02-span.md §4.2):
+// attribute-key sanitization (§6.3).
 func (r *Registry) Normalize(in SpanInput, ctx Context) map[string]any {
+	var out map[string]any
 	for _, n := range r.normalizers {
 		if n.Detect(in) {
-			return n.Map(in, ctx)
+			out = n.Map(in, ctx)
+			break
 		}
 	}
-	return r.fallback.Map(in, ctx)
+	if out == nil {
+		out = r.fallback.Map(in, ctx)
+	}
+	if attrs, ok := out["attributes"].(map[string]any); ok {
+		SanitizeAttributeKeys(attrs)
+	}
+	return out
 }
 
 // Default returns a registry with the OTel GenAI semconv normalizer as both the

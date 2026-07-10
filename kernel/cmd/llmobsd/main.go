@@ -20,6 +20,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/normalize"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/pipeline"
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/query"
+	"github.com/m7mdhka/llmobs/kernel/internal/gateway/authhttp"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 	"github.com/m7mdhka/llmobs/kernel/pkg/brand"
@@ -71,6 +72,15 @@ func run() error {
 			"project", project, "api_key", key)
 	}
 
+	adminCreated, err := controlplane.BootstrapAdmin(rootCtx, pool, cfg.BootstrapAdminEml, cfg.BootstrapAdminPwd)
+	if err != nil {
+		return err
+	}
+	if adminCreated {
+		log.Warn("bootstrap created the admin user — sign in with the configured password",
+			"email", cfg.BootstrapAdminEml)
+	}
+
 	store := postgres.NewStore(pool)
 	reg := normalize.Default()
 	pipe := pipeline.New(pool, store, reg, pipeline.NoopBus{}, pipeline.Config{})
@@ -81,11 +91,14 @@ func run() error {
 	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
 	qsrv := query.NewServer(store, pool, log, maxWindow)
 
-	// API server: query + health.
+	// API server: auth + query + health, all behind the session middleware so a
+	// resolved session is available to every downstream handler.
+	auth := authhttp.New(pool, log, cfg.CookieSecure)
 	apiMux := http.NewServeMux()
 	platform.NewHealth(pool).Register(apiMux)
+	auth.Register(apiMux)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
-	apiServer := &http.Server{Addr: cfg.APIAddr, Handler: apiMux, ReadHeaderTimeout: 5 * time.Second}
+	apiServer := &http.Server{Addr: cfg.APIAddr, Handler: auth.Middleware(apiMux), ReadHeaderTimeout: 5 * time.Second}
 
 	// OTLP HTTP receiver server.
 	otlpServer := &http.Server{Addr: cfg.OTLPHTTPAddr, Handler: receiver.Handler(), ReadHeaderTimeout: 5 * time.Second}

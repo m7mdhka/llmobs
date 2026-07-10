@@ -14,16 +14,19 @@ import (
 // optional JSON file (LLMOBS_CONFIG_FILE), then environment overrides. Every env
 // var is LLMOBS_-prefixed via the brand constant (D15).
 type Config struct {
-	DatabaseURL      string `json:"database_url"`
-	OTLPHTTPAddr     string `json:"otlp_http_addr"`
-	OTLPGRPCAddr     string `json:"otlp_grpc_addr"`
-	APIAddr          string `json:"api_addr"`
-	LogLevel         string `json:"log_level"`
-	LogFormat        string `json:"log_format"`
-	MigrateOnBoot    bool   `json:"migrate_on_boot"`
-	BootstrapProject string `json:"bootstrap_project"`
-	BootstrapAPIKey  string `json:"bootstrap_api_key"`
-	QueryMaxWindow   string `json:"query_max_window"` // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
+	DatabaseURL       string `json:"database_url"`
+	OTLPHTTPAddr      string `json:"otlp_http_addr"`
+	OTLPGRPCAddr      string `json:"otlp_grpc_addr"`
+	APIAddr           string `json:"api_addr"`
+	LogLevel          string `json:"log_level"`
+	LogFormat         string `json:"log_format"`
+	MigrateOnBoot     bool   `json:"migrate_on_boot"`
+	BootstrapProject  string `json:"bootstrap_project"`
+	BootstrapAPIKey   string `json:"bootstrap_api_key"`
+	BootstrapAdminEml string `json:"bootstrap_admin_email"`
+	BootstrapAdminPwd string `json:"bootstrap_admin_password"`
+	QueryMaxWindow    string `json:"query_max_window"` // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
+	CookieSecure      bool   `json:"cookie_secure"`    // set Secure on session cookies
 }
 
 func defaults() Config {
@@ -61,8 +64,11 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("LOG_FORMAT"), &c.LogFormat)
 	envStr(brand.Env("BOOTSTRAP_PROJECT"), &c.BootstrapProject)
 	envStr(brand.Env("BOOTSTRAP_API_KEY"), &c.BootstrapAPIKey)
+	envStr(brand.Env("BOOTSTRAP_ADMIN_EMAIL"), &c.BootstrapAdminEml)
+	envStr(brand.Env("BOOTSTRAP_ADMIN_PASSWORD"), &c.BootstrapAdminPwd)
 	envStr(brand.Env("QUERY_MAX_WINDOW"), &c.QueryMaxWindow)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
+	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	return c, nil
 }
 

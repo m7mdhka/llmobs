@@ -61,38 +61,70 @@ const (
 	classReference
 )
 
-// spanFields maps queryable span fields to (column, class). Mirrors fields.json;
-// a CI check keeps fields.json in sync with the model (unknown fields -> 422).
-var spanFields = map[string]struct {
+type fieldDef struct {
 	col   string
 	class fieldClass
-}{
-	"id":                   {"id", classString},
-	"trace_id":             {"trace_id", classString},
-	"parent_span_id":       {"parent_span_id", classString},
-	"kind":                 {"kind", classEnum},
-	"raw_kind":             {"raw_kind", classString},
-	"name":                 {"name", classString},
-	"start_time":           {"start_time", classTimestamp},
-	"end_time":             {"end_time", classTimestamp},
-	"status.code":          {"status_code", classEnum},
-	"environment":          {"environment", classString},
-	"release":              {"release", classString},
-	"version":              {"version", classString},
-	"session_id":           {"session_id", classString},
-	"user_id":              {"user_id", classString},
-	"model":                {"model", classString},
-	"provider":             {"provider", classString},
-	"total_cost":           {"total_cost", classNumeric},
-	"attributes":           {"attributes", classAttrMap},
-	"usage_details":        {"usage_details", classNumericMap},
-	"cost_details":         {"cost_details", classNumericMap},
-	"prompt_ref":           {"prompt_ref", classReference},
-	"pricing_snapshot_ref": {"pricing_snapshot_ref", classReference},
 }
 
-var orderableFields = map[string]bool{
-	"id": true, "trace_id": true, "name": true, "start_time": true, "end_time": true, "total_cost": true,
+// queryFields is the per-target queryable surface: the field→(column,class) map
+// and the orderable subset. Mirrors fields.json; a CI check keeps fields.json in
+// sync with the model (unknown fields -> 422).
+type queryFields struct {
+	fields    map[string]fieldDef
+	orderable map[string]bool
+}
+
+var spanFields = queryFields{
+	fields: map[string]fieldDef{
+		"id":                   {"id", classString},
+		"trace_id":             {"trace_id", classString},
+		"parent_span_id":       {"parent_span_id", classString},
+		"kind":                 {"kind", classEnum},
+		"raw_kind":             {"raw_kind", classString},
+		"name":                 {"name", classString},
+		"start_time":           {"start_time", classTimestamp},
+		"end_time":             {"end_time", classTimestamp},
+		"status.code":          {"status_code", classEnum},
+		"environment":          {"environment", classString},
+		"release":              {"release", classString},
+		"version":              {"version", classString},
+		"session_id":           {"session_id", classString},
+		"user_id":              {"user_id", classString},
+		"model":                {"model", classString},
+		"provider":             {"provider", classString},
+		"total_cost":           {"total_cost", classNumeric},
+		"attributes":           {"attributes", classAttrMap},
+		"usage_details":        {"usage_details", classNumericMap},
+		"cost_details":         {"cost_details", classNumericMap},
+		"prompt_ref":           {"prompt_ref", classReference},
+		"pricing_snapshot_ref": {"pricing_snapshot_ref", classReference},
+	},
+	orderable: map[string]bool{
+		"id": true, "trace_id": true, "name": true, "start_time": true, "end_time": true, "total_cost": true,
+	},
+}
+
+// traceFields is the queryable surface of the derived `traces` target. Columns
+// reference the synthesized trace projection (see postgres.QueryTraces): the
+// values are per DSL §4.1. `tags` (string_array) is in fields.json but the
+// compiler has no string_array support yet, so filtering on it is deferred.
+var traceFields = queryFields{
+	fields: map[string]fieldDef{
+		"id":          {"id", classString},
+		"name":        {"name", classString},
+		"start_time":  {"start_time", classTimestamp},
+		"end_time":    {"end_time", classTimestamp},
+		"status.code": {"status_code", classEnum},
+		"environment": {"environment", classString},
+		"release":     {"release", classString},
+		"version":     {"version", classString},
+		"session_id":  {"session_id", classString},
+		"user_id":     {"user_id", classString},
+		"attributes":  {"attributes", classAttrMap},
+	},
+	orderable: map[string]bool{
+		"id": true, "name": true, "start_time": true, "end_time": true,
+	},
 }
 
 type builder struct {
@@ -117,14 +149,33 @@ func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration)
 	if t, _ := doc["target"].(string); t != "spans" {
 		return nil, errf("schema_invalid", 400, "target must be 'spans'")
 	}
+	// scoreConditions only apply to the traces target (DSL §8).
+	if _, hasScores := doc["scores"]; hasScores {
+		return nil, errf("schema_invalid", 400, "scores are only valid on the traces target")
+	}
+	return compileTarget(doc, projectID, maxWindow, spanFields)
+}
+
+// CompileTraces compiles a traces query. Trace fields are derived from spans (DSL
+// §4.1); the compiled predicate runs against the synthesized trace projection.
+// The `scores` semi-join (§8) is not implemented in this maturity.
+func CompileTraces(doc map[string]any, projectID string, maxWindow time.Duration) (*Compiled, error) {
+	if t, _ := doc["target"].(string); t != "traces" {
+		return nil, errf("schema_invalid", 400, "target must be 'traces'")
+	}
+	if _, hasScores := doc["scores"]; hasScores {
+		return nil, errf("not_implemented", 501, "score semi-join (QD-9) is not implemented in v1alpha1")
+	}
+	return compileTarget(doc, projectID, maxWindow, traceFields)
+}
+
+// compileTarget is the shared row-query compiler; qf selects the target's
+// queryable fields, so spans and traces share NULL/ceiling/422/cursor semantics.
+func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration, qf queryFields) (*Compiled, error) {
 	for k := range doc {
 		if !allowedTopKeys[k] {
 			return nil, errf("schema_invalid", 400, "unknown top-level key %q", k)
 		}
-	}
-	// scoreConditions only apply to the traces target (DSL §8).
-	if _, hasScores := doc["scores"]; hasScores {
-		return nil, errf("schema_invalid", 400, "scores are only valid on the traces target")
 	}
 	b := &builder{}
 	// project scoping is always first.
@@ -165,7 +216,7 @@ func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration)
 					if _, nested := cm["any"]; nested {
 						return nil, errf("schema_invalid", 400, "nesting exceeds MAX_NESTING_DEPTH (2)")
 					}
-					sql, err := compileCondition(b, cm)
+					sql, err := compileCondition(b, cm, qf)
 					if err != nil {
 						return nil, err
 					}
@@ -177,7 +228,7 @@ func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration)
 				}
 				continue
 			}
-			sql, err := compileCondition(b, member)
+			sql, err := compileCondition(b, member, qf)
 			if err != nil {
 				return nil, err
 			}
@@ -189,7 +240,7 @@ func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration)
 		return nil, errf("condition_limit_exceeded", 422, "more than %d conditions", maxConditions)
 	}
 
-	order, err := compileOrder(doc)
+	order, err := compileOrder(doc, qf)
 	if err != nil {
 		return nil, err
 	}
@@ -232,10 +283,10 @@ func queryFingerprint(doc map[string]any) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-func compileCondition(b *builder, c map[string]any) (string, error) {
+func compileCondition(b *builder, c map[string]any, qf queryFields) (string, error) {
 	field, _ := c["field"].(string)
 	op, _ := c["op"].(string)
-	f, known := spanFields[field]
+	f, known := qf.fields[field]
 	if !known {
 		return "", errf("unknown_field", 422, "unknown field %q", field)
 	}
@@ -251,10 +302,7 @@ func compileCondition(b *builder, c map[string]any) (string, error) {
 	}
 }
 
-func compileSimpleCond(b *builder, f struct {
-	col   string
-	class fieldClass
-}, c map[string]any, op string) (string, error) {
+func compileSimpleCond(b *builder, f fieldDef, c map[string]any, op string) (string, error) {
 	col := f.col
 	num := f.class == classNumeric || f.class == classTimestamp
 	switch op {
@@ -370,18 +418,18 @@ func compileRefCond(b *builder, col string, c map[string]any) (string, error) {
 	return "(" + pred + ")", nil
 }
 
-func compileOrder(doc map[string]any) (string, error) {
+func compileOrder(doc map[string]any, qf queryFields) (string, error) {
 	if raw, ok := doc["orderBy"].([]any); ok && len(raw) > 0 {
 		var parts []string
 		for _, m := range raw {
 			o, _ := m.(map[string]any)
 			field, _ := o["field"].(string)
 			dir, _ := o["dir"].(string)
-			f, known := spanFields[field]
+			f, known := qf.fields[field]
 			if !known {
 				return "", errf("unknown_field", 422, "unknown orderBy field %q", field)
 			}
-			if !orderableFields[field] {
+			if !qf.orderable[field] {
 				return "", errf("not_orderable", 422, "field %q is not orderable", field)
 			}
 			d := "ASC"
@@ -412,10 +460,7 @@ func sqlCmp(op string) string {
 	return "="
 }
 
-func coerce(f struct {
-	col   string
-	class fieldClass
-}, v any) any {
+func coerce(f fieldDef, v any) any {
 	if f.class == classTimestamp {
 		if t, err := parseTime(v); err == nil {
 			return t

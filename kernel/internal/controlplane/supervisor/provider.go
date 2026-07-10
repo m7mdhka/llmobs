@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
+	"github.com/m7mdhka/llmobs/kernel/internal/plugindata"
 )
 
 // PluginSpec is the supervised view of a plugin: identity, its approved
@@ -21,6 +22,7 @@ type PluginSpec struct {
 	GrantedScopes       []string
 	Backend             executors.Backend
 	WatermarkBudget     time.Duration
+	Collections         []plugindata.CollectionSpec // store collections to provision (H5)
 }
 
 // Provider supplies the currently-installed backend plugins to supervise.
@@ -60,7 +62,35 @@ type manifestDoc struct {
 			InfoPath        string `yaml:"infoPath"`
 			WatermarkBudget string `yaml:"watermarkBudget"`
 		} `yaml:"backend"`
+		Store *struct {
+			Collections []struct {
+				Name   string `yaml:"name"`
+				Fields []struct {
+					Name    string `yaml:"name"`
+					Type    string `yaml:"type"`
+					Indexed bool   `yaml:"indexed"`
+				} `yaml:"fields"`
+			} `yaml:"collections"`
+		} `yaml:"store"`
 	} `yaml:"spec"`
+}
+
+// collections converts the parsed manifest store block into CollectionSpecs.
+func (m manifestDoc) collections() []plugindata.CollectionSpec {
+	if m.Spec.Store == nil {
+		return nil
+	}
+	out := make([]plugindata.CollectionSpec, 0, len(m.Spec.Store.Collections))
+	for _, c := range m.Spec.Store.Collections {
+		spec := plugindata.CollectionSpec{Name: c.Name}
+		for _, f := range c.Fields {
+			spec.Fields = append(spec.Fields, plugindata.FieldSpec{
+				Name: f.Name, Type: plugindata.FieldType(f.Type), Indexed: f.Indexed,
+			})
+		}
+		out = append(out, spec)
+	}
+	return out
 }
 
 func (d *DirProvider) Plugins() []PluginSpec {
@@ -100,6 +130,7 @@ func (d *DirProvider) Plugins() []PluginSpec {
 				HealthPath: m.Spec.Backend.HealthPath,
 			},
 			WatermarkBudget: budget,
+			Collections:     m.collections(),
 		})
 	}
 	return out

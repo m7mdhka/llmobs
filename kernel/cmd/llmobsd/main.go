@@ -194,6 +194,11 @@ func run() error {
 		return err
 	}
 	pluginapi.NewSecrets(pluginAuthz, postgres.NewPluginSecrets(pool), secretBox, log).Register(apiMux, "/v1alpha1/plugin/secrets")
+	// Store: plugin-owned structured collections. The supervisor provisions each
+	// plugin's collections during starting (migration = health signal, H5).
+	pluginStore := postgres.NewPluginStore(pool)
+	sup.SetProvisioner(pluginStore)
+	pluginapi.NewStore(pluginAuthz, pluginStore).Register(apiMux, "/v1alpha1/plugin/store")
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is

@@ -22,7 +22,7 @@ type APIKeyInfo struct {
 
 // allowedScopes are the scopes an issued machine key may hold.
 var allowedScopes = map[string]bool{
-	"ingest": true, "query": true, "scores:write": true, "delete": true,
+	"ingest": true, "query": true, "query:payloads": true, "scores:write": true, "delete": true,
 }
 
 // CreateAPIKey issues a new machine key for a project with the given scopes and

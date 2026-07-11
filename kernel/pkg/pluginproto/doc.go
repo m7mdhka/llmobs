@@ -34,6 +34,16 @@ const (
 	// pre-intersected identity assertion) on a plugin frontend's Query API calls.
 	FrontendTokenHeader = "X-LLMObs-Frontend-Token"
 
+	// PluginFrontendHeader marks a Query API request as originating from a plugin
+	// frontend (G1). The SDK sets it on EVERY plugin-context call. When present the
+	// kernel REQUIRES a valid frontend token and confines the caller to the token's
+	// intersected scopes — it never falls back to the ambient session cookie's full
+	// user scope. This is what makes J1 least-privilege actually enforced for a
+	// cooperating frontend (a token that is missing/expired fails closed instead of
+	// silently escalating). A hostile same-origin frontend that omits BOTH this marker
+	// and the token is the deferred origin-isolation boundary (ADR-0004 amendment).
+	PluginFrontendHeader = "X-LLMObs-Plugin-Frontend"
+
 	// DefaultInfoPath / DefaultHealthPath are the well-known plugin endpoints the
 	// supervisor calls when the manifest does not override them.
 	DefaultInfoPath   = "/plugin/v1/info"

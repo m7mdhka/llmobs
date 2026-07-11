@@ -47,6 +47,14 @@ export function LLMObsPluginProvider({
 }): React.ReactElement {
   const value = React.useMemo<LLMObsContextValue>(() => {
     const baseUrl = config.baseUrl ?? "";
+    // G1 structural guard: this provider wraps ONLY plugin surfaces, so a real
+    // DataClient built here is ALWAYS a plugin context and MUST run under a frontend
+    // token. If the shell mounted a surface without wiring a provider, default to one
+    // that yields no token — the DataClient then FAILS CLOSED (throws) rather than
+    // silently calling the kernel with the ambient session cookie at the user's full
+    // scope. A forgotten mint wiring can never re-open the escalation. (Tests inject a
+    // fake client via config.client, bypassing this.)
+    const frontendToken: FrontendTokenProvider = config.frontendToken ?? (async () => undefined);
     return {
       baseUrl,
       projectId: config.projectId,
@@ -57,7 +65,7 @@ export function LLMObsPluginProvider({
           baseUrl,
           projectId: config.projectId,
           fetchImpl: config.fetchImpl,
-          frontendToken: config.frontendToken,
+          frontendToken,
         }),
     };
   }, [config.baseUrl, config.projectId, config.user, config.fetchImpl, config.frontendToken, config.client]);

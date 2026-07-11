@@ -103,12 +103,23 @@ export class DataClient implements LLMObsClient {
     const h: Record<string, string> = { Accept: "application/json" };
     if (json) h["Content-Type"] = "application/json";
     if (this.cfg.projectId) h["X-LLMObs-Project"] = this.cfg.projectId;
-    // J1: present the plugin frontend token when the shell provides one. The kernel
-    // prefers it over the session cookie (Case 1b before Case 2), confining a
-    // cooperating frontend to its least-privilege grant.
+    // J1/G1: this is a plugin-context client (a frontend-token provider is configured).
+    // FAIL CLOSED: always mark the request as plugin-originated and REQUIRE a token; if
+    // one cannot be obtained, throw rather than send the call with only the ambient
+    // session cookie — which the kernel would scope to the user's FULL permissions
+    // (the privilege-escalation G1 closes). The kernel likewise requires a valid token
+    // whenever the marker is present.
     if (this.cfg.frontendToken) {
+      h["X-LLMObs-Plugin-Frontend"] = "1";
       const tok = await this.cfg.frontendToken();
-      if (tok) h["X-LLMObs-Frontend-Token"] = tok;
+      if (!tok) {
+        throw new SdkError(
+          401,
+          "frontend_token_unavailable",
+          "plugin frontend token unavailable; refusing to call the kernel with ambient session scope",
+        );
+      }
+      h["X-LLMObs-Frontend-Token"] = tok;
     }
     return h;
   }

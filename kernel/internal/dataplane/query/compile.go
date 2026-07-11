@@ -47,6 +47,19 @@ type Compiled struct {
 	// orderBy). The next page's cursor must carry it; a cursor from a different
 	// query shape is rejected (DSL §7).
 	Fingerprint string
+	// OrderKeys is the LOGICAL order (field names + direction) the Order SQL encodes,
+	// dialect-neutral. The dual-read merge sorts the lite∪scale union by these keys —
+	// it cannot parse the dialect-specific Order SQL (a computed field like `duration`
+	// resolves to an engine expression, not a doc field). Computed fields (duration,
+	// ttft) are recomputed from doc timestamps by the merge.
+	OrderKeys []OrderKey
+}
+
+// OrderKey is one logical ORDER BY term: a canonical field name (e.g. "start_time",
+// "duration") and its direction. The trailing "id ASC" tiebreak is always included.
+type OrderKey struct {
+	Field string
+	Desc  bool
 }
 
 type fieldClass int
@@ -358,7 +371,7 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 		}
 	}
 
-	order, err := compileOrder(doc, qf, d)
+	order, orderKeys, err := compileOrder(doc, qf, d)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +398,7 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 		preds = append(preds, "("+anchor+" < "+b.ph(st)+" OR ("+anchor+" = "+b.ph(st)+" AND id > "+b.ph(id)+"))")
 	}
 
-	return &Compiled{Where: strings.Join(preds, " AND "), Args: b.args, Order: order, Limit: limit, Fingerprint: fp}, nil
+	return &Compiled{Where: strings.Join(preds, " AND "), Args: b.args, Order: order, Limit: limit, Fingerprint: fp, OrderKeys: orderKeys}, nil
 }
 
 // compileScoreCondition builds one QD-9 EXISTS predicate: the trace has ≥1 score
@@ -653,30 +666,40 @@ func compileRefCond(b *builder, col string, c map[string]any) (string, error) {
 	return "(" + pred + ")", nil
 }
 
-func compileOrder(doc map[string]any, qf queryFields, d Dialect) (string, error) {
+func compileOrder(doc map[string]any, qf queryFields, d Dialect) (string, []OrderKey, error) {
 	if raw, ok := doc["orderBy"].([]any); ok && len(raw) > 0 {
 		var parts []string
+		var keys []OrderKey
 		for _, m := range raw {
 			o, _ := m.(map[string]any)
 			field, _ := o["field"].(string)
 			dir, _ := o["dir"].(string)
 			f, known := qf.fields[field]
 			if !known {
-				return "", errf("unknown_field", 422, "unknown orderBy field %q", field)
+				return "", nil, errf("unknown_field", 422, "unknown orderBy field %q", field)
 			}
 			if !qf.orderable[field] {
-				return "", errf("not_orderable", 422, "field %q is not orderable", field)
+				return "", nil, errf("not_orderable", 422, "field %q is not orderable", field)
 			}
+			desc := strings.ToLower(dir) == "desc"
 			dir2 := "ASC"
-			if strings.ToLower(dir) == "desc" {
+			if desc {
 				dir2 = "DESC"
 			}
-			parts = append(parts, resolveCol(d, f)+" "+dir2)
+			// Explicit NULLS LAST on BOTH dialects: Postgres defaults DESC→NULLS FIRST
+			// while ClickHouse defaults NULLS LAST, so an unqualified DESC on a nullable/
+			// computed key would place NULLs differently per engine — and the dual-read
+			// merge (which sorts NULLs last) would drop scale's NULL-valued rows off a
+			// full page. Forcing NULLS LAST everywhere keeps engines + merge consistent.
+			parts = append(parts, resolveCol(d, f)+" "+dir2+" NULLS LAST")
+			keys = append(keys, OrderKey{Field: field, Desc: desc})
 		}
 		parts = append(parts, "id ASC")
-		return strings.Join(parts, ", "), nil
+		keys = append(keys, OrderKey{Field: "id"})
+		return strings.Join(parts, ", "), keys, nil
 	}
-	return qf.timeAnchor + " DESC, id ASC", nil
+	return qf.timeAnchor + " DESC NULLS LAST, id ASC",
+		[]OrderKey{{Field: qf.timeAnchor, Desc: true}, {Field: "id"}}, nil
 }
 
 // helpers

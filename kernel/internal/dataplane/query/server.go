@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/queryapi"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage/dualstore"
 	"github.com/m7mdhka/llmobs/kernel/pkg/pluginproto"
 )
 
@@ -31,6 +33,34 @@ type Server struct {
 	metrics   *metrics.Registry
 	signer    *plugintoken.Signer // verifies plugin service tokens + user assertions (H3)
 	dialect   Dialect             // SQL dialect the compiler emits for this store
+	dual      *dualstore.Store    // when set, reads unify lite∪scale (RULING-MIG6); nil = single store
+}
+
+// SetDualStore enables permanent dual-read: every read unifies the historical
+// (lite) and new (scale) backends at the Query API (RULING-MIG6). Get*/Erase/score-
+// ingest route through the dual decorator; the compiled-SQL list/aggregation paths
+// compile per-dialect and merge. The write path (pipeline) must use the same dual
+// store so a span is immediately readable across the boundary.
+func (s *Server) SetDualStore(d *dualstore.Store) { s.dual = d }
+
+// pointReads is the non-compiled-SQL read/erase/score-ingest surface both the
+// single store and the dual decorator satisfy.
+type pointReads interface {
+	GetSpan(ctx context.Context, projectID, id string) (json.RawMessage, error)
+	GetScore(ctx context.Context, projectID, id string) (json.RawMessage, error)
+	GetTraceSpans(ctx context.Context, projectID, traceID string) ([]json.RawMessage, error)
+	EraseSpans(ctx context.Context, projectID, userID, actor string, from, to time.Time) (int, string, error)
+	PersistScore(ctx context.Context, ev storage.Event) error
+}
+
+// reads returns the effective store for the non-SQL paths: the dual decorator when
+// dual-read is enabled (so Get/Erase/score-ingest unify lite∪scale), else the single
+// store. This is the convergence seam for those paths (R-MIG4).
+func (s *Server) reads() pointReads {
+	if s.dual != nil {
+		return s.dual
+	}
+	return s.store
 }
 
 func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration, reg *metrics.Registry, signer *plugintoken.Signer) *Server {
@@ -227,17 +257,11 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	started := time.Now()
-	var rows []json.RawMessage
 	anchor := "start_time"
-	switch target {
-	case "traces":
-		rows, err = s.store.QueryTraces(r.Context(), c.Where, c.Args, c.Order, c.Limit+1)
-	case "scores":
+	if target == "scores" {
 		anchor = "timestamp"
-		rows, err = s.store.QueryScores(r.Context(), c.Where, c.Args, c.Order, c.Limit+1)
-	default:
-		rows, err = s.store.QuerySpans(r.Context(), c.Where, c.Args, c.Order, c.Limit+1)
 	}
+	rows, err := s.listRows(r.Context(), target, doc, id.ProjectID, c)
 	if err != nil {
 		s.log.Error("query execution", "err", err.Error())
 		writeErr(w, errf("internal", 500, "query failed"))
@@ -295,7 +319,7 @@ func (s *Server) runAggregation(w http.ResponseWriter, r *http.Request, doc map[
 		return
 	}
 	started := time.Now()
-	groups, err := s.store.QueryAggregation(r.Context(), target, ca.Select, ca.Where, ca.GroupBy, ca.Args)
+	groups, warnings, err := s.aggRows(r.Context(), target, doc, id.ProjectID, ca)
 	if err != nil {
 		s.log.Error("aggregation execution", "err", err.Error())
 		writeErr(w, errf("internal", 500, "aggregation failed"))
@@ -313,11 +337,15 @@ func (s *Server) runAggregation(w http.ResponseWriter, r *http.Request, doc map[
 		b, _ := json.Marshal(g)
 		data[i] = b
 	}
+	warns := make([]any, len(warnings))
+	for i, w := range warnings {
+		warns[i] = w
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":  "v1alpha1",
 		"data":     data,
 		"stats":    map[string]any{"elapsed_ms": time.Since(started).Milliseconds(), "returned": len(groups)},
-		"warnings": []any{},
+		"warnings": warns,
 	})
 }
 
@@ -344,7 +372,7 @@ func (s *Server) GetSpan(w http.ResponseWriter, r *http.Request, id string) {
 		writeErr(w, aerr)
 		return
 	}
-	doc, err := s.store.GetSpan(r.Context(), ident.ProjectID, id)
+	doc, err := s.reads().GetSpan(r.Context(), ident.ProjectID, id)
 	if err != nil {
 		writeErr(w, errf("internal", 500, "fetch failed"))
 		return
@@ -381,7 +409,7 @@ func (s *Server) EraseSpans(w http.ResponseWriter, r *http.Request, params query
 	if sess, ok := authhttp.SessionFrom(r.Context()); ok {
 		actor = "session:" + sess.User.Email
 	}
-	erased, auditID, err := s.store.EraseSpans(r.Context(), ident.ProjectID, params.UserId, actor, params.From, params.To)
+	erased, auditID, err := s.reads().EraseSpans(r.Context(), ident.ProjectID, params.UserId, actor, params.From, params.To)
 	if err != nil {
 		s.log.Error("erase spans", "err", err.Error())
 		writeErr(w, errf("internal", 500, "erasure failed"))
@@ -398,7 +426,7 @@ func (s *Server) GetScore(w http.ResponseWriter, r *http.Request, id string) {
 		writeErr(w, aerr)
 		return
 	}
-	doc, err := s.store.GetScore(r.Context(), ident.ProjectID, id)
+	doc, err := s.reads().GetScore(r.Context(), ident.ProjectID, id)
 	if err != nil {
 		writeErr(w, errf("internal", 500, "fetch failed"))
 		return
@@ -444,7 +472,7 @@ func (s *Server) WriteScore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, sc := range scores {
-		if err := s.store.PersistScore(r.Context(), scoreEvent(sc)); err != nil {
+		if err := s.reads().PersistScore(r.Context(), scoreEvent(sc)); err != nil {
 			s.log.Error("score persist", "err", err.Error())
 			writeErr(w, errf("internal", 500, "score write failed"))
 			return

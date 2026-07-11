@@ -70,6 +70,28 @@ type Config struct {
 	EventRedisSentinelAddrs    []string `json:"event_redis_sentinel_addrs"`
 	EventRedisPassword         string   `json:"event_redis_password"`
 	EventRedisSentinelPassword string   `json:"event_redis_sentinel_password"`
+	// Scale dual-read (ADR-0026 RULING-MIG6): when ClickHouseURL is set, the kernel
+	// runs the PERMANENT dual-read layer — every read unifies Postgres-lite
+	// (historical) and ClickHouse-scale (new), and writes go to scale with
+	// seed-on-migrate. This is how a self-hoster crosses the lite→scale boundary
+	// without a migration cliff: no read window where data is missing. Empty => lite.
+	ClickHouseURL string `json:"clickhouse_url"`
+	// CHCluster is the ClickHouse cluster name for ON CLUSTER DDL on boot-migrate
+	// (empty => standalone/Replicated-database; "default" is refused, R-CH1).
+	CHCluster string `json:"ch_cluster"`
+	// ClickHouse per-query resource caps (RULING-CH9). The scale adapter fails closed
+	// unless all four are set; these defaults are generous for interactive reads.
+	CHMaxExecutionTime string `json:"ch_max_execution_time"` // e.g. "30s"
+	CHMaxMemoryBytes   int64  `json:"ch_max_memory_bytes"`
+	CHMaxRowsToRead    int64  `json:"ch_max_rows_to_read"`
+	CHMaxBytesToRead   int64  `json:"ch_max_bytes_to_read"`
+	// Lite→scale backfill (L5, RULING-MIG6). OPTIONAL and convenience-only — dual-read
+	// already makes lite data readable, so this just moves cold rows onto scale in the
+	// background. Decoupled from boot readiness; resumable across restarts. Only runs
+	// when dual-read (ClickHouseURL) is enabled.
+	BackfillOnBoot    bool   `json:"backfill_on_boot"`
+	BackfillChunkSize int    `json:"backfill_chunk_size"` // rows per batch; default 500
+	BackfillBudget    string `json:"backfill_budget"`     // SEPARATE execution budget (NOT the read timeout); e.g. "30m"
 }
 
 func defaults() Config {
@@ -94,6 +116,12 @@ func defaults() Config {
 		ErasureSuppressionTTL:     "720h",
 		PluginReconcileInterval:   "15s",
 		EventBacklogCap:           10000,
+		CHMaxExecutionTime:        "30s",
+		CHMaxMemoryBytes:          2 << 30, // 2 GiB
+		CHMaxRowsToRead:           50_000_000,
+		CHMaxBytesToRead:          5 << 30, // 5 GiB
+		BackfillChunkSize:         500,
+		BackfillBudget:            "30m",
 	}
 }
 
@@ -141,6 +169,15 @@ func LoadConfig() (Config, error) {
 	envStrList(brand.Env("EVENT_REDIS_SENTINEL_ADDRS"), &c.EventRedisSentinelAddrs)
 	envStr(brand.Env("EVENT_REDIS_PASSWORD"), &c.EventRedisPassword)
 	envStr(brand.Env("EVENT_REDIS_SENTINEL_PASSWORD"), &c.EventRedisSentinelPassword)
+	envStr(brand.Env("CLICKHOUSE_URL"), &c.ClickHouseURL)
+	envStr(brand.Env("CH_CLUSTER"), &c.CHCluster)
+	envStr(brand.Env("CH_MAX_EXECUTION_TIME"), &c.CHMaxExecutionTime)
+	envInt64(brand.Env("CH_MAX_MEMORY_BYTES"), &c.CHMaxMemoryBytes)
+	envInt64(brand.Env("CH_MAX_ROWS_TO_READ"), &c.CHMaxRowsToRead)
+	envInt64(brand.Env("CH_MAX_BYTES_TO_READ"), &c.CHMaxBytesToRead)
+	envBool(brand.Env("BACKFILL_ON_BOOT"), &c.BackfillOnBoot)
+	envInt(brand.Env("BACKFILL_CHUNK_SIZE"), &c.BackfillChunkSize)
+	envStr(brand.Env("BACKFILL_BUDGET"), &c.BackfillBudget)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)
@@ -180,6 +217,14 @@ func envStrList(key string, dst *[]string) {
 func envInt(key string, dst *int) {
 	if v, ok := os.LookupEnv(key); ok {
 		if n, err := strconv.Atoi(v); err == nil {
+			*dst = n
+		}
+	}
+}
+
+func envInt64(key string, dst *int64) {
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			*dst = n
 		}
 	}

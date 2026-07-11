@@ -17,7 +17,7 @@ func (s *Server) GetTraceTree(w http.ResponseWriter, r *http.Request, traceID st
 		writeErr(w, aerr)
 		return
 	}
-	rows, err := s.store.GetTraceSpans(r.Context(), ident.ProjectID, traceID)
+	rows, err := s.reads().GetTraceSpans(r.Context(), ident.ProjectID, traceID)
 	if err != nil {
 		s.log.Error("trace tree fetch", "err", err.Error())
 		writeErr(w, errf("internal", 500, "fetch failed"))
@@ -55,7 +55,7 @@ func (s *Server) GetTrace(w http.ResponseWriter, r *http.Request, id string) {
 		writeErr(w, aerr)
 		return
 	}
-	rows, err := s.store.GetTraceSpans(r.Context(), ident.ProjectID, id)
+	rows, err := s.reads().GetTraceSpans(r.Context(), ident.ProjectID, id)
 	if err != nil {
 		writeErr(w, errf("internal", 500, "fetch failed"))
 		return

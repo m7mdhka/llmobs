@@ -107,6 +107,32 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	return count, auditID, nil
 }
 
+// SuppressSpans records an erasure-suppression tombstone for each explicit id without
+// deleting. Used by the dual-read store to make scale's suppression set complete
+// across the boundary: a span erased from lite-only must also be suppressed in scale
+// so the backfill/seed cannot resurrect it (scale.PersistSpan checks this table).
+func (s *Store) SuppressSpans(ctx context.Context, projectID string, ids []string, auditID string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	expires := time.Now().Add(s.suppressionTTL).UTC()
+	batch, err := s.conn.PrepareBatch(ctx,
+		`INSERT INTO erasure_suppression (project_id, id, audit_id, expires_at, event_ts)`)
+	if err != nil {
+		return fmt.Errorf("prepare suppression batch: %w", err)
+	}
+	now := time.Now().UTC()
+	for _, id := range ids {
+		if err := batch.Append(projectID, id, auditID, expires, now); err != nil {
+			return fmt.Errorf("append suppression: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send suppression batch: %w", err)
+	}
+	return nil
+}
+
 func randomHexID(prefix string) (string, error) {
 	buf := make([]byte, 12)
 	if _, err := rand.Read(buf); err != nil {

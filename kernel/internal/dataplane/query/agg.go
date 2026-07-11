@@ -20,6 +20,20 @@ type CompiledAgg struct {
 	GroupBy string // comma-joined group aliases, or "" for a global aggregate
 	Where   string
 	Args    []any
+	// GroupAliases are the result columns that form the group key (g0,g1,…). AggMetas
+	// carries each aggregate result column's alias + op. The dual-read aggregation
+	// merge uses these to classify columns by their ACTUAL op (a summable count/sum vs
+	// a non-mergeable avg/count_distinct/percentile) instead of sniffing column-name
+	// prefixes — which a caller-controlled alias could spoof.
+	GroupAliases []string
+	AggMetas     []AggMeta
+}
+
+// AggMeta is one aggregate result column: its (possibly caller-supplied) alias and
+// the canonical op that produced it.
+type AggMeta struct {
+	Alias string
+	Op    string
 }
 
 var validAggOps = map[string]bool{
@@ -96,17 +110,19 @@ func CompileAggregationForDialect(doc map[string]any, projectID string, maxWindo
 	if err != nil {
 		return nil, err
 	}
-	aggSelects, err := compileAggregations(doc, qf, d)
+	aggSelects, aggMetas, err := compileAggregations(doc, qf, d)
 	if err != nil {
 		return nil, err
 	}
 	selects = append(selects, aggSelects...)
 
 	return &CompiledAgg{
-		Select:  strings.Join(selects, ", "),
-		GroupBy: strings.Join(groupAliases, ", "),
-		Where:   strings.Join(preds, " AND "),
-		Args:    b.args,
+		Select:       strings.Join(selects, ", "),
+		GroupBy:      strings.Join(groupAliases, ", "),
+		Where:        strings.Join(preds, " AND "),
+		Args:         b.args,
+		GroupAliases: groupAliases,
+		AggMetas:     aggMetas,
 	}, nil
 }
 
@@ -167,37 +183,39 @@ func compileGroupBy(doc map[string]any, qf queryFields, anchor string, d Dialect
 	return selects, aliases, nil
 }
 
-func compileAggregations(doc map[string]any, qf queryFields, d Dialect) ([]string, error) {
+func compileAggregations(doc map[string]any, qf queryFields, d Dialect) ([]string, []AggMeta, error) {
 	raw, ok := doc["aggregations"].([]any)
 	if !ok || len(raw) == 0 {
-		return nil, errf("schema_invalid", 400, "aggregations must be a non-empty array")
+		return nil, nil, errf("schema_invalid", 400, "aggregations must be a non-empty array")
 	}
 	if len(raw) > maxAggregations {
-		return nil, errf("schema_invalid", 400, "more than %d aggregations", maxAggregations)
+		return nil, nil, errf("schema_invalid", 400, "more than %d aggregations", maxAggregations)
 	}
 	out := make([]string, 0, len(raw))
+	metas := make([]AggMeta, 0, len(raw))
 	for _, m := range raw {
 		a, ok := m.(map[string]any)
 		if !ok {
-			return nil, errf("schema_invalid", 400, "aggregation must be an object")
+			return nil, nil, errf("schema_invalid", 400, "aggregation must be an object")
 		}
 		op, _ := a["op"].(string)
 		if !validAggOps[op] {
-			return nil, errf("operator_not_allowed", 422, "unknown aggregation op %q", op)
+			return nil, nil, errf("operator_not_allowed", 422, "unknown aggregation op %q", op)
 		}
 		field, _ := a["field"].(string)
 		alias, _ := a["alias"].(string)
 
 		expr, defAlias, err := aggExpr(op, field, a, qf, d)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if alias == "" {
 			alias = defAlias
 		}
 		out = append(out, expr+" AS "+d.quoteIdent(alias))
+		metas = append(metas, AggMeta{Alias: alias, Op: op})
 	}
-	return out, nil
+	return out, metas, nil
 }
 
 func aggExpr(op, field string, a map[string]any, qf queryFields, d Dialect) (expr, defAlias string, err error) {

@@ -87,3 +87,45 @@ func randomHexID(prefix string) (string, error) {
 	}
 	return prefix + "_" + hex.EncodeToString(buf), nil
 }
+
+// SpanIDsForErase resolves the span ids an erase for (projectID, userID) within
+// [from, to) WOULD remove, without deleting anything. It mirrors EraseSpans' match
+// predicate exactly. The dual-read store calls this so it can pre-suppress lite-only
+// ids in the scale store BEFORE any delete — closing the cross-boundary resurrection
+// gap where a span present only in lite would leave scale with no tombstone.
+func (s *Store) SpanIDsForErase(ctx context.Context, projectID, userID string, from, to time.Time) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id FROM spans WHERE project_id=$1 AND user_id=$2 AND start_time >= $3 AND start_time < $4`,
+		projectID, userID, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// SuppressSpans records an erasure-suppression tombstone for each explicit id without
+// deleting. Idempotent (extends the TTL on conflict). Used by the dual-read store to
+// make the scale suppression set complete across the boundary.
+func (s *Store) SuppressSpans(ctx context.Context, projectID string, ids []string, auditID string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	expires := time.Now().Add(s.suppressionTTL).UTC()
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO erasure_suppression (project_id, id, audit_id, expires_at)
+		 SELECT $1, x.id, $2, $3 FROM unnest($4::text[]) AS x(id)
+		 ON CONFLICT (project_id, id) DO UPDATE SET
+		   audit_id=EXCLUDED.audit_id, erased_at=now(),
+		   expires_at=GREATEST(erasure_suppression.expires_at, EXCLUDED.expires_at)`,
+		projectID, auditID, expires, ids)
+	return err
+}

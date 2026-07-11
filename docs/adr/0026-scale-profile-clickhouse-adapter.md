@@ -180,6 +180,51 @@ chunks, per-batch retry+backoff, and visible progress. Per the failure taxonomy
 deterministic failure dead-letters (recorded, redrivable) so one bad row can't pin
 the migration. Decoupled from boot readiness — `/readyz` never waits on it.
 
+### D10 — L5 adversarial-review hardening (the failure paths, not the happy path)
+
+The mandatory security + boundary review of L5 found six issues, all fixed with
+permanent regression tests (the failure path is where the worst bugs hide):
+
+- **Erasure resurrection (HIGH, security).** A span erased while present ONLY in lite
+  left the scale store with no suppression tombstone, so a later backfill/seed replay
+  could resurrect GDPR-erased data. Fixed at the seam scale.PersistSpan already guards:
+  the dual erase resolves lite's matching ids and pre-suppresses them in scale BEFORE
+  any delete (`EraseIDResolver`/`EraseSuppressor` capabilities, compile-time-asserted in
+  `main.go`). Regression: `TestErasedLiteSpanNotResurrectedByBackfill`.
+- **Computed-field ordering (HIGH).** The dual merge parsed the dialect ORDER SQL as
+  doc field names, so `orderBy: duration|ttft` silently collapsed to id-only order (and,
+  after trim, the wrong rows). Fixed by threading LOGICAL order keys (`Compiled.OrderKeys`)
+  and recomputing `duration`/`ttft` from doc timestamps in the merge.
+- **Aggregation merge classification (MEDIUM).** Column op was inferred from a caller-
+  spoofable name prefix — `count_distinct` was summed across a straddle (double-counting)
+  and a user alias `g0` could hijack the group key. Fixed by threading the compiled
+  `{GroupAliases, AggMetas}` so the merge classifies by actual op; non-mergeable
+  aggregates (avg/count_distinct/percentile) over a straddle keep scale's partial AND
+  now surface a response `warnings[]` entry (D8 made visible).
+- **Backfill failure taxonomy (MEDIUM, #12).** A scale outage exhausted per-row retries
+  and mass-dead-lettered the dataset. Fixed with a consecutive-failure breaker: a run of
+  persist failures stops the run LOUD and resumable (transient outage); an isolated
+  failure dead-letters (deterministic per-row rejection).
+- **Convergence seam (MEDIUM, #11).** The compiled-SQL read branch was duplicated in two
+  handlers. Consolidated into `s.listRows`/`s.aggRows` seam helpers so a new list/agg
+  handler inherits dual-read by construction; the grep-proof test enforces the single seam.
+
+The erase guard is **fail-closed**: if either store is ever wrapped in a decorator that
+drops the `EraseIDResolver`/`EraseSuppressor` capability, the dual erase refuses loudly
+rather than silently degrading the GDPR guarantee.
+
+**Known limitations (tracked, not blocking).**
+- *T1 — id-tiebreak collation.* The merge orders `id` byte-wise (matching ClickHouse and
+  Go); if Postgres runs a non-C collation, a same-timestamp cluster's `id` tiebreak can
+  differ at a page boundary and duplicate/skip a row across pages. Not observed in
+  practice; forcing C collation on the id keyset is deferred to avoid changing
+  single-store pagination behavior in this PR.
+- *R2 — ClickHouse suppression TOCTOU.* ClickHouse has no transactions, so its
+  `PersistSpan` suppression-check and insert are not atomic — the same inherent G3
+  redelivery window that already exists for ordinary single-store scale re-delivery. The
+  L5 erase guard closes the *structural* lite-only gap (an erased span always gets a scale
+  tombstone) but does not widen or newly introduce this pre-existing race.
+
 ## Consequences
 
 - A shared `storage/merge` package; the Postgres adapter is refactored to import it

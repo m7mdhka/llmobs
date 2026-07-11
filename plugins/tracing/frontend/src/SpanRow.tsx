@@ -1,5 +1,5 @@
 import React from "react";
-import { KindBadge } from "@llmobs/plugin-sdk";
+import { KindBadge } from "@llmobs/plugin-sdk/react";
 import { hueForKind } from "@llmobs/tokens";
 import type { SpanNode, Bounds } from "./tree.js";
 import { barGeometry } from "./tree.js";

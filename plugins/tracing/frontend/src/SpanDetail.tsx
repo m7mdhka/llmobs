@@ -1,5 +1,5 @@
 import React from "react";
-import { Tabs, type TabItem } from "@llmobs/plugin-sdk";
+import { Tabs, type TabItem } from "@llmobs/plugin-sdk/react";
 import type { WireSpan } from "./wire.js";
 import { fmtDuration } from "./format.js";
 

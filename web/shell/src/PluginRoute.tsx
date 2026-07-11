@@ -1,69 +1,89 @@
-import React, { Component, Suspense, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { LoadingState, PluginUnavailable } from "@llmobs/ui";
-import { LLMObsPluginProvider } from "@llmobs/plugin-sdk";
-import { loadPluginSurface } from "./remoteLoader.js";
+import { DataClient, type PluginMountContext, type PluginUnmount } from "@llmobs/plugin-sdk";
+import { currentTheme } from "./theme.js";
+import { loadPluginMount } from "./remoteLoader.js";
 import { makeFrontendTokenProvider, type RegistryPlugin, type Session } from "./api.js";
 
-// Mounts a plugin's federated surface inside the SDK provider (which supplies the
-// project + user + data client). A failure to load the remote (network,
-// integrity, missing export) degrades to the standard unavailable state — a
-// broken plugin never takes down the shell (the dogfood / graceful-degradation
-// rule). Each render of a route gets a fresh boundary keyed by plugin id.
-export function PluginRoute({ plugin, session }: { plugin: RegistryPlugin; session: Session }): React.ReactElement {
-  const [surface, setSurface] = useState<ComponentType<Record<string, never>> | null>(null);
-  const [failed, setFailed] = useState(false);
+// Mounts a plugin's federated surface through the FRAMEWORK-NEUTRAL contract (ADR-0030):
+// the shell builds a plain `context`, loads the remote's `mount(element, context)`, calls
+// it into a container it owns, and calls the returned `unmount()` on route change. The
+// plugin renders with any framework — the shell no longer renders a React component or
+// wraps it in a React provider. A failure to load or a throw from `mount` degrades to the
+// standard unavailable state; a broken plugin never takes down the shell.
+export function PluginRoute({
+  plugin,
+  session,
+  basePath,
+}: {
+  plugin: RegistryPlugin;
+  session: Session;
+  basePath: string;
+}): React.ReactElement {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
 
-  // J1: a per-plugin, per-session frontend token provider. Stable across renders
-  // (memoized on plugin id + session) so the SDK reuses one caching provider and
-  // re-mints only near expiry. Confines a cooperating frontend to its grant; a
-  // hostile frontend can still bypass it same-origin (documented trust model).
-  const frontendToken = useMemo(
-    () => makeFrontendTokenProvider(plugin.id, session.csrfToken, () => undefined),
-    [plugin.id, session.csrfToken],
-  );
+  // The neutral mount context. Stable across renders (memoized on plugin id + session)
+  // so the mount effect runs once per surface. The data client is built HERE, in the
+  // shell, under the plugin's frontend token — so its G1 fail-closed enforcement holds
+  // for whatever framework the plugin uses, exactly as it did for the React binding.
+  const context = useMemo<PluginMountContext>(() => {
+    // The shell OWNS the frontend-token provider and closes over it inside the data
+    // client — it is deliberately NOT placed on the context, so untrusted plugin code
+    // cannot read the raw bearer token and exfiltrate it off-origin. G1 confinement still
+    // holds: the client fails closed when no token can be minted.
+    const frontendToken = makeFrontendTokenProvider(plugin.id, session.csrfToken, () => undefined);
+    const theme = currentTheme() === "dark" ? "dark" : "light";
+    return {
+      baseUrl: "",
+      basePath,
+      user: { id: session.user.id, email: session.user.email, role: session.user.role },
+      client: new DataClient({ baseUrl: "", frontendToken }),
+      theme: { mode: theme },
+      // Locale/direction are threaded now (N1); N3 wires real detection + RTL.
+      locale: "en",
+      direction: "ltr",
+    };
+  }, [plugin.id, basePath, session.csrfToken, session.user.id, session.user.email, session.user.role]);
 
   useEffect(() => {
     let alive = true;
-    setSurface(null);
-    setFailed(false);
-    loadPluginSurface(plugin)
-      .then((c) => alive && setSurface(() => c))
-      .catch(() => alive && setFailed(true));
+    let unmount: PluginUnmount | void;
+    setStatus("loading");
+    loadPluginMount(plugin)
+      .then((mount) => {
+        if (!alive || !containerRef.current) return;
+        try {
+          unmount = mount(containerRef.current, context);
+          if (alive) setStatus("ready");
+        } catch {
+          if (alive) setStatus("failed");
+        }
+      })
+      .catch(() => {
+        if (alive) setStatus("failed");
+      });
     return () => {
       alive = false;
+      if (typeof unmount === "function") {
+        try {
+          unmount();
+        } catch {
+          /* a plugin's teardown throwing must not break navigation */
+        }
+      }
     };
-  }, [plugin.id]);
+  }, [plugin.id, context]);
 
-  if (failed) {
+  if (status === "failed") {
     return <PluginUnavailable pluginName={plugin.name} reason="The plugin's frontend failed to load." />;
   }
-  if (!surface) {
-    return <LoadingState title={`Loading ${plugin.name}…`} />;
-  }
-  const Surface = surface;
+  // The container is always present so `mount` has a stable element to render into; the
+  // loading indicator overlays until mount resolves.
   return (
-    <PluginErrorBoundary pluginName={plugin.name}>
-      <Suspense fallback={<LoadingState title={`Loading ${plugin.name}…`} />}>
-        <LLMObsPluginProvider config={{ user: session.user, frontendToken }}>
-          <Surface />
-        </LLMObsPluginProvider>
-      </Suspense>
-    </PluginErrorBoundary>
+    <>
+      {status === "loading" && <LoadingState title={`Loading ${plugin.name}…`} />}
+      <div ref={containerRef} data-plugin={plugin.id} />
+    </>
   );
-}
-
-class PluginErrorBoundary extends Component<{ pluginName: string; children: ReactNode }, { crashed: boolean }> {
-  constructor(props: { pluginName: string; children: ReactNode }) {
-    super(props);
-    this.state = { crashed: false };
-  }
-  static getDerivedStateFromError(): { crashed: boolean } {
-    return { crashed: true };
-  }
-  render(): ReactNode {
-    if (this.state.crashed) {
-      return <PluginUnavailable pluginName={this.props.pluginName} reason="The plugin crashed while rendering." />;
-    }
-    return this.props.children;
-  }
 }

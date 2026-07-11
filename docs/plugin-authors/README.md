@@ -7,6 +7,13 @@ manifest without ever reading kernel code.
 Covers:
 
 - The seven SDK primitives (query, write, events, jobs, kv, secrets, surface).
+- The **framework-neutral frontend contract** (ADR-0030): your exposed module exports
+  `mount(element, context) → unmount` and may render with **any framework** — React,
+  Vue, Svelte, or plain DOM. React is one binding (`@llmobs/plugin-sdk/react`, with the
+  hooks + design system + `createReactBinding`), not a requirement. Scaffold from
+  `templates/plugin-frontend-only` (React) or `templates/plugin-frontend-vanilla`
+  (no framework). The `context` carries the token-confined data client, the active
+  project, the theme, the routing base path, and locale/direction.
 - The `llmobs-plugin.yaml` manifest.
 - [The inner loop — `make dev` (create → dev → edit → reload)](dev-loop.md) (J3).
 - [Settings — a schema-form tab with no backend](settings.md) (J2).

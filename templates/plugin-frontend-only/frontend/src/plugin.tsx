@@ -1,9 +1,11 @@
 import React from "react";
-import { EmptyState, LoadingState, ErrorState, useLLMObs, useTraces } from "@llmobs/plugin-sdk";
+import { createReactBinding, EmptyState, LoadingState, ErrorState, useLLMObs, useTraces } from "@llmobs/plugin-sdk/react";
 
-// The exposed surface. The shell mounts it at your nav path ("/your-plugin/*").
-// Read all data through the SDK (the dogfood rule) — never reach around it.
-export default function YourPlugin(): React.ReactElement {
+// The exposed surface, mounted through the FRAMEWORK-NEUTRAL contract (ADR-0030): the
+// module exports `mount`, and React is the binding (@llmobs/plugin-sdk/react). Your
+// component reads all data through the SDK hooks (the dogfood rule) — never reach around
+// them. If you use routing, wrap in `<BrowserRouter basename={context.basePath}>`.
+function YourPlugin(): React.ReactElement {
   const { user } = useLLMObs();
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
@@ -30,3 +32,8 @@ export default function YourPlugin(): React.ReactElement {
     </div>
   );
 }
+
+// The neutral mount the shell calls. `createReactBinding` wraps YourPlugin in the SDK
+// provider (seeded from the shell-built, token-confined context) and adapts it to
+// `mount(element, context) -> unmount`.
+export const mount = createReactBinding(YourPlugin);

@@ -1,0 +1,25 @@
+{
+  "name": "@your-org/plugin-your-vanilla-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Tier-2 LLMObs plugin frontend with NO framework — a Module Federation remote that renders with plain DOM through the neutral mount contract (ADR-0030). Proof that @llmobs/plugin-sdk is framework-agnostic.",
+  "type": "module",
+  "scripts": {
+    "build": "rspack build",
+    "dev": "rspack serve",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@llmobs/plugin-sdk": "workspace:*",
+    "@llmobs/tokens": "workspace:*"
+  },
+  "devDependencies": {
+    "@module-federation/enhanced": "0.8.4",
+    "@rspack/cli": "1.1.6",
+    "@rspack/core": "1.1.6",
+    "jsdom": "25.0.1",
+    "typescript": "5.6.3",
+    "vitest": "2.1.8"
+  }
+}

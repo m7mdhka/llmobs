@@ -6,7 +6,8 @@
 import * as React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
-import { DataClient, SdkError, LLMObsPluginProvider, useLLMObs } from "../dist/index.js";
+import { DataClient, SdkError } from "../dist/index.js";
+import { LLMObsPluginProvider, useLLMObs } from "../dist/react.js";
 
 function fakeFetch(captured: { headers?: Record<string, string> }) {
   return vi.fn(async (_url: string, init: RequestInit) => {
@@ -75,7 +76,7 @@ describe("G1 SDK frontend-token fail-closed", () => {
 // WITHOUT a frontend-token provider (a forgotten mint wiring) must still fail closed —
 // the constructed DataClient defaults to a no-token provider, so calls throw rather than
 // run at the ambient session's full scope.
-import { LLMObsPluginProvider, useLLMObs } from "../dist/index.js";
+import { LLMObsPluginProvider, useLLMObs } from "../dist/react.js";
 import * as React from "react";
 import { render, waitFor } from "@testing-library/react";
 

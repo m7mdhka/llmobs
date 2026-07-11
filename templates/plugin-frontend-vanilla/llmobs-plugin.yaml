@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../api/schemas/manifest/v1alpha1/llmobs-plugin.schema.json
+apiVersion: llmobs.dev/v1alpha1
+kind: Plugin
+metadata:
+  id: your-org/your-vanilla-plugin
+  name: Your Vanilla Plugin
+  version: 0.1.0
+  description: A Tier-2 (frontend-only) LLMObs plugin with NO framework — plain DOM over the neutral mount contract.
+spec:
+  capabilities:
+    - query
+  # The manifest is framework-neutral (it never names React): the kernel only transports
+  # the Module Federation remote coordinates. This plugin's exposed module exports the
+  # neutral `mount(element, context)` (ADR-0030), rendered with plain DOM.
+  frontend:
+    remoteName: your_vanilla_plugin
+    exposedModule: ./plugin
+    entry: remoteEntry.js
+    nav:
+      - path: /your-vanilla-plugin
+        label: Your Vanilla Plugin
+        section: Observe

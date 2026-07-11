@@ -1,15 +1,23 @@
-// @llmobs/plugin-sdk v0 — the Tier-2 plugin surface. A plugin frontend imports
-// ONLY this package (which re-exports the design system): the provider, data
-// hooks, manifest types, and the standard degraded-state components. Semver
-// starts at 0.1.0; see CHANGELOG.md.
+// @llmobs/plugin-sdk v0 — the FRAMEWORK-NEUTRAL Tier-2 plugin surface (Arc N / N1,
+// ADR-0030). This entry imports NO React: a plugin frontend written in any framework
+// (React, Vue, Svelte, vanilla) exports the neutral `mount(element, context)` contract
+// and consumes these plain primitives. The React binding — hooks + provider + the
+// design system — lives at `@llmobs/plugin-sdk/react`, a thin adapter over this core.
+// See CHANGELOG.md.
 
-// Provider + context (the shell supplies it; plugins consume via hooks).
-export { LLMObsPluginProvider, useLLMObs } from "./context.js";
-export type { LLMObsContextValue, ProviderConfig } from "./context.js";
+// The framework-neutral mount contract (what a plugin exports; what the shell passes in).
+export type {
+  PluginMount,
+  PluginUnmount,
+  PluginModule,
+  PluginMountContext,
+  PluginUser,
+  PluginTheme,
+  TextDirection,
+} from "./mount.js";
 
-// Data primitives: `query` + `write` (score writes).
-export { useQuery, useTraces, useTrace, useWriteScore, useSettings } from "./hooks.js";
-export type { AsyncState, TracesParams, MutationState, SettingsState } from "./hooks.js";
+// Data primitives: `query` + `write` (score writes). DataClient is a plain fetch class —
+// the G1 frontend-token enforcement (fail-closed) is here, framework-independent.
 export { DataClient, SdkError } from "./client.js";
 export type { QueryResponse, TraceTree, ClientConfig, QueryInput, ScoreInput, SettingsView, FrontendTokenProvider, LLMObsClient } from "./client.js";
 
@@ -48,10 +56,7 @@ export type {
   LLMObsQueryDSLDocumentV1Alpha1 as QueryDocument,
 } from "@llmobs/query-client";
 
-// Re-export the design system so a plugin has a single import surface.
-export * from "@llmobs/ui";
+// Theme tokens — CSS custom properties + helpers, framework-neutral (any binding uses
+// them). The React design-system COMPONENTS (@llmobs/ui) are re-exported from
+// `@llmobs/plugin-sdk/react`, not here.
 export * from "@llmobs/tokens";
-// SchemaForm (J2) — re-exported selectively (a blanket re-export would collide with
-// @llmobs/ui's `Field`). Pair with useSettings above for a settings tab.
-export { SchemaForm } from "@llmobs/schema-form";
-export type { SchemaFormProps } from "@llmobs/schema-form";

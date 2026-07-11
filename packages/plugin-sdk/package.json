@@ -1,12 +1,13 @@
 {
   "name": "@llmobs/plugin-sdk",
-  "version": "0.1.0",
-  "description": "The LLMObs plugin SDK (Tier-2 surface). A plugin frontend imports ONLY this (plus @llmobs/ui, @llmobs/tokens): the provider, data hooks over the Query API, the manifest types, and the standard degraded-state components. Semver-sacred.",
+  "version": "0.2.0",
+  "description": "The LLMObs plugin SDK (Tier-2 surface). Framework-neutral core: the mount contract, the data-layer clients, manifest + entity types, theme tokens. React is one binding at @llmobs/plugin-sdk/react (hooks, provider, design system, createReactBinding). Semver-sacred.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./react": { "types": "./dist/react.d.ts", "import": "./dist/react.js" },
     "./testing": { "types": "./dist/testing.d.ts", "import": "./dist/testing.js" }
   },
   "files": ["dist", "src"],
@@ -16,7 +17,12 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "react": "^18.3.0"
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
   },
   "dependencies": {
     "@llmobs/query-client": "workspace:*",
@@ -27,6 +33,7 @@
   "devDependencies": {
     "@testing-library/react": "16.0.1",
     "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
     "jsdom": "25.0.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",

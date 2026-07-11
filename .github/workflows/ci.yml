@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - run: pnpm install --frozen-lockfile --filter @llmobs/shell... --filter @llmobs/plugin-tracing... --filter @llmobs/plugin-sdk...
+      - run: pnpm install --frozen-lockfile --filter @llmobs/shell... --filter @llmobs/plugin-tracing... --filter @llmobs/plugin-sdk... --filter @your-org/plugin-your-vanilla-plugin...
       - name: Build design system, SDK, shell (MF host), and tracing plugin (MF remote)
         run: |
           pnpm --filter @llmobs/query-client build
@@ -67,15 +67,20 @@ jobs:
           pnpm --filter @llmobs/plugin-sdk build
           NODE_ENV=production pnpm --filter @llmobs/shell build
           NODE_ENV=production pnpm --filter @llmobs/plugin-tracing build
+      - name: Build the NON-React vanilla plugin (ADR-0030 — proves a framework-free MF remote compiles)
+        run: NODE_ENV=production pnpm --filter @your-org/plugin-your-vanilla-plugin build
       - name: SDK unit tests (hooks + @llmobs/plugin-sdk/testing utilities)
         run: pnpm --filter @llmobs/plugin-sdk test
       - name: Tracing plugin unit tests (buildTree cycle/depth guards)
         run: pnpm --filter @llmobs/plugin-tracing test
-      - name: Typecheck the shell + SDK + tracing plugin
+      - name: Vanilla plugin falsification test (mount/query/unmount + G1-holds-for-non-React)
+        run: pnpm --filter @your-org/plugin-your-vanilla-plugin test
+      - name: Typecheck the shell + SDK + tracing plugin + vanilla plugin
         run: |
           pnpm --filter @llmobs/shell typecheck
           pnpm --filter @llmobs/plugin-sdk typecheck
           pnpm --filter @llmobs/plugin-tracing typecheck
+          pnpm --filter @your-org/plugin-your-vanilla-plugin typecheck
       - name: Shared singletons are declared (no plugin can bundle its own copy)
         run: pnpm --filter @llmobs/shell check:singletons
       - name: Brand guard (display name only in @llmobs/brand)

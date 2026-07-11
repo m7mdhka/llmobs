@@ -15,7 +15,7 @@ decision history exists from the start:
 | ADR-0001 | Microkernel architecture (D1) |
 | ADR-0002 | Dogfood rule — first-party plugins use only the public API (D2) |
 | ADR-0003 | OTLP-canonical ingestion; normalizers vs. compat plugins (D3) |
-| ADR-0004 | Plugins are containers + manifest; MF 2.0 frontends (D4). **Amended (J1, see [ADR-0023](0023-plugin-protocol.md) "Frontend token"):** MF frontends share the shell's origin, so a frontend-only plugin is *trusted-at-install*; the frontend token is least-privilege-by-default, not a boundary. Origin isolation (cross-origin sandboxed iframe + postMessage) is the deferred real boundary. |
+| ADR-0004 | Plugins are containers + manifest; MF 2.0 frontends (D4). **Amended (J1, see [ADR-0023](0023-plugin-protocol.md) "Frontend token"):** MF frontends share the shell's origin, so a frontend-only plugin is *trusted-at-install*; the frontend token is least-privilege-by-default, not a boundary. Origin isolation (cross-origin sandboxed iframe + postMessage) is the deferred real boundary. **Amended (N1, see [ADR-0030](0030-framework-neutral-frontend-contract.md)):** a plugin frontend exports a framework-neutral `mount(element, context) → unmount` contract; React is one binding (`@llmobs/plugin-sdk/react`), not the binding. MF stays the loader; what a remote exports changes from a React component to `mount`/`unmount`. |
 | ADR-0005 | Double-token auth; permission intersection (D5) |
 | ADR-0006 | Declarative supervisor, pluggable executors (D6) |
 | ADR-0007 | Two deployment profiles: lite and scale (D7) |
@@ -43,3 +43,4 @@ order). New decisions continue the numbering:
 | [ADR-0023](0023-plugin-protocol.md) | Plugin protocol (Tier-3 backend): handshake, tokens, R1–R4 (Arc H) |
 | [ADR-0024](0024-plugin-settings-schemaform.md) | Plugin settings store + SchemaForm: kv-backed, frontend-token-scoped, `writeOnly` secrets never returned (Arc J / J2) |
 | [ADR-0025](0025-prelaunch-design-rules.md) | Pre-launch design-rules from the Langfuse merged-PR mine: cost-derivation, outbound-fetch + egress watchdog, token-revocation freshness, limiter fail-open/closed, agent-tool gating, convergence-point, self-hosting (Arc K / K2) |
+| [ADR-0030](0030-framework-neutral-frontend-contract.md) | Framework-neutral plugin frontend contract — `mount(element, context) → unmount`; React becomes one binding (`@llmobs/plugin-sdk/react`); amends ADR-0004 (Arc N / N1) |

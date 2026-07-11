@@ -36,6 +36,19 @@ func (f *fakePriceOps) SetDiscount(context.Context, string, float64, string) err
 	return nil
 }
 
+// fakeReprice records whether a re-price run was triggered and with what selector.
+type fakeReprice struct {
+	started       bool
+	snapshotRefID string
+	projectID     string
+}
+
+func (f *fakeReprice) StartReprice(snapshotRefID, projectID string) (string, bool) {
+	f.started = true
+	f.snapshotRefID, f.projectID = snapshotRefID, projectID
+	return "price:" + snapshotRefID, true
+}
+
 func withRole(r *http.Request, role, csrf string) *http.Request {
 	sess := controlplane.Session{CSRFToken: csrf, User: controlplane.User{ID: "u1", Email: "a@b.c", Role: role}}
 	return r.WithContext(context.WithValue(r.Context(), sessionKey, sess))
@@ -49,7 +62,7 @@ func TestPricingWriteAuthz(t *testing.T) {
 	h := New(nil, nil, false)
 	store := &fakePriceOps{}
 	mux := http.NewServeMux()
-	h.RegisterPricing(mux, store)
+	h.RegisterPricing(mux, store, &fakeReprice{})
 
 	body := `{"provider":"openai","model":"gpt-4o","effective_from":"2026-01-01T00:00:00Z","rates":{"input":{"per_token":0.0000025}}}`
 	post := func(mod func(*http.Request) *http.Request) *httptest.ResponseRecorder {
@@ -97,5 +110,63 @@ func TestPricingWriteAuthz(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("viewer read must be 200, got %d", rec.Code)
+	}
+}
+
+// TestRepriceTriggerAuthz proves the M4 re-price trigger inherits the same admin gate as
+// a price edit — it MUTATES money across history, so a viewer (or anonymous, or
+// CSRF-less) caller must never launch it, and the canonicalized superseded ref id reaches
+// the launcher only on an authorized request.
+func TestRepriceTriggerAuthz(t *testing.T) {
+	h := New(nil, nil, false)
+	store := &fakePriceOps{}
+	rp := &fakeReprice{}
+	mux := http.NewServeMux()
+	h.RegisterPricing(mux, store, rp)
+
+	body := `{"scope":"price","provider":"Google","model":"gemini-1.5-pro","version":1}`
+	post := func(mod func(*http.Request) *http.Request) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1alpha1/pricing/reprice", strings.NewReader(body))
+		mux.ServeHTTP(rec, mod(req))
+		return rec
+	}
+
+	// Anonymous → 401; viewer+CSRF → 403; admin without CSRF → 403.
+	if rec := post(func(r *http.Request) *http.Request { return r }); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous reprice must be 401, got %d", rec.Code)
+	}
+	if rec := post(func(r *http.Request) *http.Request {
+		r = withRole(r, "viewer", "tok")
+		r.Header.Set(csrfHeader, "tok")
+		return r
+	}); rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer reprice must be 403, got %d", rec.Code)
+	}
+	if rec := post(func(r *http.Request) *http.Request { return withRole(r, "admin", "tok") }); rec.Code != http.StatusForbidden {
+		t.Fatalf("reprice without CSRF must be 403, got %d", rec.Code)
+	}
+	if rp.started {
+		t.Fatal("no unauthorized request may trigger a re-price")
+	}
+
+	// Admin + CSRF → 202, launcher reached with the CANONICALIZED ref id (Google→gemini).
+	rec := post(func(r *http.Request) *http.Request {
+		r = withRole(r, "admin", "tok")
+		r.Header.Set(csrfHeader, "tok")
+		return r
+	})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("admin reprice with CSRF must be 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !rp.started {
+		t.Fatal("authorized reprice must reach the launcher")
+	}
+	wantRef := pricing.EntryID(pricing.CanonicalProvider("Google"), pricing.CanonicalModel("gemini-1.5-pro"), 1)
+	if rp.snapshotRefID != wantRef {
+		t.Fatalf("launcher got ref %q, want canonical %q", rp.snapshotRefID, wantRef)
+	}
+	if rp.projectID != "" {
+		t.Fatalf("price-scope reprice must carry no project, got %q", rp.projectID)
 	}
 }

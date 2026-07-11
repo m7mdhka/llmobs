@@ -46,13 +46,51 @@ provider-prefixed model never silently records zero cost.
 
 ## Precision
 
-Cost is a fixed-scale decimal: `float64` in Go/JSON, `Decimal64(12)` on the ClickHouse
-(scale) adapter. Derived cost is computed once and stored identically on both the
-Postgres and ClickHouse adapters; the documented cross-adapter bound is equality to 12
-fractional digits.
+Cost is `float64` in Go/JSON and `Float64` on the ClickHouse (scale) adapter (with
+`cost_details` a JSON string on both). Per-span derived cost is computed once by the
+shared derivation and stored identically on both adapters — it is byte-identical because
+the derivation is deterministic (a stable-order sum) and both engines store the same
+`float64`. Trace-level `total_cost` (a query-time SUM over leaf spans) is rounded to a
+shared decimal scale so the roll-up is byte-identical cross-adapter even though Postgres
+sums exact `NUMERIC` while ClickHouse accumulates `Float64`.
 
 ## Aggregate spans don't double-count (R5)
 
 An agent/tool aggregate span (`invoke_agent`, `execute_tool`, …) that carries the sum of
 its child model calls' usage does **not** have that usage extracted — otherwise the
 trace's cost would double. Cost accrues on the leaf model-call spans only.
+
+## Re-pricing history after a price or discount change (M4)
+
+Because every derived cost records the exact price version it used
+(`pricing_snapshot_ref.id`), a price correction is **deterministic to re-apply** — not a
+best-effort full rewrite. When you edit a price (which appends a new version) or change a
+project discount, trigger a re-pricing backfill:
+
+```
+POST /v1alpha1/pricing/reprice
+# Re-price spans priced against a superseded version (global — a price is instance-wide):
+{ "scope": "price", "provider": "openai", "model": "gpt-4o", "version": 1 }
+# Re-price your project's derived spans after a discount change (tenant-scoped):
+{ "scope": "discount" }
+```
+
+The endpoint is admin-gated exactly like a price edit (it mutates money across history)
+and returns `202` with a `run_key`. The job runs in the background:
+
+- **Resumable & bounded.** It scans in bounded chunks on a `(ts, project_id, id)` cursor
+  and runs on its own generous budget (never the interactive read timeout), so a large
+  history re-prices over time and survives a restart.
+- **Never drops a cost on a blip.** A transient price-store/persist failure stops the run
+  loud and resumable — it is *never* converted into a null (which would drop the existing
+  cost). It resumes and finishes once the backend recovers.
+- **Idempotent.** A span whose re-derived cost equals its current cost is left untouched,
+  so re-running the same re-price is a no-op. Re-priced spans get a fresh
+  `pricing_snapshot_ref` pointing at the new version, so the chain stays re-derivable.
+- **Provided cost is never touched.** A span whose cost was provided by the SDK (`R1`)
+  carries no snapshot ref and is never scanned — provided always wins.
+- **Tenant-scoped.** A discount re-price touches only that project's spans; it cannot
+  cross a project boundary. (A global price re-price applies to every project, because a
+  global price is instance-wide.)
+- **Both profiles, both engines.** In a scale deployment the run covers spans in both the
+  lite (Postgres) and scale (ClickHouse) tiers; the re-derived cost is identical on both.

@@ -145,11 +145,29 @@ schedule version is the entry version, not a separate field. A re-pricing backfi
 (below) matches spans by `pricing_snapshot_ref.id` and re-derives against the newest
 applicable version.
 
-Re-pricing MUST be performed as a **backfill job on the kernel `jobs` primitive**
-(not an inline mutation): a job reads spans whose `pricing_snapshot_ref` matches
-the corrected price entry and re-emits `upsert` events recomputing `cost_details`,
-`total_cost`, and `pricing_snapshot_ref`. This composes with the normal merge fold
-(`05-update-semantics.md`).
+Re-pricing MUST be performed as a **kernel background backfill job** (not an inline
+mutation): it reads spans whose `pricing_snapshot_ref.id` matches a superseded price
+version (or, for a discount change, a project's derived spans) and re-emits `upsert`
+events recomputing `cost_details`, `total_cost`, and `pricing_snapshot_ref`. Each
+re-emitted event carries **only** the cost field-groups with a fresh `event_ts`, so
+the merge fold (`05-update-semantics.md`) updates cost and leaves every other
+field-group at its original provenance. Because re-pricing MUTATES money across a time
+range, it MUST reuse the lite→scale backfill discipline (ADR-0026): bounded chunks; a
+`(ts, project_id, id)` total-ordered resumable cursor; a SEPARATE generous execution
+budget (never the interactive read timeout); and the permanent-vs-transient failure
+taxonomy (CLAUDE.md #12) — a transient price-store/persist failure STOPS the run loud
+and resumable (it is never converted into a per-span null, which here would DROP an
+existing cost), while a deterministic per-span anomaly is dead-lettered and stepped
+over. It MUST be **idempotent**: a span whose re-derived cost equals its current cost
+is not re-emitted (re-derivation is bit-stable, §7.6), so a second identical run is a
+no-op. Derivation MUST reuse the SAME path as the ingest enrich stage (never a fork),
+so a re-priced span computes byte-identically to one priced at ingest — including
+**cross-adapter** (Postgres and ClickHouse yield identical re-priced cost). A re-price
+scoped to one project (a discount change) MUST NOT cross the project boundary. The
+run's cursor/dead-letter state is control-plane (Postgres in both profiles); the scan
+runs against the store the spans live in (either adapter). The trigger is an
+admin-gated control-plane endpoint (`POST /v1alpha1/pricing/reprice`), authorized
+exactly like a price/discount edit.
 
 > Evidence: In Langfuse cost is resolved at ingest against a point-in-time price
 > table and stored denormalized, so a price change or mis-match requires reprocessing
@@ -157,8 +175,9 @@ the corrected price entry and re-emits `upsert` events recomputing `cost_details
 > (`addGenerationsCostBackfill`) — but it stores **no** reference to which price row
 > produced a given cost, making the backfill a blunt full-rewrite (study Ch. 06 §5.2,
 > §6; digest §4). LM-4 diverges by storing `pricing_snapshot_ref` so re-pricing is
-> targeted and history is precisely re-derivable, and by mandating the `jobs`
-> primitive rather than a bespoke migration.
+> targeted and history is precisely re-derivable, and by running it as a resumable,
+> budgeted kernel background backfill job (reusing the lite→scale backfill discipline)
+> rather than a bespoke one-shot migration.
 
 ## 6. Read-time reduction (Informative)
 

@@ -147,6 +147,52 @@ type TelemetryStore interface {
 	QueryAggregation(ctx context.Context, target, sel, where, groupBy string, args []any) ([]map[string]any, error)
 }
 
+// RepriceCursor is the TOTAL order a re-pricing run resumes from: (ts, project_id, id).
+// The tuple is fully ordering, so a keyset scan strictly advances and same-timestamp
+// spans never loop (the #7117 trap). The zero cursor starts from the beginning. It is
+// dialect-neutral so both adapters' SpansForReprice share one resumable contract.
+type RepriceCursor struct {
+	TS        time.Time
+	ProjectID string
+	ID        string
+}
+
+// RepriceFilter selects the derived spans a re-pricing run re-derives (06-usage-cost.md
+// §5). At least one field is always set, so a run never scans the whole table:
+//   - SnapshotRefID: spans priced against a specific superseded price-version id
+//     ("openai/gpt-4o#1"). GLOBAL across projects — a price change applies instance-wide.
+//   - ProjectID: constrain to one project — set ALONE for a discount change, or with
+//     SnapshotRefID to scope a price re-price to one tenant. When set, the scan provably
+//     cannot cross the project boundary (the tenant-isolation guarantee).
+type RepriceFilter struct {
+	SnapshotRefID string
+	ProjectID     string
+}
+
+// RepriceScanner is the TELEMETRY surface the re-pricing backfill drives: a resumable
+// scan of derived spans + the persist it re-emits through. BOTH adapters (Postgres,
+// ClickHouse) implement it, so re-pricing runs in either profile against the store the
+// spans live in. Declared at the consumer.
+type RepriceScanner interface {
+	SpansForReprice(ctx context.Context, runKey string, f RepriceFilter, after RepriceCursor, limit int) ([]json.RawMessage, RepriceCursor, error)
+	PersistSpan(ctx context.Context, ev Event) error
+}
+
+// RepriceState is the CONTROL-PLANE surface for a run's resumable cursor + dead-letter.
+// It is ALWAYS Postgres (control-plane metadata lives in Postgres in both profiles), so
+// it is a separate interface from the adapter-specific RepriceScanner — a ClickHouse
+// re-price uses a ClickHouse scanner but this Postgres-backed state.
+type RepriceState interface {
+	LoadRepriceState(ctx context.Context, runKey string) (cur RepriceCursor, repriced, scanned int64, err error)
+	SaveRepriceState(ctx context.Context, runKey string, cur RepriceCursor, repriced, scanned int64) error
+	// ClearRepriceState deletes a run's cursor on completion, so the state row exists ONLY
+	// while a run is in-flight (for crash-resumption). A later re-trigger of the same run
+	// key therefore starts fresh and re-scans — catching a SUBSEQUENT change (a second
+	// discount edit reuses the run key) instead of being short-circuited as "already done".
+	ClearRepriceState(ctx context.Context, runKey string) error
+	DeadLetterReprice(ctx context.Context, runKey, projectID, id, reason string) error
+}
+
 // MergeConformer is the normative-merge surface an adapter exposes to the
 // conformance harness (tools/conformance). Every adapter MUST reproduce the fold
 // in 05-update-semantics.md; the harness asserts that with the spec's V-vectors

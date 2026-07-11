@@ -23,21 +23,32 @@ type PriceOps interface {
 	SetDiscount(ctx context.Context, projectID string, factor float64, actor string) error
 }
 
+// RepriceStarter starts a background re-pricing run (Arc M / M4). Implemented by
+// *reprice.Launcher; declared here so authhttp stays free of the storage/reprice
+// packages. It returns the run key and whether a new run started (false = an identical run
+// was already in flight). A nil starter disables the trigger endpoint.
+type RepriceStarter interface {
+	StartReprice(snapshotRefID, projectID string) (runKey string, started bool)
+}
+
 // RegisterPricing mounts the price-table management endpoints (ADR-0029). All are
 // session-authenticated and CSRF-protected on mutating methods (via RequireAuth).
 // READS are open to any authenticated session; WRITES additionally require
 // configuration authority (admin today, the #21 RBAC seam) — a viewer cannot change
 // what every tenant on the instance is billed. Global price entries carry NO project;
 // only the per-project discount is tenant-scoped, to the caller's own default project.
-func (h *Handler) RegisterPricing(mux *http.ServeMux, store PriceOps) {
-	p := &pricingHandler{h: h, store: store}
+// reprice (M4) MAY be nil (re-pricing disabled); when set it mounts the admin-gated
+// re-price trigger.
+func (h *Handler) RegisterPricing(mux *http.ServeMux, store PriceOps, reprice RepriceStarter) {
+	p := &pricingHandler{h: h, store: store, reprice: reprice}
 	mux.Handle("/v1alpha1/pricing", h.RequireAuth(http.HandlerFunc(p.collection)))
 	mux.Handle("/v1alpha1/pricing/", h.RequireAuth(http.HandlerFunc(p.sub)))
 }
 
 type pricingHandler struct {
-	h     *Handler
-	store PriceOps
+	h       *Handler
+	store   PriceOps
+	reprice RepriceStarter
 }
 
 // canWrite reports whether the session may change pricing (admin/write authority).
@@ -98,9 +109,73 @@ func (p *pricingHandler) sub(w http.ResponseWriter, r *http.Request) {
 		p.versions(w, r)
 	case rest == "discount":
 		p.discount(w, r)
+	case rest == "reprice":
+		p.repriceTrigger(w, r)
 	default:
 		writeErr(w, http.StatusNotFound, "not_found", "unknown pricing resource")
 	}
+}
+
+// repriceTrigger: POST /v1alpha1/pricing/reprice — start a background re-pricing run
+// (M4, 06-usage-cost.md §5). Admin-gated exactly like a price/discount edit, because it
+// MUTATES money across history. Two scopes:
+//   - scope="price" (default): re-price spans priced against a superseded version of
+//     (provider, model, version). GLOBAL across projects — a price applies instance-wide.
+//   - scope="discount": re-price the caller's OWN project's derived spans after a discount
+//     change. Tenant-scoped: projectID is server-derived, never caller-supplied, so a
+//     caller can never re-price another tenant's spans.
+func (p *pricingHandler) repriceTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST only")
+		return
+	}
+	if p.reprice == nil {
+		writeErr(w, http.StatusNotImplemented, "not_implemented", "re-pricing is not enabled on this instance")
+		return
+	}
+	if _, ok := p.canWrite(r); !ok {
+		writeErr(w, http.StatusForbidden, "forbidden", "re-pricing requires an admin session")
+		return
+	}
+	var req struct {
+		Scope    string `json:"scope"` // "price" (default) | "discount"
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Version  int    `json:"version"` // the SUPERSEDED price version to re-price off
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "schema_invalid", "invalid JSON or unknown field")
+		return
+	}
+
+	var snapshotRefID, projectID string
+	switch req.Scope {
+	case "", "price":
+		if req.Provider == "" || req.Model == "" || req.Version <= 0 {
+			writeErr(w, http.StatusBadRequest, "schema_invalid", "provider, model, and a positive version are required")
+			return
+		}
+		// Canonicalize so the ref id matches how derivation stamped it (R6) — a raw
+		// spelling ("Google") must resolve to the same id as the canonical one.
+		snapshotRefID = pricing.EntryID(pricing.CanonicalProvider(req.Provider), pricing.CanonicalModel(req.Model), req.Version)
+	case "discount":
+		// Server-derived project (never caller-supplied) — the tenant-isolation seam,
+		// same as the discount get/set handler.
+		pid, err := controlplane.DefaultProjectID(r.Context(), p.h.pool)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal", "no project")
+			return
+		}
+		projectID = pid
+	default:
+		writeErr(w, http.StatusBadRequest, "schema_invalid", "scope must be 'price' or 'discount'")
+		return
+	}
+
+	runKey, started := p.reprice.StartReprice(snapshotRefID, projectID)
+	writeJSON(w, http.StatusAccepted, map[string]any{"run_key": runKey, "started": started})
 }
 
 // versions: GET /v1alpha1/pricing/versions?provider=&model= — the price history for one

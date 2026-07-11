@@ -44,6 +44,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/secretbox"
 	"github.com/m7mdhka/llmobs/kernel/internal/pluginsettings"
+	"github.com/m7mdhka/llmobs/kernel/internal/reprice"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/backfill"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/clickhouse"
@@ -158,6 +159,10 @@ func run() error {
 	// strands a self-hoster — no read window where a just-written span is missing.
 	// Empty ClickHouseURL => single-store lite (unchanged).
 	var writeStore storage.TelemetryStore = store
+	// Re-pricing (M4) scans the store the spans LIVE in. In lite that is Postgres; in a
+	// dual (scale) deployment a run must cover BOTH tiers, so the scale ClickHouse store
+	// is appended below. The run state is always Postgres (control-plane).
+	repriceScanners := []reprice.NamedScanner{{Name: "lite", Scanner: store}}
 	var dual *dualstore.Store
 	if cfg.ClickHouseURL != "" {
 		scale, closeScale, cErr := buildScaleStore(rootCtx, cfg, log)
@@ -168,6 +173,7 @@ func run() error {
 		defer closeScale()
 		dual = dualstore.New(store, scale)
 		writeStore = dual
+		repriceScanners = append(repriceScanners, reprice.NamedScanner{Name: "scale", Scanner: scale})
 		log.Info("scale dual-read enabled (Postgres-lite ∪ ClickHouse-scale)")
 
 		// Optional lite→scale backfill (L5). Convenience-only: dual-read already makes
@@ -288,7 +294,12 @@ func run() error {
 	// Price table management (ADR-0029): session-authed; reads open to any session,
 	// writes gated to admin (config authority). Global entries carry no project; the
 	// per-project discount is scoped to the caller's own project.
-	auth.RegisterPricing(apiMux, priceStore)
+	// Re-pricing trigger (M4): an admin-gated background job that re-derives cost across
+	// history when a price version is superseded or a discount changes. Runs on its own
+	// generous budget (NOT the interactive read timeout), resumable, and bounded — never
+	// nulls an existing cost on a transient blip (it stops loud and resumes).
+	repriceLauncher := reprice.NewLauncher(rootCtx, repriceScanners, store, priceStore, reprice.Config{}, 2, log)
+	auth.RegisterPricing(apiMux, priceStore, repriceLauncher)
 	var regSource registry.Source = registry.EmptySource{}
 	if cfg.PluginDir != "" {
 		var opts []registry.DirOption

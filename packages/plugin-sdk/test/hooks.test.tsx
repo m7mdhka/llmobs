@@ -115,3 +115,53 @@ describe("useWriteScore against a fake client", () => {
     expect(client.calls.writeScore[0].name).toBe("quality");
   });
 });
+
+// N2: a CUSTOM settings view — NOT SchemaForm — renders opaque (nested) settings via
+// useSettings and persists them. This proves the frontend half of the custom-settings
+// escape: a rule-builder/visual-editor renders + saves through the same generic hook,
+// while the kernel stores the opaque values and keeps declared secrets never-returned.
+function CustomSettings(): React.ReactElement {
+  const { data, loading, save, saving } = useSettings();
+  if (loading) return <p>loading</p>;
+  const rules = (data?.values?.rules as Array<{ op: string }> | undefined) ?? [];
+  return (
+    <div>
+      <p>rules: {rules.length}</p>
+      <p>op0: {rules[0]?.op ?? "none"}</p>
+      <p>apiKey set: {data?.secrets?.apiKey ? "yes" : "no"}</p>
+      <button
+        onClick={() => save({ rules: [{ op: "eq" }, { op: "gt" }], layout: { columns: 3 } })}
+        disabled={saving}
+      >
+        Save
+      </button>
+    </div>
+  );
+}
+
+describe("custom (non-SchemaForm) settings view via useSettings (N2)", () => {
+  it("renders opaque nested values + secret markers, and persists a custom shape", async () => {
+    const saved: Array<Record<string, unknown>> = [];
+    const client = createFakeClient({
+      settings: { values: { rules: [{ op: "eq" }] }, secrets: { apiKey: true } },
+      onSetSettings: (v) => {
+        saved.push(v);
+      },
+    });
+    render(
+      <TestLLMObsProvider client={client}>
+        <CustomSettings />
+      </TestLLMObsProvider>,
+    );
+    // The nested opaque value + secret marker render (no SchemaForm involved).
+    await waitFor(() => expect(screen.getByText("rules: 1")).toBeTruthy());
+    expect(screen.getByText("op0: eq")).toBeTruthy();
+    expect(screen.getByText("apiKey set: yes")).toBeTruthy();
+
+    // Saving a nested (non-flat-subset) shape round-trips through the generic hook.
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => expect(saved.length).toBe(1));
+    expect((saved[0].rules as unknown[]).length).toBe(2);
+    expect((saved[0].layout as { columns: number }).columns).toBe(3);
+  });
+});

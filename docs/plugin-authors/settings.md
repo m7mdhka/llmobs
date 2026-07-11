@@ -100,3 +100,26 @@ tamper-proof against the plugin's own code belong in a backend.
 - `POST /v1alpha1/plugin/settings/set` with `{ "values": { "<field>": <value>, … } }` → `204`, or `400 { error, field }` on a validation failure.
 
 Both are frontend-token authed; the SDK presents the token for you.
+
+## Custom settings view (the escape hatch, N2)
+
+The SchemaForm path renders standard field types. If your settings need a **custom UI** —
+a rule-builder, a visual mapping editor, anything the flat subset can't express — declare
+`spec.settingsView: custom` in your manifest and render your own settings view (any
+framework, via the [neutral mount contract](../adr/0030-framework-neutral-frontend-contract.md)).
+You still read and write through the same `useSettings` hook:
+
+```ts
+const { data, save } = useSettings();
+// data.values is your OPAQUE settings object (any shape you stored)
+save({ rules: [/* your nested rule tree */], layout: { columns: 3 } });
+```
+
+- **Non-secret values are opaque.** The kernel stores whatever JSON you send (bounded to
+  64 KiB) without subset-validation — your view owns validation. Nested objects and arrays
+  are fine here (unlike the schema-form subset).
+- **Secrets are unchanged.** Declare a `writeOnly` field in a (now-optional) `settingsSchema`
+  and it is still envelope-encrypted and **never returned** — H4 holds identically in
+  custom mode. A custom plugin with no secrets needs no schema at all.
+- **Schema mode stays the default.** Use it (no `settingsView`, or `settingsView: schema`)
+  whenever the flat subset fits — you get a consistent, validated form for free.

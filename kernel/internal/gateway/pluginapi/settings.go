@@ -16,8 +16,11 @@ type SettingsStore interface {
 	Set(ctx context.Context, m *pluginsettings.Model, pluginID, projectID string, incoming map[string]json.RawMessage) error
 }
 
-// SchemaSource resolves a plugin's raw settings JSON Schema by id (registry-backed).
-type SchemaSource func(pluginID string) (json.RawMessage, bool)
+// SchemaSource resolves a plugin's raw settings JSON Schema by id (registry-backed),
+// whether it is in custom (opaque-storage) mode, and whether the plugin has settings at
+// all. A custom-mode plugin may carry no schema (no secrets), so `ok` is not tied to
+// schema presence.
+type SchemaSource func(pluginID string) (schema json.RawMessage, custom, ok bool)
 
 // Settings serves the plugin settings endpoints (J2). Unlike kv/secrets/store, these
 // authorize the J1 FRONTEND token (a pure-frontend plugin's only credential); the
@@ -62,12 +65,12 @@ func (h *Settings) handle(fn func(http.ResponseWriter, *http.Request, pluginauth
 			writeJSON(w, status, map[string]any{"error": err.Error()})
 			return
 		}
-		raw, ok := h.schema(caller.PluginID)
+		raw, custom, ok := h.schema(caller.PluginID)
 		if !ok {
-			writeJSON(w, http.StatusNotFound, map[string]any{"error": "plugin declares no settings schema"})
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "plugin declares no settings"})
 			return
 		}
-		model, err := pluginsettings.ParseSchema(raw)
+		model, err := pluginsettings.ParseSchema(raw, custom)
 		if err != nil {
 			// The manifest passed JSON validity at load but the schema is outside the
 			// supported subset — a plugin misconfiguration, not a caller error.

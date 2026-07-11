@@ -37,6 +37,10 @@ type Plugin struct {
 	// one; the shell renders it as a settings tab and the kernel validates writes
 	// against it. Served to the shell in the registry list.
 	SettingsSchema json.RawMessage `json:"settingsSchema,omitempty"`
+	// SettingsCustom is true when settingsView is "custom" (N2): the plugin mounts its
+	// own settings view and non-secret values are stored as opaque JSON. A declared
+	// writeOnly field is still an encrypted, never-returned secret (H4).
+	SettingsCustom bool `json:"settingsCustom,omitempty"`
 }
 
 // Source supplies the currently-available plugins. D4 implements a manifest
@@ -57,16 +61,19 @@ func GrantFor(src Source, id string) (caps, perms []string, ok bool) {
 	return nil, nil, false
 }
 
-// SchemaFor returns a plugin's raw settings JSON Schema by id, false if the plugin
-// is unknown or declares no settingsSchema. Used by the settings store (J2) to find
-// the secret (writeOnly) fields and validate a settings write.
-func SchemaFor(src Source, id string) (schema json.RawMessage, ok bool) {
+// SchemaFor returns a plugin's raw settings JSON Schema by id, whether it is in custom
+// mode (N2), and whether the plugin HAS settings at all. Used by the settings store
+// (J2/N2): schema mode validates against the schema; custom mode reads the schema only
+// for its writeOnly (secret) fields and stores the rest opaquely. A plugin has settings
+// when it declares a settingsSchema OR opts into custom mode — a custom plugin may carry
+// no schema (no secrets), so `ok` is not tied to schema presence.
+func SchemaFor(src Source, id string) (schema json.RawMessage, custom, ok bool) {
 	for _, p := range src.Plugins() {
 		if p.ID == id {
-			return p.SettingsSchema, len(p.SettingsSchema) > 0
+			return p.SettingsSchema, p.SettingsCustom, len(p.SettingsSchema) > 0 || p.SettingsCustom
 		}
 	}
-	return nil, false
+	return nil, false, false
 }
 
 // EmptySource advertises no plugins.

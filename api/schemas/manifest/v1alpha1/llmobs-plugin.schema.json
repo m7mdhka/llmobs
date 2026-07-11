@@ -89,7 +89,12 @@
         },
         "settingsSchema": {
           "type": "string",
-          "description": "Optional path to a JSON Schema for the plugin's settings (rendered by SchemaForm; future arc)."
+          "description": "Optional path to a JSON Schema for the plugin's settings. In the default 'schema' settingsView it is validated (flat subset) and rendered by SchemaForm; in 'custom' settingsView it is optional and consulted ONLY for its writeOnly (secret) field declarations."
+        },
+        "settingsView": {
+          "type": "string",
+          "enum": ["schema", "custom"],
+          "description": "How the plugin's settings are edited + stored (ADR-0030/N2). 'schema' (default): SchemaForm renders settingsSchema and the kernel validates writes against the flat subset. 'custom': the plugin mounts its OWN settings view (a rule-builder / visual editor) via the neutral mount contract and the kernel stores non-secret values as opaque JSON (no subset validation, bounded size). In BOTH modes a writeOnly field declared in settingsSchema is a secret — envelope-encrypted and never returned (H4)."
         },
         "store": {
           "type": "object",

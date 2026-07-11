@@ -61,6 +61,31 @@ func (s *Store) Get(ctx context.Context, m *Model, pluginID, projectID string) (
 		return View{}, err
 	}
 	v := View{Values: map[string]json.RawMessage{}, Secrets: map[string]bool{}}
+	if m.Custom {
+		// Custom mode (N2): non-secret values are opaque, so return ALL of them EXCEPT any
+		// key that is currently a declared secret. Skipping declared-secret keys makes H4
+		// hold BY CONSTRUCTION (invariant #11): even if a field was reclassified from
+		// opaque to writeOnly and a stale plaintext value lingers under that name, it is
+		// never served — mirroring the schema-mode Get's guarantee. A secret's ciphertext
+		// lives in doc.Secrets and is NEVER decrypted; only its set/not-set is reported.
+		secret := map[string]bool{}
+		for _, f := range m.Fields {
+			if f.Secret {
+				secret[f.Name] = true
+			}
+		}
+		for k, raw := range doc.Values {
+			if secret[k] {
+				continue // a declared secret is never served as a plaintext value
+			}
+			v.Values[k] = raw
+		}
+		for name := range secret {
+			_, set := doc.Secrets[name]
+			v.Secrets[name] = set
+		}
+		return v, nil
+	}
 	for _, f := range m.Fields {
 		if f.Secret {
 			_, set := doc.Secrets[f.Name]
@@ -96,34 +121,72 @@ func (s *Store) Set(ctx context.Context, m *Model, pluginID, projectID string, i
 	if doc.Secrets == nil {
 		doc.Secrets = map[string]sealed{}
 	}
-	for _, f := range m.Fields {
-		raw, present := incoming[f.Name]
-		if !present {
-			continue
+	seal := func(name string, raw json.RawMessage) error {
+		var plain string
+		if err := json.Unmarshal(raw, &plain); err != nil {
+			return &ValidationError{Field: name, Reason: "secret must be a string"}
 		}
-		if f.Secret {
-			if isEmptyString(raw) {
-				continue // preserve existing
-			}
-			var plain string
-			if err := json.Unmarshal(raw, &plain); err != nil {
-				return &ValidationError{Field: f.Name, Reason: "secret must be a string"}
-			}
-			ct, nonce, err := s.box.Seal([]byte(plain))
-			if err != nil {
-				return fmt.Errorf("seal secret %q: %w", f.Name, err)
-			}
-			doc.Secrets[f.Name] = sealed{
-				Ciphertext: base64.StdEncoding.EncodeToString(ct),
-				Nonce:      base64.StdEncoding.EncodeToString(nonce),
-			}
-			continue
+		ct, nonce, err := s.box.Seal([]byte(plain))
+		if err != nil {
+			return fmt.Errorf("seal secret %q: %w", name, err)
 		}
-		doc.Values[f.Name] = raw
+		doc.Secrets[name] = sealed{
+			Ciphertext: base64.StdEncoding.EncodeToString(ct),
+			Nonce:      base64.StdEncoding.EncodeToString(nonce),
+		}
+		delete(doc.Values, name) // reap any plaintext lingering under a (now-)secret name
+		return nil
+	}
+	if m.Custom {
+		// Custom mode (N2): a declared secret is encrypted (preserve on empty) exactly as
+		// in schema mode; every OTHER incoming key is stored as opaque JSON. A secret name
+		// is NEVER written to the plaintext Values map — so it can never be read back.
+		secret := map[string]bool{}
+		for _, f := range m.Fields {
+			if f.Secret {
+				secret[f.Name] = true
+			}
+		}
+		for name, raw := range incoming {
+			if secret[name] {
+				if isEmptyString(raw) {
+					continue // preserve existing
+				}
+				if err := seal(name, raw); err != nil {
+					return err
+				}
+				delete(doc.Values, name) // defense: a secret never lingers in plaintext
+				continue
+			}
+			doc.Values[name] = raw
+		}
+	} else {
+		for _, f := range m.Fields {
+			raw, present := incoming[f.Name]
+			if !present {
+				continue
+			}
+			if f.Secret {
+				if isEmptyString(raw) {
+					continue // preserve existing
+				}
+				if err := seal(f.Name, raw); err != nil {
+					return err
+				}
+				continue
+			}
+			doc.Values[f.Name] = raw
+		}
 	}
 	out, err := json.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal settings: %w", err)
+	}
+	// Bound the stored document — critical in custom mode where non-secret values are
+	// un-schema'd opaque JSON (a plugin must not turn project-shared settings into
+	// unbounded storage). Checked against the MERGED doc so growth across writes is caught.
+	if len(out) > MaxValueBytes {
+		return &ValidationError{Field: "", Reason: fmt.Sprintf("settings document exceeds %d bytes", MaxValueBytes)}
 	}
 	return s.kv.Set(ctx, pluginID, projectID, settingsKey, out)
 }

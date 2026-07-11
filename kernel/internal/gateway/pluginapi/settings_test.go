@@ -25,6 +25,16 @@ const settingsSchemaJSON = `{
   }
 }`
 
+// customSecretSchemaJSON is a CUSTOM-mode plugin's schema (N2): it declares only its
+// secret (writeOnly) field. Everything else the plugin's own view stores is opaque JSON
+// the kernel never subset-validates — but the secret is still encrypted + never returned.
+const customSecretSchemaJSON = `{
+  "type": "object",
+  "properties": {
+    "apiKey": {"type": "string", "writeOnly": true}
+  }
+}`
+
 func settingsSetup(t *testing.T) (*Settings, *plugintoken.Signer) {
 	return settingsSetupAuthz(t, func(*http.Request) bool { return true })
 }
@@ -40,11 +50,14 @@ func settingsSetupAuthz(t *testing.T, canWrite func(*http.Request) bool) (*Setti
 		t.Fatal(err)
 	}
 	store := pluginsettings.NewStore(newFakeKV(), box)
-	schema := func(pluginID string) (json.RawMessage, bool) {
+	schema := func(pluginID string) (json.RawMessage, bool, bool) {
 		if pluginID == "acme/dash" {
-			return json.RawMessage(settingsSchemaJSON), true
+			return json.RawMessage(settingsSchemaJSON), false, true
 		}
-		return nil, false
+		if pluginID == "acme/custom" {
+			return json.RawMessage(customSecretSchemaJSON), true, true
+		}
+		return nil, false, false
 	}
 	return NewSettings(pluginauth.New(signer, nil), store, schema, canWrite), signer
 }
@@ -107,6 +120,56 @@ func TestSettingsFrontendRoundTripStripsSecret(t *testing.T) {
 	}
 	if string(view.Values["endpoint"]) != `"https://api.x"` {
 		t.Fatalf("endpoint wrong: %s", view.Values["endpoint"])
+	}
+}
+
+// TestSettingsCustomModeOpaqueAndSecret is the N2 proof: a CUSTOM-mode plugin persists
+// arbitrary NESTED (non-subset) settings the flat schema-form could never express, and its
+// declared secret is still encrypted + never returned (H4 holds in custom mode).
+func TestSettingsCustomModeOpaqueAndSecret(t *testing.T) {
+	h, signer := settingsSetup(t)
+	tok := frontendTok(t, signer, "acme/custom", "projA")
+
+	// A rule-builder's output: a nested array/object the flat subset would reject, plus
+	// the declared secret.
+	rec := callSettings(h, "set", tok, `{"values":{
+		"rules":[{"when":{"field":"status","op":"eq","value":"error"},"then":["alert","tag:urgent"]}],
+		"layout":{"columns":3,"pinned":["latency"]},
+		"apiKey":"sk-custom-9999"
+	}}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("custom set: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = callSettings(h, "get", tok, `{}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("custom get: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	// H4: the secret must NEVER appear in any GET response.
+	if strings.Contains(body, "sk-custom-9999") {
+		t.Fatalf("secret leaked in custom-mode GET: %s", body)
+	}
+	var view struct {
+		Values  map[string]json.RawMessage `json:"values"`
+		Secrets map[string]bool            `json:"secrets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	// The opaque nested values round-trip verbatim.
+	if !strings.Contains(string(view.Values["rules"]), `"op":"eq"`) {
+		t.Fatalf("nested rules not persisted opaquely: %s", view.Values["rules"])
+	}
+	if !strings.Contains(string(view.Values["layout"]), `"columns":3`) {
+		t.Fatalf("nested layout not persisted: %s", view.Values["layout"])
+	}
+	// The secret is reported set but never in values.
+	if !view.Secrets["apiKey"] {
+		t.Fatal("apiKey should be reported set in custom mode")
+	}
+	if _, leaked := view.Values["apiKey"]; leaked {
+		t.Fatal("secret must not be in custom-mode values")
 	}
 }
 

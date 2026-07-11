@@ -68,6 +68,11 @@ type manifestDoc struct {
 		// the plugin's settings (J2). Loaded at scan time so the kernel knows the
 		// secret (writeOnly) fields and can validate a settings write.
 		SettingsSchema string `yaml:"settingsSchema"`
+		// SettingsView selects how settings are edited/stored (N2): "schema" (default,
+		// SchemaForm + flat-subset validation) or "custom" (the plugin mounts its own
+		// view; non-secret values are stored opaque; declared writeOnly fields stay
+		// encrypted + never returned).
+		SettingsView string `yaml:"settingsView"`
 	} `yaml:"spec"`
 }
 
@@ -177,6 +182,18 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 			return Plugin{}, "", fmt.Errorf("settingsSchema %s is not valid JSON", sp)
 		}
 		p.SettingsSchema = json.RawMessage(schemaRaw)
+	}
+	// settingsView (N2): "custom" stores non-secret values opaquely (a plugin-mounted
+	// view) while a declared writeOnly field stays a secret. A custom plugin need not
+	// declare a settingsSchema at all (it has no secrets); "schema" (or empty) is the
+	// default SchemaForm path. Any other value is a manifest error.
+	switch m.Spec.SettingsView {
+	case "", "schema":
+		p.SettingsCustom = false
+	case "custom":
+		p.SettingsCustom = true
+	default:
+		return Plugin{}, "", fmt.Errorf("settingsView %q must be \"schema\" or \"custom\"", m.Spec.SettingsView)
 	}
 	return p, distRoot, nil
 }

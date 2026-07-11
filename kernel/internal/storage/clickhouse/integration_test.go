@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +108,54 @@ func TestIntegrationMigrateAndMerge(t *testing.T) {
 	attrs, _ := state["attributes"].(map[string]any)
 	if attrs["x"] != 1.0 || attrs["y"] != 2.0 {
 		t.Errorf("attributes = %v, want both x=1 and y=2 (deep merge)", attrs)
+	}
+}
+
+func TestIntegrationPathologicalQueryCapped(t *testing.T) {
+	conn := dialCH(t)
+	freshSchema(t, conn)
+	ctx := context.Background()
+	s := NewStore(conn)
+
+	// Seed a handful of spans.
+	start := time.Now().UTC().Format(time.RFC3339Nano)
+	for i := 0; i < 20; i++ {
+		id := "sp" + string(rune('a'+i))
+		if err := s.PersistSpan(ctx, up(1, id, map[string]any{"kind": "generation", "start_time": start})); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	// A pathological cap: at most 1 row may be scanned. The query MUST be rejected
+	// by ClickHouse (capped), not run to completion — and the connection must stay
+	// usable afterward (a cap protects the cluster; it does not take it down).
+	s.SetReadLimits(ReadLimits{
+		MaxExecutionTime: 30 * time.Second,
+		MaxMemoryUsage:   1 << 30,
+		MaxRowsToRead:    1,
+		MaxBytesToRead:   1 << 30,
+	})
+	_, err := s.QuerySpans(ctx, "project_id = ?", []any{"p"}, "", 1000)
+	if err == nil {
+		t.Fatal("expected the row-cap to reject the pathological scan, got nil error")
+	}
+	if !strings.Contains(err.Error(), "rows") && !strings.Contains(err.Error(), "limit") && !strings.Contains(strings.ToLower(err.Error()), "exceed") {
+		t.Fatalf("expected a rows-limit error, got: %v", err)
+	}
+
+	// The cluster survived: a sane-limit query on the same connection works.
+	s.SetReadLimits(ReadLimits{
+		MaxExecutionTime: 30 * time.Second,
+		MaxMemoryUsage:   1 << 30,
+		MaxRowsToRead:    10_000_000,
+		MaxBytesToRead:   1 << 30,
+	})
+	rows, err := s.QuerySpans(ctx, "project_id = ?", []any{"p"}, "", 1000)
+	if err != nil {
+		t.Fatalf("post-cap query failed (connection poisoned?): %v", err)
+	}
+	if len(rows) != 20 {
+		t.Fatalf("post-cap query returned %d rows, want 20", len(rows))
 	}
 }
 

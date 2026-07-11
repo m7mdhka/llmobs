@@ -19,10 +19,11 @@ var (
 	errMissingScoreIdentity = errors.New("score event missing project_id or id")
 )
 
-// writeConn is the narrow ClickHouse surface the write path needs, declared at
-// the consumer per go-style. clickhouse-go's driver.Conn satisfies it.
+// writeConn is the narrow ClickHouse surface the read+write paths need, declared
+// at the consumer per go-style. clickhouse-go's driver.Conn satisfies it.
 type writeConn interface {
 	Query(ctx context.Context, query string, args ...any) (driver.Rows, error)
+	Exec(ctx context.Context, query string, args ...any) error
 	PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error)
 }
 
@@ -37,7 +38,13 @@ type Store struct {
 	conn           writeConn
 	suppressionTTL time.Duration // erasure-tombstone retention (G3)
 	lastVer        atomic.Int64  // monotonic write-order stamp (RMT version)
+	limits         ReadLimits    // per-query resource caps (RULING-CH9); fail-closed
 }
+
+// SetReadLimits configures the mandatory per-query resource caps (RULING-CH9).
+// Until set to a fully-valid value, every DSL read fails closed — the adapter
+// refuses to emit an unbounded ClickHouse read.
+func (s *Store) SetReadLimits(l ReadLimits) { s.limits = l }
 
 // nextVer returns a strictly-increasing write-order stamp for the ReplacingMergeTree
 // version column. It tracks wall-clock nanoseconds (so it is comparable across nodes
@@ -61,7 +68,10 @@ func (s *Store) nextVer() uint64 {
 // enough to outlast plausible redelivery, then they may be reaped.
 const defaultSuppressionTTL = 720 * time.Hour // 30 days
 
-// NewStore builds the ClickHouse write adapter over an established connection.
+// Store implements the full telemetry storage contract (read + write).
+var _ storage.TelemetryStore = (*Store)(nil)
+
+// NewStore builds the ClickHouse adapter over an established connection.
 func NewStore(conn writeConn) *Store {
 	return &Store{conn: conn, suppressionTTL: defaultSuppressionTTL}
 }

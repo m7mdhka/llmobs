@@ -6,6 +6,37 @@ Langfuse study. Adapters MAY diverge; these are revisitable without a spec
 change, because they describe physical choices that the logical model
 (`00`–`08`) forbids from being observable (`00-overview.md` §1.1).
 
+## 0. Normative requirements (exception to this file's Informative status)
+
+The requirement below is **Normative** (ADR-0026), notwithstanding this file's
+otherwise-informative status. It is a load-bearing cross-adapter invariant that a
+physical layout choice can silently violate, so it is stated as a rule and is
+conformance-gated. (RULING-CH9's per-query resource-limit requirement is the second
+such normative item; it lands with the scale read path in L2.)
+
+### N1 — RMT-style physical collapse orders by write-arrival, not `event_ts`
+
+The logical merge fold (`05-update-semantics.md`) is ordered by `event_ts`: that is
+the spec semantics for which event wins a field group *inside the fold*. A physical
+adapter that keeps one settled row per `(project_id, id)` by **collapsing** duplicate
+physical rows — any `ReplacingMergeTree`-style engine — MUST order that collapse by
+**write-arrival order** (a monotonic per-write stamp), NOT by `event_ts`.
+
+Rationale: merge-on-write folds each incoming event into the current settled row, so
+the **last write already incorporates every prior event** (via per-field provenance).
+Write-order is therefore completeness-order. If the physical collapse instead keeps
+the max-`event_ts` row, an out-of-order **older** event — whose freshly-written row
+correctly folds in all newer data — loses the collapse to a stale higher-`event_ts`
+row, and its contribution is **silently dropped**. The physical layer's job is to keep
+the already-folded row, never to re-derive the fold from a version column.
+
+This is a real trap, hit and fixed in the ClickHouse adapter (L1): the version column
+of a `ReplacingMergeTree` *looks* like it should be `event_ts`, and it must not be.
+Use a write-arrival stamp (`ver`) as the engine version and dedup reads by it;
+`event_ts` stays a data column used only for spec-level ordering *inside* the fold.
+The ClickHouse adapter will not be the last RMT-style adapter — this warning is for
+the next author.
+
 ## 1. Why this is separate (Informative)
 
 The logical model is storage-neutral. The Query API MUST behave identically over
@@ -46,12 +77,14 @@ contract.
 
 - **Partition by month** (`toYYYYMM(start_time)` / `toYYYYMM(timestamp)`), so
   time-range queries prune partitions and retention drops whole partitions.
-- Implement the merge fold (`05-update-semantics.md`) with
-  `ReplacingMergeTree(event_ts, is_deleted)` and read-time deduplication. Reads
-  MUST dedup on `(project_id, id)` (`FINAL`, or a hand-rolled
-  `argMax`/`LIMIT 1 BY id, project_id`), because the logical idempotency key is
-  `(project_id, id)` alone — **do not** let the physical sort key become the dedup
-  identity (`01-entities.md` §3.3).
+- Implement the merge fold (`05-update-semantics.md`) with a `ReplacingMergeTree`
+  versioned on a **write-arrival stamp `ver` (§0 N1), NOT `event_ts`** — versioning
+  on `event_ts` silently drops out-of-order data — plus `is_deleted` as a normal
+  read-filtered column (a revivable field-group, never the RMT physical-delete
+  feature). Use read-time deduplication: reads MUST dedup on `(project_id, id)`
+  (a hand-rolled `argMax`/`LIMIT 1 BY project_id, id` by `ver`, or `FINAL`), because
+  the logical idempotency key is `(project_id, id)` alone — **do not** let the
+  physical sort key become the dedup identity (`01-entities.md` §3.3).
 
 > Evidence: Langfuse's dedup identity is its full sort key, so id reuse across a day
 > boundary or a name change leaves duplicate rows that only `LIMIT 1 BY id` reads

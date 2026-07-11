@@ -90,10 +90,11 @@ var spanFields = queryFields{
 		"start_time":            {"start_time", classTimestamp},
 		"end_time":              {"end_time", classTimestamp},
 		"completion_start_time": {"completion_start_time", classTimestamp},
-		// Computed numeric fields (DSL §4.2): SQL expressions over the timestamps,
-		// in seconds. NULL when the underlying timestamp is null (open span / no TTFT).
-		"duration":             {"EXTRACT(EPOCH FROM (end_time - start_time))", classNumeric},
-		"ttft":                 {"EXTRACT(EPOCH FROM (completion_start_time - start_time))", classNumeric},
+		// Computed numeric fields (DSL §4.2): resolved per-dialect to a
+		// time-difference expression in fractional seconds (resolveCol /
+		// Dialect.computedCol). NULL when an endpoint is null (open span / no TTFT).
+		"duration":             {"duration", classNumeric},
+		"ttft":                 {"ttft", classNumeric},
 		"status.code":          {"status_code", classEnum},
 		"environment":          {"environment", classString},
 		"release":              {"release", classString},
@@ -183,11 +184,22 @@ var scoreFields = queryFields{
 
 type builder struct {
 	args []any
+	d    Dialect
 }
 
 func (b *builder) ph(v any) string {
 	b.args = append(b.args, v)
-	return "$" + strconv.Itoa(len(b.args))
+	return b.d.placeholder(len(b.args))
+}
+
+// resolveCol maps a fieldDef to its SQL column expression: a computed field
+// (duration, ttft) resolves to the dialect's time-difference expression; every
+// other field's col is a plain identifier, dialect-neutral.
+func resolveCol(d Dialect, f fieldDef) string {
+	if expr, ok := d.computedCol(f.col); ok {
+		return expr
+	}
+	return f.col
 }
 
 // allowedTopKeys is the closed set of top-level query keys (DSL §1). Unknown
@@ -198,8 +210,22 @@ var allowedTopKeys = map[string]bool{
 	"groupBy": true, "aggregations": true, "scores": true,
 }
 
-// CompileSpans compiles a spans query for the given project.
+// PostgresDialect and ClickHouseDialect are the two SQL emitters the compiler can
+// target. The lite server uses Postgres; the scale server uses ClickHouse. The
+// no-arg Compile* helpers default to Postgres (the reference dialect); the server
+// selects per its store via the *ForDialect variants.
+var (
+	PostgresDialect   Dialect = pgDialect{}
+	ClickHouseDialect Dialect = chDialect{}
+)
+
+// CompileSpans compiles a spans query for the given project (Postgres dialect).
 func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration) (*Compiled, error) {
+	return CompileSpansForDialect(doc, projectID, maxWindow, PostgresDialect)
+}
+
+// CompileSpansForDialect compiles a spans query, emitting SQL for the given dialect.
+func CompileSpansForDialect(doc map[string]any, projectID string, maxWindow time.Duration, d Dialect) (*Compiled, error) {
 	if t, _ := doc["target"].(string); t != "spans" {
 		return nil, errf("schema_invalid", 400, "target must be 'spans'")
 	}
@@ -207,40 +233,51 @@ func CompileSpans(doc map[string]any, projectID string, maxWindow time.Duration)
 	if _, hasScores := doc["scores"]; hasScores {
 		return nil, errf("schema_invalid", 400, "scores are only valid on the traces target")
 	}
-	return compileTarget(doc, projectID, maxWindow, spanFields)
+	return compileTarget(doc, projectID, maxWindow, spanFields, d)
 }
 
-// CompileTraces compiles a traces query. Trace fields are derived from spans (DSL
-// §4.1); the compiled predicate runs against the synthesized trace projection.
-// The `scores` semi-join (§8) is not implemented in this maturity.
+// CompileTraces compiles a traces query (Postgres dialect). Trace fields are
+// derived from spans (DSL §4.1); the compiled predicate runs against the
+// synthesized trace projection. The `scores` semi-join (§8) is supported.
 func CompileTraces(doc map[string]any, projectID string, maxWindow time.Duration) (*Compiled, error) {
+	return CompileTracesForDialect(doc, projectID, maxWindow, PostgresDialect)
+}
+
+// CompileTracesForDialect compiles a traces query for the given dialect.
+func CompileTracesForDialect(doc map[string]any, projectID string, maxWindow time.Duration, d Dialect) (*Compiled, error) {
 	if t, _ := doc["target"].(string); t != "traces" {
 		return nil, errf("schema_invalid", 400, "target must be 'traces'")
 	}
-	return compileTarget(doc, projectID, maxWindow, traceFields)
+	return compileTarget(doc, projectID, maxWindow, traceFields, d)
 }
 
-// CompileScores compiles a scores query. Score fields per 04-score.md; the time
-// anchor is `timestamp`.
+// CompileScores compiles a scores query (Postgres dialect). Score fields per
+// 04-score.md; the time anchor is `timestamp`.
 func CompileScores(doc map[string]any, projectID string, maxWindow time.Duration) (*Compiled, error) {
+	return CompileScoresForDialect(doc, projectID, maxWindow, PostgresDialect)
+}
+
+// CompileScoresForDialect compiles a scores query for the given dialect.
+func CompileScoresForDialect(doc map[string]any, projectID string, maxWindow time.Duration, d Dialect) (*Compiled, error) {
 	if t, _ := doc["target"].(string); t != "scores" {
 		return nil, errf("schema_invalid", 400, "target must be 'scores'")
 	}
 	if _, hasScores := doc["scores"]; hasScores {
 		return nil, errf("schema_invalid", 400, "the scores semi-join block is only valid on the traces target")
 	}
-	return compileTarget(doc, projectID, maxWindow, scoreFields)
+	return compileTarget(doc, projectID, maxWindow, scoreFields, d)
 }
 
 // compileTarget is the shared row-query compiler; qf selects the target's
 // queryable fields, so spans and traces share NULL/ceiling/422/cursor semantics.
-func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration, qf queryFields) (*Compiled, error) {
+// d selects the SQL dialect emitted.
+func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration, qf queryFields, d Dialect) (*Compiled, error) {
 	for k := range doc {
 		if !allowedTopKeys[k] {
 			return nil, errf("schema_invalid", 400, "unknown top-level key %q", k)
 		}
 	}
-	b := &builder{}
+	b := &builder{d: d}
 	// project scoping is always first.
 	preds := []string{"project_id = " + b.ph(projectID)}
 
@@ -321,7 +358,7 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 		}
 	}
 
-	order, err := compileOrder(doc, qf)
+	order, err := compileOrder(doc, qf, d)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +404,7 @@ func compileScoreCondition(b *builder, projectID string, c map[string]any) (stri
 		"sc.project_id = " + b.ph(projectID),
 		"sc.subject_type = " + b.ph("trace"),
 		"sc.subject_id = trace_proj.id",
-		"sc.is_deleted = false",
+		"sc.is_deleted = " + b.d.boolLiteral(false),
 		"sc.name = " + b.ph(name),
 		"sc.data_type = " + b.ph(dataType),
 	}
@@ -384,7 +421,11 @@ func compileScoreCondition(b *builder, projectID string, c map[string]any) (stri
 		if !ok {
 			return "", errf("score_type_mismatch", 422, "numeric score value must be a number")
 		}
-		inner = append(inner, "sc.value_numeric "+scoreCmp(op)+" "+b.ph(n))
+		if op == "neq" {
+			inner = append(inner, b.d.nullSafeNeq("sc.value_numeric", b.ph(n), classNumeric))
+		} else {
+			inner = append(inner, "sc.value_numeric "+sqlCmp(op)+" "+b.ph(n))
+		}
 	case "categorical":
 		switch op {
 		case "eq", "neq":
@@ -392,11 +433,11 @@ func compileScoreCondition(b *builder, projectID string, c map[string]any) (stri
 			if !ok {
 				return "", errf("score_type_mismatch", 422, "categorical score value must be a string")
 			}
-			cmp := "="
 			if op == "neq" {
-				cmp = "IS DISTINCT FROM"
+				inner = append(inner, b.d.nullSafeNeq("sc.value_string", b.ph(s), classString))
+			} else {
+				inner = append(inner, "sc.value_string = "+b.ph(s))
 			}
-			inner = append(inner, "sc.value_string "+cmp+" "+b.ph(s))
 		case "in":
 			arr, ok := c["value"].([]any)
 			if !ok {
@@ -413,7 +454,7 @@ func compileScoreCondition(b *builder, projectID string, c map[string]any) (stri
 				}
 				vals[i] = s
 			}
-			inner = append(inner, "sc.value_string = ANY("+b.ph(vals)+")")
+			inner = append(inner, b.d.inArray("sc.value_string", b.ph(vals)))
 		default:
 			return "", errf("score_type_mismatch", 422, "op %q not allowed for categorical score", op)
 		}
@@ -443,13 +484,6 @@ func scoreNumericOp(op string) bool {
 		return true
 	}
 	return false
-}
-
-func scoreCmp(op string) string {
-	if op == "neq" {
-		return "IS DISTINCT FROM"
-	}
-	return sqlCmp(op)
 }
 
 // queryFingerprint hashes the query shape that a cursor sequence must hold fixed:
@@ -486,7 +520,7 @@ func compileCondition(b *builder, c map[string]any, qf queryFields) (string, err
 }
 
 func compileSimpleCond(b *builder, f fieldDef, c map[string]any, op string) (string, error) {
-	col := f.col
+	col := resolveCol(b.d, f)
 	num := f.class == classNumeric || f.class == classTimestamp
 	if f.class == classBoolean {
 		bv, ok := c["value"].(bool)
@@ -497,7 +531,7 @@ func compileSimpleCond(b *builder, f fieldDef, c map[string]any, op string) (str
 		case "eq":
 			return col + " = " + b.ph(bv), nil
 		case "neq":
-			return col + " IS DISTINCT FROM " + b.ph(bv), nil
+			return b.d.nullSafeNeq(col, b.ph(bv), f.class), nil
 		default:
 			return "", errf("operator_not_allowed", 422, "%s not allowed on boolean field", op)
 		}
@@ -506,9 +540,9 @@ func compileSimpleCond(b *builder, f fieldDef, c map[string]any, op string) (str
 	case "eq":
 		return col + " = " + b.ph(coerce(f, c["value"])), nil
 	case "neq":
-		return col + " IS DISTINCT FROM " + b.ph(coerce(f, c["value"])), nil
+		return b.d.nullSafeNeq(col, b.ph(coerce(f, c["value"])), f.class), nil
 	case "is_null":
-		return col + " IS NULL", nil
+		return b.d.isNull(col, f.class), nil
 	case "in", "not_in":
 		arr, ok := c["value"].([]any)
 		if !ok {
@@ -523,9 +557,9 @@ func compileSimpleCond(b *builder, f fieldDef, c map[string]any, op string) (str
 		}
 		if op == "not_in" {
 			// Uniform NULL policy (DSL §2.2): negations match unset rows.
-			return "(" + col + " IS NULL OR " + col + " <> ALL(" + b.ph(vals) + "))", nil
+			return b.d.notInArray(col, b.ph(vals), f.class), nil
 		}
-		return col + " = ANY(" + b.ph(vals) + ")", nil
+		return b.d.inArray(col, b.ph(vals)), nil
 	case "gt", "gte", "lt", "lte":
 		if !num {
 			return "", errf("operator_not_allowed", 422, "%s not allowed on field", op)
@@ -552,26 +586,27 @@ func compileMapCond(b *builder, col string, c map[string]any, numeric bool) (str
 	if key == "" {
 		return "", errf("schema_invalid", 400, "map condition requires key")
 	}
-	jsonPath := col + " ->> " + b.ph(key)
 	switch op {
 	case "exists":
-		return col + " ? " + b.ph(key), nil
+		return b.d.mapHasKey(col, b.ph(key)), nil
 	case "eq":
 		if numeric {
 			return numGuard(b, col, key, "=", c["value"], false), nil
 		}
-		return jsonPath + " = " + b.ph(asString(c["value"])), nil
+		return b.d.mapExtractText(col, b.ph(key)) + " = " + b.ph(asString(c["value"])), nil
 	case "neq":
 		if numeric {
 			// Negation: unset/non-number values match (DSL §2.2, §9.1).
-			return numGuard(b, col, key, "IS DISTINCT FROM", c["value"], true), nil
+			return numGuard(b, col, key, b.d.numGuardNeqOp(), c["value"], true), nil
 		}
-		return jsonPath + " IS DISTINCT FROM " + b.ph(asString(c["value"])), nil
+		// The map key extraction is compared NULL-safely so unset keys match.
+		keyExpr := b.d.mapExtractText(col, b.ph(key))
+		return b.d.nullSafeNeq(keyExpr, b.ph(asString(c["value"])), classString), nil
 	case "contains":
 		if numeric {
 			return "", errf("operator_not_allowed", 422, "contains only on string map")
 		}
-		return jsonPath + " LIKE " + b.ph("%"+asString(c["value"])+"%"), nil
+		return b.d.mapExtractText(col, b.ph(key)) + " LIKE " + b.ph("%"+asString(c["value"])+"%"), nil
 	case "gt", "gte", "lt", "lte":
 		if !numeric {
 			return "", errf("operator_not_allowed", 422, "%s only on numeric map", op)
@@ -593,9 +628,12 @@ func numGuard(b *builder, col, key, cmp string, value any, unsetMatches bool) st
 	if unsetMatches {
 		elseVal = "true"
 	}
-	typeExpr := "jsonb_typeof(" + col + " -> " + b.ph(key) + ")"
-	castExpr := "(" + col + " ->> " + b.ph(key) + ")::numeric " + cmp + " " + b.ph(asNumber(value))
-	return "(CASE WHEN " + typeExpr + " = 'number' THEN " + castExpr + " ELSE " + elseVal + " END)"
+	// The key is bound once per textual occurrence (type-guard + cast): Postgres
+	// could reuse one `$N`, but ClickHouse `?` is strictly positional, so two
+	// bindings keeps both dialects correct and placeholder numbering stable.
+	keyPh1 := b.ph(key)
+	keyPh2 := b.ph(key)
+	return b.d.mapNumGuard(col, keyPh1, keyPh2, cmp, b.ph(asNumber(value)), elseVal)
 }
 
 func compileRefCond(b *builder, col string, c map[string]any) (string, error) {
@@ -608,14 +646,14 @@ func compileRefCond(b *builder, col string, c map[string]any) (string, error) {
 	if rt == "" || ri == "" {
 		return "", errf("schema_invalid", 400, "ref_eq requires ref_type and ref_id")
 	}
-	pred := col + " ->> 'ref_type' = " + b.ph(rt) + " AND " + col + " ->> 'ref_id' = " + b.ph(ri)
+	pred := b.d.refField(col, "ref_type") + " = " + b.ph(rt) + " AND " + b.d.refField(col, "ref_id") + " = " + b.ph(ri)
 	if rl, ok := v["ref_label"].(string); ok && rl != "" {
-		pred += " AND " + col + " ->> 'ref_label' = " + b.ph(rl)
+		pred += " AND " + b.d.refField(col, "ref_label") + " = " + b.ph(rl)
 	}
 	return "(" + pred + ")", nil
 }
 
-func compileOrder(doc map[string]any, qf queryFields) (string, error) {
+func compileOrder(doc map[string]any, qf queryFields, d Dialect) (string, error) {
 	if raw, ok := doc["orderBy"].([]any); ok && len(raw) > 0 {
 		var parts []string
 		for _, m := range raw {
@@ -629,11 +667,11 @@ func compileOrder(doc map[string]any, qf queryFields) (string, error) {
 			if !qf.orderable[field] {
 				return "", errf("not_orderable", 422, "field %q is not orderable", field)
 			}
-			d := "ASC"
+			dir2 := "ASC"
 			if strings.ToLower(dir) == "desc" {
-				d = "DESC"
+				dir2 = "DESC"
 			}
-			parts = append(parts, f.col+" "+d)
+			parts = append(parts, resolveCol(d, f)+" "+dir2)
 		}
 		parts = append(parts, "id ASC")
 		return strings.Join(parts, ", "), nil

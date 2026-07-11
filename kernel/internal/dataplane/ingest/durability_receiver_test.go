@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ import (
 // walReceiver builds a receiver backed by a WAL spool at a temp dir.
 func walReceiver(t *testing.T, capacity int, pipe Runner, reg *metrics.Registry) (*Receiver, *walSpool) {
 	t.Helper()
-	sp, err := newWALSpool(t.TempDir(), capacity, 0, nil, time.Hour)
+	sp, err := newWALSpool(filepath.Join(t.TempDir(), "wal"), capacity, 0, nil, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

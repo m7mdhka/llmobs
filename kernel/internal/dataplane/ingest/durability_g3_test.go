@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func TestG3ForgedReplayAfterErase(t *testing.T) {
 
 	// 3) Forge a re-delivery of the erased span into a durable WAL, and CRASH before
 	// it is persisted (Append, never Commit; close before the checkpoint advances).
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "wal")
 	body, _ := json.Marshal(payload)
 	forged := job{body: body, contentType: "application/json", bearer: "k", receivedAt: time.Now()}
 	s1, err := newWALSpool(dir, 16, 0, nil, time.Hour)
@@ -96,6 +97,7 @@ func TestG3ForgedReplayAfterErase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s2.Close()
+	waitReplay(s2)
 	l, ok := s2.tryNext()
 	if !ok {
 		t.Fatal("the uncommitted erased record must replay from the WAL")

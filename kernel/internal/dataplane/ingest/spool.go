@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,10 +22,6 @@ type leased struct {
 	j     job
 	retry int
 }
-
-// maxProcessRetries bounds in-process retries of a failing record before it is
-// dead-lettered (ADR-0027 D6) — a poison record must not block the watermark.
-const maxProcessRetries = 5
 
 // Spool is the ack-window seam (ADR-0027). The receiver Appends a received job
 // (durably, for the WAL impl, so the ack is ack-after-durable), workers lease via
@@ -125,7 +121,11 @@ type walSpool struct {
 	wg           sync.WaitGroup
 	ckptEvery    time.Duration
 	deadLettered atomic.Int64
+	replayDone   atomic.Bool // set once boot replay finishes; gates segment reaping
 }
+
+// errStopReplay aborts boot replay when the spool is closing.
+var errStopReplay = errors.New("spool closing during replay")
 
 // NewWALSpool builds the durable WAL-backed spool for the scale profile (ADR-0027).
 // dir is the local WAL directory; archive is the optional object-store tier (nil =
@@ -158,24 +158,54 @@ func newWALSpool(dir string, capacity int, maxSeg int64, archive ArchiveSink, ck
 		ckptEvery: ckptEvery,
 	}
 	s.watermark = w.readCheckpoint()
+	// Capture the boot watermark/max as locals for the replay goroutine: Commit
+	// advances s.watermark concurrently once workers run, so replay must not read the
+	// live field. Replay covers ONLY (bootWM, bootMax]; records Appended live after
+	// boot get seq > bootMax and are delivered by Append itself.
+	bootWM := s.watermark
+	bootMax := w.nextSeq - 1
 
-	// Boot replay: everything above the watermark is unpersisted-or-maybe-persisted;
-	// replay it (the store's merge + erasure guard make re-delivery idempotent + G3).
-	if err := w.replay(s.watermark, func(seq uint64, payload []byte) error {
-		j, derr := decodeJob(payload)
-		if derr != nil {
-			return derr // a corrupt record before the torn tail is a hard error
-		}
-		s.inFlight.Add(1)
-		s.ch <- leased{seq: seq, j: j}
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("wal replay: %w", err)
-	}
-
+	// Boot replay runs in a goroutine, feeding the bounded channel as workers drain
+	// it. It MUST NOT run synchronously in the constructor: a post-crash backlog can
+	// exceed the channel capacity, and with no worker yet consuming, a synchronous
+	// send would block forever and hang the daemon on boot — the very crash the WAL
+	// exists to survive.
 	s.wg.Add(1)
 	go s.checkpointLoop()
+	s.wg.Add(1)
+	go s.replayLoop(bootWM, bootMax)
 	return s, nil
+}
+
+// replayLoop re-feeds the boot backlog — records in (watermark, bootMax] — into the
+// channel, paced by worker consumption (a full channel just blocks this producer,
+// not the daemon). A record that survives the CRC yet fails to decode is skipped +
+// counted, never a hard boot failure — one corrupt record must not crash-loop the
+// node. Records above bootMax are live Appends and are left to Append.
+func (s *walSpool) replayLoop(bootWM, bootMax uint64) {
+	defer s.wg.Done()
+	defer s.replayDone.Store(true)
+	if bootMax <= bootWM {
+		return // nothing to replay
+	}
+	_ = s.wal.replay(bootWM, func(seq uint64, payload []byte) error {
+		if seq > bootMax {
+			return errStopReplay // reached the live-append region; stop cleanly
+		}
+		j, derr := decodeJob(payload)
+		if derr != nil {
+			s.deadLettered.Add(1)
+			return nil // skip the corrupt record; keep replaying the rest
+		}
+		s.inFlight.Add(1)
+		select {
+		case s.ch <- leased{seq: seq, j: j}:
+			return nil
+		case <-s.stopCh:
+			s.inFlight.Add(-1)
+			return errStopReplay
+		}
+	})
 }
 
 func (s *walSpool) Append(j job) error {
@@ -238,10 +268,13 @@ func (s *walSpool) deadLetter(l leased) {
 	s.Commit(l)
 }
 
-func (s *walSpool) Durable() bool       { return true }
-func (s *walSpool) Len() int            { return int(s.inFlight.Load()) }
-func (s *walSpool) Cap() int            { return s.capacity }
-func (s *walSpool) DeadLettered() int64 { return s.deadLettered.Load() }
+func (s *walSpool) Durable() bool { return true }
+
+// Len reports queued depth (records buffered, not yet leased), matching memSpool so
+// G2 high-water backpressure fires at the same occupancy on both profiles. inFlight
+// (appended-but-uncommitted, including in-worker) is the separate Append hard cap.
+func (s *walSpool) Len() int { return len(s.ch) }
+func (s *walSpool) Cap() int { return s.capacity }
 
 func (s *walSpool) tryNext() (leased, bool) {
 	select {
@@ -267,9 +300,11 @@ func (s *walSpool) checkpointLoop() {
 	}
 }
 
-// checkpoint durably records the watermark, then archives + drops sealed segments
-// fully below it. Archival (object-store) happens BEFORE deletion so a disaster
-// restore can recover them; if the sink is nil, segments are dropped locally.
+// checkpoint durably records the watermark, then reaps sealed segments fully below
+// it. Reaping is gated on replay being finished — the replay reader loads whole
+// segments, so deleting one mid-replay could abort recovery — and a segment is
+// deleted only AFTER a successful archive upload (or when there is no sink), so a
+// failed upload retries on the next tick instead of losing the cold copy.
 func (s *walSpool) checkpoint() {
 	s.mu.Lock()
 	wm := s.watermark
@@ -280,15 +315,16 @@ func (s *walSpool) checkpoint() {
 	if err := s.wal.writeCheckpoint(wm); err != nil {
 		return
 	}
-	if s.archive != nil {
-		s.archiveBelow(wm)
+	if !s.replayDone.Load() {
+		return // never reap while boot replay is still reading segments
 	}
-	_, _ = s.wal.truncate(wm)
+	s.reapSegments(wm)
 }
 
-// archiveBelow uploads sealed segments fully below the watermark to the sink; the
-// local truncate that follows only removes them once they are archived.
-func (s *walSpool) archiveBelow(wm uint64) {
+// reapSegments archives (if a sink is configured) then deletes each sealed segment
+// fully below the watermark. Deletion is gated on a successful Put so the cold copy
+// is never lost before it is archived.
+func (s *walSpool) reapSegments(wm uint64) {
 	segs, err := s.wal.segments()
 	if err != nil {
 		return
@@ -300,11 +336,15 @@ func (s *walSpool) archiveBelow(wm uint64) {
 		if seg == active || i+1 >= len(segs) {
 			continue
 		}
-		maxInSeg := segStart(segs[i+1]) - 1
-		if maxInSeg > wm {
+		if segStart(segs[i+1])-1 > wm { // maxInSeg > wm → still has unpersisted records
 			continue
 		}
-		_ = s.archive.Put(context.Background(), seg, s.wal.dir+"/"+seg)
+		if s.archive != nil {
+			if err := s.archive.Put(context.Background(), seg, filepath.Join(s.wal.dir, seg)); err != nil {
+				continue // archival failed — keep the segment; retry next tick
+			}
+		}
+		_ = s.wal.removeSegment(seg)
 	}
 }
 

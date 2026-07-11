@@ -6,11 +6,16 @@ import (
 	"sync"
 )
 
-// ArchiveSink is the object-store archival/replay tier BEHIND the WAL (ADR-0027
-// D5). Sealed WAL segments are uploaded here by the background checkpointer —
-// NEVER on the hot Append path — as the disaster-recovery replay source (if the
-// local WAL is lost, boot restores segments above the watermark from the sink).
-// Interface-first so lite uses noopSink and scale an S3/MinIO sink.
+// ArchiveSink is the object-store archival tier BEHIND the WAL (ADR-0027 D5).
+// Sealed, fully-persisted WAL segments are uploaded here by the background
+// checkpointer — NEVER on the hot Append path — as cold retention. Interface-first
+// so lite uses noopSink and scale an S3/MinIO sink.
+//
+// SECURITY: a segment carries the same unredacted payloads + valid bearer tokens as
+// the local WAL. A real implementation MUST use server-side encryption and a PRIVATE
+// ACL — the archive's protection must not be weaker than the owner-only local WAL.
+// The restore-and-replay path is deferred (it must re-drive erasure tombstones to
+// avoid resurrecting spans erased after the segment was archived; see ADR-0027 D5).
 type ArchiveSink interface {
 	// Put uploads the segment file at localPath under key. Best-effort; the WAL is
 	// the durable floor, so a failed Put just retries on the next checkpoint tick.

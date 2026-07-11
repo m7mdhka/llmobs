@@ -28,14 +28,15 @@ import (
 // highest contiguously-persisted seq: on boot every record with seq > watermark
 // replays (idempotent merge makes duplicates safe).
 type wal struct {
-	dir     string
-	maxSeg  int64
-	mu      sync.Mutex
-	cur     *os.File
-	curName string
-	curSeq  uint64 // first seq written to the current segment (for naming)
-	curSize int64
-	nextSeq uint64
+	dir       string
+	maxSeg    int64
+	mu        sync.Mutex
+	cur       *os.File
+	curName   string
+	curSeq    uint64 // first seq written to the current segment (for naming)
+	curSize   int64
+	nextSeq   uint64
+	closeOnce sync.Once
 }
 
 const (
@@ -57,6 +58,14 @@ func openWAL(dir string, maxSeg int64) (*wal, error) {
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("wal mkdir: %w", err)
+	}
+	// The WAL holds unredacted bodies + bearer tokens; MkdirAll does not tighten a
+	// pre-existing dir, so fail closed if it is group/other-accessible rather than
+	// silently write PII + replayable credentials to a world-readable path.
+	if info, err := os.Stat(dir); err != nil {
+		return nil, fmt.Errorf("wal stat: %w", err)
+	} else if info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("wal dir %s must be owner-only (0700); found %o — it stores unredacted payloads and bearer tokens", dir, info.Mode().Perm())
 	}
 	w := &wal{dir: dir, maxSeg: maxSeg, nextSeq: 1}
 	// Recover the highest seq across existing segments so we never reuse one.
@@ -210,43 +219,13 @@ func (w *wal) readCheckpoint() uint64 {
 	return binary.LittleEndian.Uint64(buf[:8])
 }
 
-// truncate drops sealed segments whose highest seq is <= watermark. The active
-// segment is never removed. Returns the names dropped (for archival accounting).
-func (w *wal) truncate(watermark uint64) ([]string, error) {
-	w.mu.Lock()
-	active := w.curName
-	w.mu.Unlock()
-
-	segs, err := w.segments()
-	if err != nil {
-		return nil, err
+// removeSegment deletes a sealed segment by name (never the active one — the
+// caller guarantees that). A missing file is not an error (idempotent reap).
+func (w *wal) removeSegment(name string) error {
+	if err := os.Remove(filepath.Join(w.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
-	var dropped []string
-	for i, seg := range segs {
-		if seg == active {
-			continue
-		}
-		// A segment is fully consumed when the NEXT segment's start seq (or the
-		// active segment) is already <= watermark+1 — i.e. every record in this
-		// segment has seq <= watermark. Cheapest exact check: the max seq in the
-		// segment is < the next segment's start seq, so if the next segment starts at
-		// startSeq and startSeq-1 <= watermark, this segment is fully below.
-		maxInSeg := segStart(seg) // conservative lower bound; refine via next start
-		if i+1 < len(segs) {
-			if next := segStart(segs[i+1]); next > 0 {
-				maxInSeg = next - 1
-			}
-		} else {
-			continue // last sealed-or-active handled above
-		}
-		if maxInSeg <= watermark {
-			if err := os.Remove(filepath.Join(w.dir, seg)); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return dropped, err
-			}
-			dropped = append(dropped, seg)
-		}
-	}
-	return dropped, nil
+	return nil
 }
 
 // segStart parses the first seq encoded in a segment file name.
@@ -262,8 +241,11 @@ func segStart(name string) uint64 {
 func (w *wal) close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.cur != nil {
-		return w.cur.Close()
-	}
-	return nil
+	var err error
+	w.closeOnce.Do(func() {
+		if w.cur != nil {
+			err = w.cur.Close()
+		}
+	})
+	return err
 }

@@ -71,20 +71,37 @@ load-bearing invariant and is proven with a forged-replay-after-erase test
 
 ### D5 — Async object-store tier behind the WAL (never on the hot path)
 
-An `ArchiveSink` (object storage) receives **sealed** (rotated) WAL segments from a
-background uploader — never the hot Append path. It is the archival + disaster-replay
-source: if the local WAL is lost (disk failure, fresh node), boot restores segments
-above the watermark from the sink. The hot path touches only the local WAL; the sink
-is best-effort and lags. Interface-first so lite can use a no-op sink and scale an
+An `ArchiveSink` (object storage) receives **sealed, fully-persisted** (below the
+watermark) WAL segments from the background checkpointer — never the hot Append
+path — as **cold retention** (audit / long-term retention). A segment is deleted
+locally only after a successful upload, so a failed upload retries on the next tick
+instead of losing the cold copy. The hot path touches only the local WAL; the sink
+is best-effort and lags. Interface-first so lite uses a no-op sink and scale an
 S3/MinIO sink.
 
-### D6 — Poison-record bound
+The **restore-and-replay-from-archive** path (rebuild a fresh node's store from cold
+segments after total local + DB loss) is **deferred**: safe cold replay must
+re-drive erasure tombstones first, because a segment archived months ago holds spans
+whose GDPR-erasure suppression TTL has since expired — replaying them blind would
+**resurrect erased data** (G3 across a cold restore is a distinct guarantee from G3
+across a warm crash/replay, which D4 covers). Until that guard exists, the archive is
+retention only; the local WAL remains the sole replay source (proven).
 
-A record that fails persist for non-transient reasons (malformed body) would replay
-forever. After a bounded retry count it is moved to a DLQ segment and counted
-(`llmobs_ingest_wal_dead_lettered_total`), never blocking the watermark — mirroring
-the event bus's DLQ. Transient persist failures (DB down) are governed by G2
-(health-driven shedding) and simply retried on the next drain/boot.
+### D6 — Poison bound vs. never-drop-on-transient
+
+The failure classification is load-bearing for durability and split by cause:
+
+- **Permanent** (a malformed body — `pipeline.ErrPermanent`, set only by the decode
+  stage): the record can never succeed, so it is dead-lettered — counted
+  (`llmobs_ingest_wal_dead_lettered_total`) and its watermark advanced so it cannot
+  wedge the checkpoint.
+- **Transient** (everything else — a DB/infra outage): the record is **NEVER dropped
+  and NEVER committed**. Committing it would advance the watermark past durable data
+  and truncate it away — re-opening loss-window #2. It is backed off and requeued;
+  it stays durable and replays, and G2 sheds new ingest until persistence recovers.
+  A revoked-credential record (auth failure) is treated as transient too — it stays
+  durable (never persisted, never lost); a TTL-based reap of ancient stuck records is
+  a follow-up.
 
 ## Guarantees after L3 (scale profile, walSpool)
 
@@ -106,10 +123,23 @@ after Append), so the WAL stores **raw OTLP bodies (unredacted prompts/completio
 = PII) and the request bearer token**. This is inherent to replay — the record must
 reproduce the exact request. Consequences and mitigations:
 
-- WAL files are written **owner-only** (dir `0700`, segments/checkpoint `0600`).
+- WAL files are written **owner-only** (dir `0700`, segments/checkpoint `0600`), and
+  the spool **fails closed on boot** if the dir is group/other-accessible (a
+  pre-existing loose dir is refused rather than silently writing credentials to a
+  world-readable path).
 - The WAL directory MUST be treated with the **same protection as the database**
   (disk encryption at rest, restricted host/volume access). A WAL leak exposes both
   PII and valid bearer tokens (which would allow request replay-auth).
+- **Deferred hardening:** at-rest record encryption with the existing secretbox
+  master key (so plaintext credentials never hit disk, consistent with how the rest
+  of the system envelope-encrypts secrets), and an authenticated (MAC'd) checkpoint.
+  Today the checkpoint/record integrity is CRC32 (accidental corruption only) + host
+  FS perms (the `0700` dir is the trust boundary) — acceptable within the same-uid
+  threat model, to be upgraded when encryption lands.
+- The `ArchiveSink` contract requires real (S3/MinIO) implementations to use
+  server-side encryption + a private ACL: the archive propagates the same PII +
+  replayable bearer tokens to a second store, whose protection must not be weaker
+  than the local WAL's.
 - The WAL is **transient**: records are truncated after persist + checkpoint, so a
   span's raw body normally lives in the WAL only until it is persisted. A GDPR
   erasure targets the store; it does not scrub the WAL, but an erased span's WAL
@@ -130,5 +160,11 @@ reproduce the exact request. Consequences and mitigations:
 ## Deferred / follow-up
 
 - Group-commit fsync batching (throughput; correctness unaffected).
-- The real S3/MinIO `ArchiveSink` + kind e2e restore-from-object-store drill (the
-  in-repo proof uses a fake sink; the interface + uploader/restore logic are tested).
+- The real S3/MinIO `ArchiveSink` (SSE + private ACL required) + the
+  restore-and-replay-from-archive path, which must re-drive erasure tombstones before
+  cold replay to avoid G3-across-cold-restore resurrection (D5). The in-repo proof
+  uses a fake sink; the upload + Put-gated-delete logic is tested.
+- At-rest record encryption (secretbox master key) + authenticated checkpoint, so
+  plaintext credentials never touch disk (Security section).
+- TTL-based reap of records stuck on a permanent non-decode failure (e.g. a
+  permanently-revoked credential) — durable, never lost, but they accumulate.

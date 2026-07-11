@@ -3,12 +3,24 @@ package ingest
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 func mkjob(id string) job {
 	return job{body: []byte(id), contentType: "application/x-protobuf", bearer: "k", receivedAt: time.Unix(0, 0).UTC()}
+}
+
+// waitReplay blocks until boot replay has finished feeding the channel (replay is
+// async so a reopened spool must not be drained before it completes).
+func waitReplay(s *walSpool) {
+	for i := 0; i < 2000; i++ {
+		if s.replayDone.Load() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func TestMemSpoolBackpressure(t *testing.T) {
@@ -31,7 +43,7 @@ func TestMemSpoolBackpressure(t *testing.T) {
 // was Appended (durably) but NOT Committed — the crash-before-persist case —
 // survives a spool close/reopen and replays. This closes the SIGKILL window.
 func TestWALSpoolAckAfterDurableReplay(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "wal")
 	s, err := newWALSpool(dir, 16, 0, nil, time.Hour) // long ckpt so nothing checkpoints
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +70,7 @@ func TestWALSpoolAckAfterDurableReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s2.Close()
+	waitReplay(s2)
 	got := map[string]bool{}
 	for i := 0; i < 2; i++ {
 		l, ok := s2.tryNext()
@@ -77,7 +90,7 @@ func TestWALSpoolAckAfterDurableReplay(t *testing.T) {
 // TestWALSpoolCommittedNotReplayed proves the checkpoint truly suppresses replay of
 // fully-persisted records (no infinite reprocessing).
 func TestWALSpoolCommittedNotReplayed(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "wal")
 	s, _ := newWALSpool(dir, 16, 0, nil, time.Hour)
 	for _, id := range []string{"a", "b"} {
 		_ = s.Append(mkjob(id))
@@ -99,7 +112,7 @@ func TestWALSpoolCommittedNotReplayed(t *testing.T) {
 // TestWALSpoolTornTail proves a partial final record (a crash mid-write) is
 // truncated on replay, not misread — the preceding good records still recover.
 func TestWALSpoolTornTail(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "wal")
 	s, _ := newWALSpool(dir, 16, 0, nil, time.Hour)
 	_ = s.Append(mkjob("good1"))
 	_ = s.Append(mkjob("good2"))
@@ -114,6 +127,7 @@ func TestWALSpoolTornTail(t *testing.T) {
 		t.Fatalf("reopen must tolerate a torn tail: %v", err)
 	}
 	defer s2.Close()
+	waitReplay(s2)
 	got := map[string]bool{}
 	for {
 		l, ok := s2.tryNext()
@@ -128,7 +142,7 @@ func TestWALSpoolTornTail(t *testing.T) {
 }
 
 func TestWALSpoolBackpressure(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "wal")
 	s, _ := newWALSpool(dir, 2, 0, nil, time.Hour)
 	defer s.Close()
 	if err := s.Append(mkjob("a")); err != nil {
@@ -149,7 +163,7 @@ func TestWALSpoolBackpressure(t *testing.T) {
 // segments are archived to the sink, and a disaster restore (local WAL wiped)
 // recovers them from the sink for replay.
 func TestWALSpoolArchiveThenRestore(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "wal")
 	sink := newMemSink()
 	// Tiny segments so appends roll over and seal segments the archiver can ship.
 	s, _ := newWALSpool(dir, 64, 200, sink, time.Hour)

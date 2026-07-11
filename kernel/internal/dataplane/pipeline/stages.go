@@ -32,30 +32,39 @@ func (s *authenticateStage) Process(ctx context.Context, ing *Ingestion) error {
 	return nil
 }
 
-// decode: OTLP bytes -> transport-neutral SpanInputs (protobuf or JSON).
+// ErrPermanent marks an ingest failure that is DETERMINISTIC — the same bytes will
+// always fail (a malformed body, an unsupported content-type). The durable ingest
+// spool (ADR-0027) may dead-letter such a record, because retrying or replaying it
+// can never succeed. Everything NOT wrapped with ErrPermanent is treated as
+// transient (a DB/infra failure): the spool must retry/replay it forever and never
+// advance its watermark, or it would drop durable data on a passing outage.
+var ErrPermanent = errors.New("permanent ingest error")
+
+// decode: OTLP bytes -> transport-neutral SpanInputs (protobuf or JSON). Decode
+// failures are permanent (the bytes are fixed): they wrap ErrPermanent so the spool
+// dead-letters rather than retrying/replaying them forever.
 type decodeStage struct{}
 
 func (s *decodeStage) Name() string { return "decode" }
 func (s *decodeStage) Process(_ context.Context, ing *Ingestion) error {
 	ct := strings.ToLower(ing.ContentType)
-	var err error
 	switch {
 	case strings.Contains(ct, "application/json"):
 		traces, e := normalize.UnmarshalOTLPJSON(ing.Body)
 		if e != nil {
-			return e
+			return errors.Join(ErrPermanent, e)
 		}
 		ing.Spans = normalize.FromTraces(traces)
 	case strings.Contains(ct, "application/x-protobuf"), ct == "":
 		traces, e := normalize.UnmarshalOTLPProto(ing.Body)
 		if e != nil {
-			return e
+			return errors.Join(ErrPermanent, e)
 		}
 		ing.Spans = normalize.FromTraces(traces)
 	default:
-		err = errors.New("unsupported content-type: " + ing.ContentType)
+		return errors.Join(ErrPermanent, errors.New("unsupported content-type: "+ing.ContentType))
 	}
-	return err
+	return nil
 }
 
 // normalize: SpanInputs -> canonical span events (upsert), keyed on span id and

@@ -15,6 +15,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -255,26 +256,40 @@ func (r *Receiver) finalDrain() {
 	}
 }
 
-// handle runs one leased record through the pipeline and settles it on the spool:
-// success/erasure-suppressed (pipe.Run returns nil for both) → Commit; a failure →
-// bounded retry, then dead-letter. This is where the WAL's ack-after-durable pays
-// off: a failed record is NOT committed, so it survives and replays.
+// handle runs one leased record through the pipeline and settles it on the spool.
+// The failure classification is load-bearing for durability (ADR-0027 D6):
+//   - success / erasure-suppressed (pipe.Run returns nil for both) → Commit.
+//   - a PERMANENT error (malformed body — pipeline.ErrPermanent) → dead-letter: it
+//     can never succeed, so drop it and advance past it.
+//   - any OTHER error is TRANSIENT (a DB/infra outage): NEVER drop and NEVER commit
+//     it — that would advance the watermark past durable data and vaporize it on the
+//     next truncate. Back off and requeue; the record stays durable and replays,
+//     and G2 sheds new ingest until persistence recovers.
 func (r *Receiver) handle(ctx context.Context, l leased) {
-	if err := r.pipe.Run(ctx, ingestionOf(l.j)); err != nil {
-		r.log.Warn("ingestion pipeline error", "err", err.Error())
-		if l.retry >= maxProcessRetries {
-			r.spool.deadLetter(l)
-			if r.mreg != nil {
-				r.mreg.CounterAdd("llmobs_ingest_wal_dead_lettered_total",
-					"Ingest records dead-lettered after exhausting in-process retries.", nil, 1)
-			}
-			return
-		}
-		l.retry++
-		r.spool.requeue(l)
+	err := r.pipe.Run(ctx, ingestionOf(l.j))
+	if err == nil {
+		r.spool.Commit(l)
 		return
 	}
-	r.spool.Commit(l)
+	if errors.Is(err, pipeline.ErrPermanent) {
+		r.log.Warn("ingest record dead-lettered (permanent)", "err", err.Error())
+		r.spool.deadLetter(l)
+		if r.mreg != nil {
+			r.mreg.CounterAdd("llmobs_ingest_wal_dead_lettered_total",
+				"Ingest records dead-lettered because they can never succeed (malformed).", nil, 1)
+		}
+		return
+	}
+	// Transient: throttle, then requeue WITHOUT committing. Bounded exponential
+	// backoff, interruptible by the hard shutdown so drain isn't blocked.
+	r.log.Warn("ingestion pipeline error (transient; will retry, not dropped)", "err", err.Error(), "retry", l.retry)
+	backoff := time.Duration(1<<min(l.retry, 5)) * 50 * time.Millisecond
+	select {
+	case <-time.After(backoff):
+	case <-ctx.Done():
+	}
+	l.retry++
+	r.spool.requeue(l)
 }
 
 func ingestionOf(j job) *pipeline.Ingestion {

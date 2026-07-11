@@ -90,17 +90,23 @@ var ErrBadCredentials = errors.New("bad credentials")
 func VerifyPassword(ctx context.Context, pool *pgxpool.Pool, email, password string) (User, error) {
 	var u User
 	var hash string
+	var revoked bool
 	// Resolve the authoritative membership role (default org), exactly as ResolveSession
 	// does — so the login response and /auth/me agree and the legacy users.role is never
-	// surfaced to a client. No membership → "" → no scopes (fail closed).
+	// surfaced to a client. No membership → "" → no scopes (fail closed). The revoked flag
+	// (Arc O / O4) is fetched in the SAME query so a revoked account incurs NO extra
+	// round-trip — the "revoked" vs "wrong password" timing is identical (no account-state
+	// enumeration by timing), and there's no second DB hit on the login hot path.
 	err := pool.QueryRow(ctx,
-		`SELECT u.id, u.email, COALESCE(m.role, ''), u.password_hash
+		`SELECT u.id, u.email, COALESCE(m.role, ''), u.password_hash,
+		        EXISTS(SELECT 1 FROM revocations r
+		                WHERE r.principal_kind = 'user' AND r.principal_id = lower(u.email))
 		   FROM users u
 		   LEFT JOIN org_memberships m
 		     ON m.user_id = u.id
 		    AND m.org_id = (SELECT org_id FROM projects ORDER BY created_at ASC LIMIT 1)
 		  WHERE lower(u.email) = lower($1)`,
-		strings.TrimSpace(email)).Scan(&u.ID, &u.Email, &u.Role, &hash)
+		strings.TrimSpace(email)).Scan(&u.ID, &u.Email, &u.Role, &hash, &revoked)
 	if err == pgx.ErrNoRows {
 		// Verify against a dummy hash so a missing user and a wrong password take
 		// the same time (mitigates user-enumeration by timing).
@@ -114,14 +120,8 @@ func VerifyPassword(ctx context.Context, pool *pgxpool.Pool, email, password str
 	if verr != nil || !ok {
 		return User{}, ErrBadCredentials
 	}
-	// A revoked user must not be able to mint a fresh session and restart the derivation
-	// tree (Arc O / O4). Checked AFTER the password verify so the timing is identical to a
-	// wrong password, and denied as ErrBadCredentials so the response never reveals that the
-	// account exists-but-is-revoked (no account-state enumeration).
-	revoked, rerr := UserRevoked(ctx, pool, u.Email)
-	if rerr != nil {
-		return User{}, rerr
-	}
+	// A revoked user must not be able to mint a fresh session and restart the derivation tree.
+	// Denied as ErrBadCredentials so the response never reveals the account exists-but-revoked.
 	if revoked {
 		return User{}, ErrBadCredentials
 	}

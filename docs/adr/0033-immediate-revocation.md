@@ -52,8 +52,12 @@ revocation (which denies their still-live frontend tokens and identity assertion
 password compare so timing doesn't leak account state) so the subtree cannot be restarted. A
 partial cascade would be exactly the #63 gap, so it is atomic.
 
-Plugin-token revocation is wired to the supervisor: disabling a plugin records a plugin-epoch
-revocation (its issued service token dies next verify, not at TTL); re-enable clears it.
+Plugin-token revocation is wired to the supervisor through ONE disable seam (`toDisabled`)
+that every transition-to-disabled funnels through — operator disable, the reconcile
+disabled-branch, AND fault auto-disable — so a compromised plugin that fails its probes into
+auto-disable is revoked exactly like an operator-disabled one (a future disable path inherits
+the revoke by calling the seam; invariant #11). Uninstall (removal from the provider) revokes
+and forgets the runtime. Re-enable clears the revocation.
 
 ### Endpoints / authority
 

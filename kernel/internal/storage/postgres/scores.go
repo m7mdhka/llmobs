@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage/merge"
 )
 
 var errMissingScoreIdentity = errors.New("score event missing project_id or id")
@@ -34,7 +35,7 @@ func (s *Store) PersistScore(ctx context.Context, ev storage.Event) error {
 		`SELECT doc, provenance FROM scores WHERE project_id=$1 AND id=$2 FOR UPDATE`,
 		projectID, id).Scan(&existingDoc, &existingProv)
 	state := map[string]any{}
-	prov := Provenance{}
+	prov := merge.Provenance{}
 	switch err {
 	case nil:
 		if uerr := json.Unmarshal(existingDoc, &state); uerr != nil {
@@ -50,7 +51,7 @@ func (s *Store) PersistScore(ctx context.Context, ev storage.Event) error {
 		return err
 	}
 
-	merged, newProv := MergeEvent("score", state, prov, ev)
+	merged, newProv := merge.MergeEvent("score", state, prov, ev)
 	doc, err := json.Marshal(merged)
 	if err != nil {
 		return err

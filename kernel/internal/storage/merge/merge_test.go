@@ -1,4 +1,4 @@
-package postgres
+package merge
 
 import (
 	"encoding/json"

@@ -221,6 +221,10 @@ func run() error {
 	pipe := pipeline.New(pool, writeStore, reg, eventBus, pipeline.Config{
 		Metrics: mreg, SkewThreshold: skew, RedactPresets: presets, RedactCustom: customRules,
 		Signal: persistHealth,
+		// Cost derivation (M2): the enrich stage resolves the price table (control-plane
+		// Postgres, both profiles) to derive cost at ingest. Fail-soft — a lookup miss/
+		// error leaves cost null, never fails ingest.
+		Prices: priceStore, Logger: log,
 	})
 
 	receiver := ingest.NewReceiver(pipe, log, cfg.IngestQueueSize, 4, mreg)

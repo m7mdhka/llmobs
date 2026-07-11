@@ -13,6 +13,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,6 +67,11 @@ type Config struct {
 	// Signal is the shared persist-health gate (G2); nil disables health-driven
 	// readiness + backpressure (the persist stage still runs).
 	Signal *ingesthealth.Signal
+	// Prices resolves the price table for the enrich stage's cost derivation (M2). Nil
+	// makes enrich a no-op pass-through (cost simply absent, never wrong).
+	Prices PriceResolver
+	// Logger for fail-soft stage diagnostics (enrich price-lookup failures); nil = quiet.
+	Logger *slog.Logger
 	// RedactPresets/RedactCustom configure built-in payload redaction (#11). Empty
 	// presets + no custom rules disables it. This is a global default today; the
 	// redact stage is structured for per-project resolution (the seam is present,
@@ -102,8 +108,8 @@ func New(pool *pgxpool.Pool, store storage.TelemetryStore, reg *normalize.Regist
 			&decodeStage{},
 			&normalizeStage{reg: reg, skewThreshold: cfg.SkewThreshold},
 			&redactStage{resolve: resolve},
-			&sampleStage{}, // no-op (issue: kernel-ingestion sampling)
-			&enrichStage{}, // no-op (issue: cost derivation / price table)
+			&sampleStage{},                                    // no-op (issue: kernel-ingestion sampling)
+			&enrichStage{prices: cfg.Prices, log: cfg.Logger}, // cost derivation (M2, §3.2/§4/§7)
 			&persistStage{store: store, metrics: cfg.Metrics, signal: cfg.Signal},
 			&publishStage{bus: bus}, // no-op in-proc bus (issue: Redis Streams bus)
 		},

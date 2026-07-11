@@ -1,6 +1,9 @@
 package normalize
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // LM-4 provided-cost passthrough (Dmitri's regression test): when the client
 // sends cost, it must flow to provided_cost_details, stamp cost_source=provided,
@@ -49,5 +52,95 @@ func TestProvidedCostExplicitTotal(t *testing.T) {
 	out := (&SemConv{}).Map(in, Context{ProjectID: "p"})
 	if out["total_cost"] != 0.5 {
 		t.Fatalf("explicit total cost should win, got %v", out["total_cost"])
+	}
+}
+
+// TestAggregateSpanUsageDropped is the #81/R5 prove-the-negative (dual-incumbent
+// Langfuse #14808 + Opik #4695): an aggregate agent span carrying usage that duplicates
+// its child must NOT have that usage extracted (or trace-level cost double-counts).
+func TestAggregateSpanUsageDropped(t *testing.T) {
+	agg := SpanInput{TraceID: "t", SpanID: "agg", Name: "invoke_agent x", Attributes: map[string]any{
+		"gen_ai.operation.name": "invoke_agent", "gen_ai.request.model": "gpt-4o",
+		"gen_ai.usage.input_tokens": int64(812), "gen_ai.usage.output_tokens": int64(96),
+		"gen_ai.usage.input_cost": 0.5,
+	}}
+	out := (&SemConv{}).Map(agg, Context{ProjectID: "p"})
+	if _, ok := out["provided_usage_details"]; ok {
+		t.Fatal("an aggregate agent span must NOT carry usage (double-count with its child)")
+	}
+	if _, ok := out["provided_cost_details"]; ok {
+		t.Fatal("an aggregate agent span must NOT carry provided cost")
+	}
+	// The model is still promoted (informational) — only usage/cost are withheld.
+	if out["model"] != "gpt-4o" {
+		t.Fatalf("model should still be promoted, got %v", out["model"])
+	}
+	// A real model call (chat) with the SAME usage keeps it.
+	leaf := SpanInput{TraceID: "t", SpanID: "leaf", Name: "chat", Attributes: map[string]any{
+		"gen_ai.operation.name": "chat", "gen_ai.request.model": "gpt-4o",
+		"gen_ai.usage.input_tokens": int64(812), "gen_ai.usage.output_tokens": int64(96),
+	}}
+	lout := (&SemConv{}).Map(leaf, Context{ProjectID: "p"})
+	if lout["provided_usage_details"] == nil {
+		t.Fatal("a model-call leaf must keep its usage")
+	}
+}
+
+// TestAudioBucketsMapped is the #79 proof: audio tokens map to dedicated buckets so cost
+// derivation can price them at the audio rate, not the text rate (Opik #7137).
+func TestAudioBucketsMapped(t *testing.T) {
+	in := SpanInput{TraceID: "t", SpanID: "s", Name: "chat", Attributes: map[string]any{
+		"gen_ai.operation.name": "chat", "gen_ai.request.model": "gpt-4o-audio-preview",
+		"gen_ai.usage.input_tokens": int64(500), "gen_ai.usage.output_tokens": int64(200),
+		"gen_ai.usage.input_audio_tokens": int64(300), "gen_ai.usage.output_audio_tokens": int64(150),
+	}}
+	out := (&SemConv{}).Map(in, Context{ProjectID: "p"})
+	u, _ := out["provided_usage_details"].(map[string]any)
+	if u["audio_input"] != int64(300) || u["audio_output"] != int64(150) {
+		t.Fatalf("audio tokens must map to audio_input/audio_output, got %v", u)
+	}
+	if u["input"] != int64(500) || u["output"] != int64(200) {
+		t.Fatalf("text tokens must remain distinct from audio, got %v", u)
+	}
+}
+
+// TestProvidedCostRejectsBadValues is the M2-review money-integrity fix: a NaN/Inf/
+// negative provided cost is DROPPED (not stored verbatim), so one crafted span can't
+// poison SUM(total_cost) across the project.
+func TestProvidedCostRejectsBadValues(t *testing.T) {
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), -0.5} {
+		in := SpanInput{TraceID: "t", SpanID: "s", Name: "chat", Attributes: map[string]any{
+			"gen_ai.operation.name": "chat", "gen_ai.request.model": "gpt-4o",
+			"gen_ai.usage.cost": bad,
+		}}
+		out := (&SemConv{}).Map(in, Context{ProjectID: "p"})
+		if pcd, ok := out["provided_cost_details"].(map[string]any); ok {
+			if _, has := pcd["total"]; has {
+				t.Fatalf("bad provided cost %v must be dropped, got %v", bad, pcd)
+			}
+		}
+		if _, ok := out["total_cost"]; ok {
+			t.Fatalf("bad provided cost %v must not reach total_cost", bad)
+		}
+	}
+	// A good value still flows.
+	good := (&SemConv{}).Map(SpanInput{TraceID: "t", SpanID: "s", Name: "chat", Attributes: map[string]any{
+		"gen_ai.operation.name": "chat", "gen_ai.request.model": "gpt-4o", "gen_ai.usage.cost": 0.5,
+	}}, Context{ProjectID: "p"})
+	if good["total_cost"] != 0.5 {
+		t.Fatalf("a valid provided cost must flow, got %v", good["total_cost"])
+	}
+}
+
+// TestAggregateGateCaseFold: the #81 gate is case-insensitive (defense-in-depth) — an
+// oddly-cased aggregate op still drops usage.
+func TestAggregateGateCaseFold(t *testing.T) {
+	in := SpanInput{TraceID: "t", SpanID: "s", Name: "agent", Attributes: map[string]any{
+		"gen_ai.operation.name": "Invoke_Agent", "gen_ai.request.model": "gpt-4o",
+		"gen_ai.usage.input_tokens": int64(100),
+	}}
+	out := (&SemConv{}).Map(in, Context{ProjectID: "p"})
+	if _, ok := out["provided_usage_details"]; ok {
+		t.Fatal("a case-variant aggregate op must still drop usage")
 	}
 }

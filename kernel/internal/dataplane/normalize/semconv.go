@@ -2,6 +2,7 @@ package normalize
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -46,6 +47,18 @@ var usageAliases = []struct{ attr, bucket string }{
 	{"gen_ai.usage.cache_creation.input_tokens", "cache_write"},
 	{"gen_ai.usage.reasoning_tokens", "reasoning"},
 	{"gen_ai.usage.output_reasoning_tokens", "reasoning"},
+	// Audio tokens (#79, 06-usage-cost.md §3.1). Multimodal/audio models report audio
+	// input/output token counts SEPARATELY from text and price them at a different
+	// (often much higher) rate. Mapped to dedicated buckets so cost derivation can price
+	// them at the audio rate, not the text rate (a bucket folded into input would bill
+	// at the text rate — the Opik #7137/#7253 bug). Pure aliases (F3); the price entry
+	// declares audio_input reduces input / audio_output reduces output.
+	{"gen_ai.usage.input_audio_tokens", "audio_input"},
+	{"gen_ai.usage.input_tokens_details.audio_tokens", "audio_input"},
+	{"gen_ai.usage.prompt_tokens_details.audio_tokens", "audio_input"},
+	{"gen_ai.usage.output_audio_tokens", "audio_output"},
+	{"gen_ai.usage.output_tokens_details.audio_tokens", "audio_output"},
+	{"gen_ai.usage.completion_tokens_details.audio_tokens", "audio_output"},
 }
 
 func init() {
@@ -148,22 +161,33 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 		if params := requestParams(in.Attributes); len(params) > 0 {
 			out["model_parameters"] = params
 		}
-		if usage, mismatch := providedUsage(in.Attributes); len(usage) > 0 {
-			out["provided_usage_details"] = usage
-			if mismatch {
-				// Advisory (#14875): provided value buckets sum past the provided total.
-				attrs["llmobs.dq.usage_total_mismatch"] = true
+		// Aggregate spans (invoke_agent/create_agent/execute_tool) frequently carry the
+		// SUM of their child model-call usage/cost (the Vercel AI SDK / LangGraph pattern,
+		// #81). Extracting it here would double-count against the child leaf that also
+		// carries it, inflating every per-trace and per-project total (§7.1, dual-incumbent
+		// Langfuse #14808 + Opik #4695). So usage/cost are extracted ONLY for usage-bearing
+		// model calls, never aggregate spans — the model/provider are still promoted
+		// (informational); with no usage, derivation produces no cost (§7.3/R4), leaving the
+		// cost to the child leaf. This is the ingest half of the no-double-count rule (R5);
+		// trace-level aggregation is the query-time half (M3).
+		if !isAggregateUsageSpan(op) {
+			if usage, mismatch := providedUsage(in.Attributes); len(usage) > 0 {
+				out["provided_usage_details"] = usage
+				if mismatch {
+					// Advisory (#14875): provided value buckets sum past the provided total.
+					attrs["llmobs.dq.usage_total_mismatch"] = true
+				}
 			}
-		}
-		// Provided cost (LM-4 provided-wins): when the client sends cost, preserve
-		// it verbatim as provided_cost_details, stamp cost_source=provided, and
-		// populate the promoted total_cost so dashboards work unchanged even before
-		// kernel derivation exists (#13). This is Dmitri's GPU-seconds path.
-		if cost := providedCost(in.Attributes); len(cost) > 0 {
-			out["provided_cost_details"] = cost
-			out["cost_source"] = "provided"
-			if total, ok := cost["total"].(float64); ok {
-				out["total_cost"] = total
+			// Provided cost (LM-4 provided-wins): when the client sends cost, preserve
+			// it verbatim as provided_cost_details, stamp cost_source=provided, and
+			// populate the promoted total_cost so dashboards work unchanged even before
+			// kernel derivation exists (#13). This is Dmitri's GPU-seconds path.
+			if cost := providedCost(in.Attributes); len(cost) > 0 {
+				out["provided_cost_details"] = cost
+				out["cost_source"] = "provided"
+				if total, ok := cost["total"].(float64); ok {
+					out["total_cost"] = total
+				}
 			}
 		}
 		// completion_start_time — time to first token (02-span.md §5), when the
@@ -188,6 +212,19 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 
 	out["attributes"] = attrs
 	return out
+}
+
+// isAggregateUsageSpan reports whether an operation type denotes an aggregate span
+// (an agent/tool step) that may carry usage duplicating its child model calls, so its
+// usage/cost MUST NOT be extracted (#81, §7.1). Only usage-bearing model-call ops (chat,
+// generate_content, …) and unknown/untyped spans have their usage read.
+func isAggregateUsageSpan(op string) bool {
+	switch strings.ToLower(strings.TrimSpace(op)) {
+	case "invoke_agent", "create_agent", "execute_tool":
+		return true
+	default:
+		return false
+	}
 }
 
 func mapKind(op string) string {
@@ -310,17 +347,22 @@ func eventStr(events []SpanEventInput, key string) string {
 	return ""
 }
 
-// providedCost maps client-sent cost into provided_cost_details (LM-4). Amounts
-// are decimals; total is summed from input+output when not sent explicitly.
+// providedCost maps client-sent cost into provided_cost_details (LM-4). Amounts are
+// decimals; total is summed from input+output when not sent explicitly. Values are
+// sanitized to FINITE, NON-NEGATIVE numbers: a client's provided cost short-circuits
+// derivation (R1) and is stored verbatim, so a NaN/Inf/negative would land in
+// total_cost and poison every SUM(total_cost) aggregate across the project (NaN is
+// contagious; Inf can break the Decimal64(12) write). A bad cost value is dropped
+// (bad data never corrupts a valid path), not stored.
 func providedCost(a map[string]any) map[string]any {
 	out := map[string]any{}
-	if v, ok := toFloat(a["gen_ai.usage.input_cost"]); ok {
+	if v, ok := goodCost(a["gen_ai.usage.input_cost"]); ok {
 		out["input"] = v
 	}
-	if v, ok := toFloat(a["gen_ai.usage.output_cost"]); ok {
+	if v, ok := goodCost(a["gen_ai.usage.output_cost"]); ok {
 		out["output"] = v
 	}
-	if v, ok := toFloat(a["gen_ai.usage.cost"]); ok {
+	if v, ok := goodCost(a["gen_ai.usage.cost"]); ok {
 		out["total"] = v
 	} else if in, iok := out["input"].(float64); iok {
 		if o, ook := out["output"].(float64); ook {
@@ -328,6 +370,15 @@ func providedCost(a map[string]any) map[string]any {
 		}
 	}
 	return out
+}
+
+// goodCost accepts only a finite, non-negative cost amount.
+func goodCost(v any) (float64, bool) {
+	f, ok := toFloat(v)
+	if !ok || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+		return 0, false
+	}
+	return f, true
 }
 
 func isRequestParam(k string) bool {

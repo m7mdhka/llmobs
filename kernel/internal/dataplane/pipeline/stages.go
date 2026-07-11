@@ -218,13 +218,6 @@ type sampleStage struct{}
 func (s *sampleStage) Name() string                                  { return "sample" }
 func (s *sampleStage) Process(_ context.Context, _ *Ingestion) error { return nil }
 
-// enrich: no-op pass-through (cost derivation needs the price table).
-// TODO(issue): usage/cost derivation + pricing snapshot; returns input unchanged.
-type enrichStage struct{}
-
-func (s *enrichStage) Name() string                                  { return "enrich" }
-func (s *enrichStage) Process(_ context.Context, _ *Ingestion) error { return nil }
-
 // persist: merge-on-write each canonical span event under the row lock, and emit
 // the data-derived ingest metrics (per project; never per-span-id labels). Each
 // persist outcome is folded into the shared persist-health signal (G2) so a run

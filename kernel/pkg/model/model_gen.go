@@ -207,9 +207,13 @@ type LLMObsCanonicalTraceV1Alpha1 struct {
 	// OTel-aligned status (02-span.md §4.1).
 	Status *LLMObsCanonicalTraceV1Alpha1Status `json:"status,omitempty"`
 	// Set semantics; union-merged on update (03-trace.md §2).
-	Tags    []string `json:"tags,omitempty"`
-	UserID  *string  `json:"user_id"`
-	Version *string  `json:"version"`
+	Tags []string `json:"tags,omitempty"`
+	// Derived trace-level cost: SUM of NON-aggregate spans' total_cost (06-usage-cost.md §7.1;
+	// agent_step/tool_call excluded to avoid double-counting). Query-time derived like
+	// end_time; null when the trace has no leaf cost.
+	TotalCost *float64 `json:"total_cost"`
+	UserID    *string  `json:"user_id"`
+	Version   *string  `json:"version"`
 }
 
 // OTel-aligned status (02-span.md §4.1).

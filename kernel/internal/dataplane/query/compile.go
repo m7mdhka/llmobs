@@ -156,9 +156,12 @@ var traceFields = queryFields{
 		"last_activity":    {"last_activity", classTimestamp},
 		"is_open":          {"is_open", classBoolean},
 		"incomplete_trace": {"incomplete_trace", classBoolean},
+		// Derived trace-level cost: SUM of non-aggregate spans' total_cost (§7.1, M3).
+		"total_cost": {"total_cost", classNumeric},
 	},
 	orderable: map[string]bool{
 		"id": true, "name": true, "start_time": true, "end_time": true, "last_activity": true,
+		"total_cost": true,
 	},
 	groupable: map[string]bool{
 		"name": true, "start_time": true, "status.code": true, "environment": true, "release": true,

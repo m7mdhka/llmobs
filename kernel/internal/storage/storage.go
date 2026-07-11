@@ -19,8 +19,64 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 )
+
+// CostRoundDecimals is the fixed decimal scale the DERIVED trace-level total_cost is
+// rounded to in EVERY adapter (Postgres, ClickHouse) and the dual-read re-synthesis, so
+// the roll-up is BYTE-IDENTICAL cross-adapter (the strict row-projection contract) rather
+// than diverging in float low bits: Postgres sums exact NUMERIC while ClickHouse/Go
+// accumulate float64 (0.04+0.05 → 0.09 vs 0.09000000000000001). 10 decimals is far below
+// any billing granularity (0.1 nano-USD) and, for realistic trace costs, within float64's
+// exact-integer range after scaling, so the rounding is deterministic and lossless in
+// practice — and identical rounding of both engines' sums collapses the divergence to zero.
+const CostRoundDecimals = 10
+
+// CostRoundSQL is the scale literal for the adapters' round(...) calls.
+func CostRoundSQL() string { return strconv.Itoa(CostRoundDecimals) }
+
+// RoundCost rounds a trace-level cost to CostRoundDecimals (the dual-read re-synth uses
+// this so a split trace's total_cost matches a single-store one bit-for-bit).
+func RoundCost(c float64) float64 {
+	p := math.Pow(10, CostRoundDecimals)
+	return math.Round(c*p) / p
+}
+
+// AggregateKinds are the span kinds whose total_cost is EXCLUDED from trace-level cost
+// roll-ups (06-usage-cost.md §7.1). An agent_step / tool_call span frequently carries
+// usage — and thus cost — that duplicates its child model-call spans; summing it into
+// the trace total would double-count. This is the query-time counterpart to the ingest
+// gate (normalize.isAggregateUsageSpan / #81, which strips such spans' usage): trace
+// cost accrues only on the non-aggregate (leaf model-call) spans. Defined ONCE so every
+// adapter's trace projection (Postgres, ClickHouse) AND the dual-read re-synthesis
+// exclude the SAME set — a divergence would fork trace cost per engine (the
+// classify-by-metadata-consistently lesson). Keep in sync with the kinds
+// normalize.mapKind emits for aggregate ops.
+var AggregateKinds = []string{"agent_step", "tool_call"}
+
+// AggregateKindsSQL renders AggregateKinds as a SQL IN-list literal
+// ("'agent_step', 'tool_call'") so both adapters build the same predicate from one
+// source. The values are fixed internal constants (never user data), safe to inline.
+func AggregateKindsSQL() string {
+	q := make([]string, len(AggregateKinds))
+	for i, k := range AggregateKinds {
+		q[i] = "'" + k + "'"
+	}
+	return strings.Join(q, ", ")
+}
+
+// IsAggregateKind reports whether a span kind is excluded from trace cost roll-ups.
+func IsAggregateKind(kind string) bool {
+	for _, k := range AggregateKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
 
 // ErrSuppressedByErasure is returned by PersistSpan when an incoming span matches
 // an unexpired erasure-suppression tombstone (G3): the span was GDPR-erased and a

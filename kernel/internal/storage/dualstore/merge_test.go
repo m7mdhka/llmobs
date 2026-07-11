@@ -111,3 +111,39 @@ func TestMergeAggregationAliasCollisionSafe(t *testing.T) {
 		t.Fatalf("avg straddle must be reported non-mergeable: got %v", nonMergeable)
 	}
 }
+
+// TestSynthesizeTraceCostExcludesAggregates proves the dual-read split-trace
+// re-synthesis (Go) sums total_cost with the SAME aggregate-kind exclusion as the SQL
+// projections (§7.1) — so a trace whose spans straddle lite∪scale gets the identical
+// trace-level cost as a single-store one.
+func TestSynthesizeTraceCostExcludesAggregates(t *testing.T) {
+	span := func(id, parent, kind string, cost float64, hasCost bool) json.RawMessage {
+		m := map[string]any{
+			"id": id, "trace_id": "t", "project_id": "p", "parent_span_id": parent,
+			"kind": kind, "name": kind, "start_time": "2026-01-01T00:00:0" + id + "Z",
+		}
+		if hasCost {
+			m["total_cost"] = cost
+		}
+		b, _ := json.Marshal(m)
+		return b
+	}
+	spans := []json.RawMessage{
+		span("1", "", "agent_step", 0.05, true),  // aggregate, cost duplicated — excluded
+		span("2", "1", "agent_step", 0.05, true), // nested aggregate — excluded
+		span("3", "2", "generation", 0.03, true), // the leaf — the real cost
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(SynthesizeTrace(spans), &doc)
+	if tc, _ := doc["total_cost"].(float64); tc != 0.03 {
+		t.Fatalf("split-trace re-synth total_cost=%v want 0.03 (aggregates excluded)", tc)
+	}
+
+	// No leaf cost → total_cost absent (null), never the aggregate's value.
+	noLeaf := []json.RawMessage{span("1", "", "agent_step", 0.07, true), span("2", "1", "tool_call", 0, false)}
+	var d2 map[string]any
+	_ = json.Unmarshal(SynthesizeTrace(noLeaf), &d2)
+	if _, ok := d2["total_cost"]; ok {
+		t.Fatalf("no leaf cost → total_cost must be absent, got %v", d2["total_cost"])
+	}
+}

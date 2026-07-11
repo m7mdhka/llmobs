@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strconv"
 	"time"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
 // ReadLimits are the mandatory per-query ClickHouse resource caps (RULING-CH9).
@@ -183,7 +185,7 @@ func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([
 //   - the orphan-with-parent-ref incomplete_trace, without a correlated subquery:
 //     collect each trace's id set and referenced parents as arrays, then test
 //     arrayExists(parent ∉ ids). The single `?` is the tenant scope for span_base.
-const chTraceProjection = `
+var chTraceProjection = `
 WITH span_base AS (
     SELECT * FROM (
         SELECT * FROM spans WHERE project_id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id
@@ -207,6 +209,11 @@ agg AS (
         coalesce(max(end_time), max(start_time)) AS t_last,
         groupArray(id) AS ids,
         groupArrayIf(parent_span_id, parent_span_id != '') AS parents,
+        -- trace-level cost (§7.1): sum NON-aggregate spans' cost; the countIf guard
+        -- reproduces the lite adapter's NULL-when-no-leaf-cost (ClickHouse sum returns 0
+        -- for no matching rows, Postgres SUM…FILTER returns NULL — this bridges them).
+        sumIf(total_cost, kind NOT IN (` + storage.AggregateKindsSQL() + `)) AS t_cost_sum,
+        countIf(total_cost IS NOT NULL AND kind NOT IN (` + storage.AggregateKindsSQL() + `)) AS t_cost_n,
         count() AS span_count
     FROM span_base
     GROUP BY trace_id, project_id
@@ -219,7 +226,10 @@ trace_proj AS (
         r.name AS name, r.environment AS environment, r.release AS release, r.version AS version,
         r.session_id AS session_id, r.user_id AS user_id, r.attributes AS attributes,
         a.span_count AS span_count, a.is_open AS is_open,
-        arrayExists(p -> not has(a.ids, p), a.parents) AS incomplete_trace
+        arrayExists(p -> not has(a.ids, p), a.parents) AS incomplete_trace,
+        -- round to the shared scale (storage.CostRoundDecimals) so the float64 sum is
+        -- byte-identical to Postgres's exact-NUMERIC sum; NULL when no leaf cost.
+        if(a.t_cost_n = 0, NULL, round(a.t_cost_sum, ` + storage.CostRoundSQL() + `)) AS total_cost
     FROM agg a INNER JOIN roots r ON r.trace_id = a.trace_id
 )`
 
@@ -237,7 +247,7 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 	}
 	sql := chTraceProjection + `
 SELECT id, project_id, start_time, end_time, last_activity, status_code, name,
-       environment, release, version, session_id, user_id, attributes, span_count, is_open, incomplete_trace
+       environment, release, version, session_id, user_id, attributes, span_count, is_open, incomplete_trace, total_cost
 FROM trace_proj`
 	if where != "" {
 		sql += " WHERE " + where
@@ -260,9 +270,10 @@ FROM trace_proj`
 			endTime, lastActivity                                                                         *time.Time
 			spanCount                                                                                     uint64
 			isOpenU8, incompleteU8                                                                        uint8
+			totalCost                                                                                     *float64
 		)
 		if err := rows.Scan(&id, &projectID, &startTime, &endTime, &lastActivity, &statusCode, &name,
-			&environment, &release, &version, &sessionID, &userID, &attributes, &spanCount, &isOpenU8, &incompleteU8); err != nil {
+			&environment, &release, &version, &sessionID, &userID, &attributes, &spanCount, &isOpenU8, &incompleteU8, &totalCost); err != nil {
 			return nil, fmt.Errorf("scan trace row: %w", err)
 		}
 		doc := map[string]any{
@@ -288,6 +299,9 @@ FROM trace_proj`
 		}
 		if endTime != nil {
 			doc["end_time"] = endTime.UTC().Format(time.RFC3339Nano)
+		}
+		if totalCost != nil {
+			doc["total_cost"] = *totalCost
 		}
 		// Match the lite adapter exactly: include attributes whenever the column
 		// parses, even when it is an empty object (lite emits "attributes":{}).

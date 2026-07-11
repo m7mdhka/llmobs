@@ -195,10 +195,15 @@ func (s *Store) GetSpan(ctx context.Context, projectID, id string) (json.RawMess
 
 // traceProjection synthesizes one row per trace from its spans (DSL §4.1): times
 // span earliest start to latest end, dimensions come from the root span (parent
-// empty, tie-broken by earliest (start_time,id); else the earliest span), and
-// status is `error` if any span errored. Exposes the columns the trace compiler
-// targets. This is the query-time materialization — traces have no write path.
-const traceProjection = `
+// empty, tie-broken by earliest (start_time,id); else the earliest span), status is
+// `error` if any span errored, and total_cost sums only NON-aggregate spans' cost
+// (§7.1 — an agent_step/tool_call duplicates its children's usage, so summing it would
+// double-count). Built once from storage.AggregateKinds so the excluded-kinds set is
+// shared with the ClickHouse projection and the dual-read re-synthesis. `SUM … FILTER`
+// ignores NULL costs and aggregate kinds and is NULL when a trace has no leaf cost
+// (the ClickHouse projection matches this NULL-when-none). This is the query-time
+// materialization — traces have no write path.
+var traceProjection = `
 WITH span_base AS (
 	SELECT * FROM spans WHERE is_deleted = false
 ),
@@ -218,6 +223,11 @@ agg AS (
 		bool_or(sb.end_time IS NULL) AS is_open,
 		-- last_activity: the most recent known time (max end_time, else max start).
 		COALESCE(MAX(sb.end_time), MAX(sb.start_time)) AS last_activity,
+		-- trace-level cost (§7.1): sum non-aggregate spans' cost only; NULL if no leaf cost.
+		-- COALESCE(kind,'') so a NULL kind is treated as non-aggregate (matches ClickHouse,
+		-- whose kind defaults to ''); round to the shared scale so the sum is byte-identical
+		-- to the ClickHouse/dual-read float64 accumulation (PG sums exact NUMERIC).
+		round(SUM(sb.total_cost) FILTER (WHERE COALESCE(sb.kind,'') NOT IN (` + storage.AggregateKindsSQL() + `)), ` + storage.CostRoundSQL() + `) AS total_cost,
 		-- incomplete_trace (llmobs.dq): a span references a parent absent from the
 		-- trace (Collector tail-sampling dropped it). Orphan-with-parent-ref.
 		bool_or(
@@ -235,7 +245,7 @@ SELECT
 	a.trace_id AS id, a.project_id, a.start_time, a.end_time, a.last_activity,
 	CASE WHEN a.any_error THEN 'error' ELSE r.status_code END AS status_code,
 	r.name, r.environment, r.release, r.version, r.session_id, r.user_id,
-	r.attributes, a.span_count, a.is_open, a.incomplete_trace
+	r.attributes, a.span_count, a.is_open, a.incomplete_trace, a.total_cost
 FROM agg a JOIN roots r ON r.trace_id = a.trace_id`
 
 // QueryTraces runs a compiled traces query against the synthesized projection and
@@ -249,7 +259,7 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 		"id, project_id, start_time, end_time, last_activity, " +
 		"COALESCE(status_code,''), COALESCE(name,''), COALESCE(environment,''), " +
 		"COALESCE(release,''), COALESCE(version,''), COALESCE(session_id,''), COALESCE(user_id,''), " +
-		"attributes, span_count, is_open, incomplete_trace " +
+		"attributes, span_count, is_open, incomplete_trace, total_cost " +
 		"FROM trace_proj"
 	if where != "" {
 		sql += " WHERE " + where
@@ -272,9 +282,10 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 			attributes                                                                        []byte
 			spanCount                                                                         int64
 			isOpen, incompleteTrace                                                           bool
+			totalCost                                                                         *float64
 		)
 		if err := rows.Scan(&id, &projectID, &startTime, &endTime, &lastActivity, &statusCode, &name,
-			&environment, &release, &version, &sessionID, &userID, &attributes, &spanCount, &isOpen, &incompleteTrace); err != nil {
+			&environment, &release, &version, &sessionID, &userID, &attributes, &spanCount, &isOpen, &incompleteTrace, &totalCost); err != nil {
 			return nil, err
 		}
 		doc := map[string]any{
@@ -300,6 +311,9 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 		}
 		if endTime != nil {
 			doc["end_time"] = endTime.UTC().Format(time.RFC3339Nano)
+		}
+		if totalCost != nil {
+			doc["total_cost"] = *totalCost
 		}
 		if len(attributes) > 0 {
 			var attrs map[string]any

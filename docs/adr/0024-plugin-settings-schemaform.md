@@ -109,6 +109,17 @@ plugin id (like `GrantFor`). A plugin with no `settingsSchema` has no settings t
 - **Returning masked secrets (e.g. last 4 chars).** Rejected — any echo is a leak
   surface; a boolean "set" marker is strictly safer and enough for the UX.
 
+## Validated (K2 / ADR-0025)
+
+The settings schema-form's flat subset **excludes `pattern` (regex)** entirely — a
+decision the Langfuse mine independently validated: Langfuse shipped a bug (#14818)
+where a Unicode-property regex in an *advertised* JSON Schema (an MCP tool schema)
+silently degraded because JSON Schema `pattern` compiles without the ECMAScript `u`
+flag, disabling the whole tool catalog. Pinned as a rule for this and any future
+externally-consumed schema (MCP tool schemas included): **the advertised/serializable
+schema MUST stay within the representable subset; strict validation is a separate
+server-side layer, never expressed as an advertised `pattern`.**
+
 ## Deferred
 
 Richer schema dialect (nested objects, arrays, conditional fields); per-field RBAC on

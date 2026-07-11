@@ -26,6 +26,10 @@ Covers:
 - [The inner loop — `make dev` (create → dev → edit → reload)](dev-loop.md) (J3).
 - [Settings — a schema-form tab with no backend](settings.md) (J2).
 - The [plugin trust model](trust-model.md) — what the frontend token confines (J1).
+- [Composing with other plugins](composing-plugins.md) — the island model + the HTTP
+  escape (a plugin exposes its own API; others integrate as strangers).
+- [Storing large artifacts](large-artifacts.md) — the bring-your-own-bucket interim
+  (`secrets` + declared egress) until a first-class `blobs` primitive lands.
 - Scaffolding from `templates/` via `llmobs plugin create`.
 - The conformance ("verified") bar.
 - Distribution: plugin = repo; release = manifest + frontend tarball + OCI image

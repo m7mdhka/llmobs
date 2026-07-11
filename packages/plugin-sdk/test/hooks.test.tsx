@@ -7,7 +7,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 // Import the BUILT package via its dist entry points (what a plugin author's
 // "@llmobs/plugin-sdk" / "@llmobs/plugin-sdk/testing" imports resolve to). Relative
 // paths keep vitest's resolver unambiguous; run after `build`.
-import { useTraces, useSettings, useWriteScore } from "../dist/index.js";
+import { useTraces, useSettings, useWriteScore } from "../dist/react.js";
 import { createFakeClient, TestLLMObsProvider, SdkError } from "../dist/testing.js";
 
 function TracesList(): React.ReactElement {

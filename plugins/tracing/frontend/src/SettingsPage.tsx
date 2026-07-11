@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { ErrorState, LoadingState, SchemaForm, useSettings } from "@llmobs/plugin-sdk";
+import { ErrorState, LoadingState, SchemaForm, useSettings } from "@llmobs/plugin-sdk/react";
 import schema from "./settings.schema.json";
 
 // The Tracing plugin's settings tab — the dogfood of J2 (ADR-0024). A PURE-FRONTEND

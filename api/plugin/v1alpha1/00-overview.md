@@ -199,6 +199,52 @@ the `kv` primitive made frontend-reachable and schema-aware — not a new primit
   never wipes a secret the user did not retype). This is the settings analogue of the
   `secrets` never-return guarantee.
 
+## 8. Frontend mount contract (framework-neutral, ADR-0030 / N1)
+
+A plugin frontend is **framework-neutral**. Its Module-Federation-exposed module MUST
+export a `mount` function; React is one binding over this contract
+(`@llmobs/plugin-sdk/react`), not the contract. The kernel/registry/manifest are
+unchanged — they transport only `remoteName` / `exposedModule` / `entry` / `nav` and
+never name a framework.
+
+- **Export shape.** The exposed module exports:
+
+  ```ts
+  mount(element: HTMLElement, context: PluginMountContext): (() => void) | void
+  ```
+
+  The shell resolves `mount` from the remote, calls it with an owned container element
+  and a plain `context`, and calls the returned `unmount()` on route change / disable.
+  A plugin may render with React, Vue, Svelte, or vanilla DOM. The legacy
+  default-React-component export (ADR-0004) is superseded.
+
+- **`context` (a plain object — no React):**
+  - `baseUrl` — gateway base URL (`""` = the shell's origin).
+  - `project` — `{ id }` or undefined.
+  - `user` — `{ id, email, role }`, **display only**; never trusted for authz.
+  - `client` — the **token-confined** data client (`query` / `write` / settings). It
+    carries the J1 frontend token and **fails closed** (§6): a call for which no token
+    can be minted throws rather than falling back to the ambient session scope. This
+    enforcement is in the data client, so it is **identical for a non-React caller** —
+    the framework is irrelevant to the boundary. The **raw token provider is deliberately
+    NOT on the context** (least exposure): the shell owns it and closes over it inside
+    `client`, so untrusted plugin code cannot read the bearer token and exfiltrate it
+    off-origin. A future primitive needing its own confined client gets a shell-owned
+    client factory, never the minting getter.
+  - `theme` — `{ mode: "light" | "dark" }`; CSS custom properties (`@llmobs/tokens`)
+    remain global on the document root (so **visual** theming is always live). `mode` is
+    captured at mount for the rare JS branch; it is not reactive today.
+  - `locale` + `direction` (`"ltr" | "rtl"`) — threaded now; real values wired by N3.
+
+- **`unmount()`** MUST be idempotent and remove all of the plugin's DOM, listeners, and
+  timers from `element`.
+
+- **The React binding.** `@llmobs/plugin-sdk/react`'s `createReactBinding(Root)` returns
+  a `mount` that creates a React root, wraps `Root` in the provider seeded from
+  `context`, and returns `root.unmount`. MF singleton-pinning of
+  `react`/`react-dom`/`react-router-dom` applies **only** to plugins that opt into this
+  binding.
+
 ## Token format (both tokens)
 
 Compact, dependency-free, stdlib-verifiable (no JWT library on the hot path):

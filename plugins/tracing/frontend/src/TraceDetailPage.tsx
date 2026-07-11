@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button, ErrorState, LoadingState, useTrace } from "@llmobs/plugin-sdk";
+import { Button, ErrorState, LoadingState, useTrace } from "@llmobs/plugin-sdk/react";
 import type { WireSpan, WireTraceTree } from "./wire.js";
 import { buildTree, spanBounds, type SpanNode } from "./tree.js";
 import { SpanRow } from "./SpanRow.js";

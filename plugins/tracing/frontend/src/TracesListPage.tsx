@@ -12,7 +12,7 @@ import {
   Table,
   useTraces,
   useQuery,
-} from "@llmobs/plugin-sdk";
+} from "@llmobs/plugin-sdk/react";
 import { fmtDuration, fmtTime } from "./format.js";
 import type { WireTrace } from "./wire.js";
 

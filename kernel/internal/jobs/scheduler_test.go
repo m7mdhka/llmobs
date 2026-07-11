@@ -108,7 +108,7 @@ func TestSystemAssertionBoundedToGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := signer.VerifyIdentityAssertion(asr, pluginproto.PluginSubject("acme/w"), time.Now())
+	claims, err := signer.VerifyIdentityAssertion(context.Background(), asr, pluginproto.PluginSubject("acme/w"), time.Now())
 	if err != nil {
 		t.Fatalf("assertion should verify for its plugin: %v", err)
 	}

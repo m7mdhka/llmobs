@@ -114,6 +114,17 @@ func VerifyPassword(ctx context.Context, pool *pgxpool.Pool, email, password str
 	if verr != nil || !ok {
 		return User{}, ErrBadCredentials
 	}
+	// A revoked user must not be able to mint a fresh session and restart the derivation
+	// tree (Arc O / O4). Checked AFTER the password verify so the timing is identical to a
+	// wrong password, and denied as ErrBadCredentials so the response never reveals that the
+	// account exists-but-is-revoked (no account-state enumeration).
+	revoked, rerr := UserRevoked(ctx, pool, u.Email)
+	if rerr != nil {
+		return User{}, rerr
+	}
+	if revoked {
+		return User{}, ErrBadCredentials
+	}
 	return u, nil
 }
 

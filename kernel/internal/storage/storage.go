@@ -53,6 +53,14 @@ type Event struct {
 // DSL→SQL compiler emits Postgres SQL, which a Postgres-compatible adapter
 // (Timescale) reuses as-is. Relocating compilation behind an adapter-owned
 // compile step (ADR-0019) is the ClickHouse-driven follow-up, not this refactor.
+// Adapter read contract (K1.5): the DSL read methods (QuerySpans/QueryTraces/
+// QueryScores/QueryAggregation) MUST enforce a server-side statement timeout, not
+// only honor ctx cancellation — a client-side cancel stops the client, not the
+// server, so a lost/late cancel would otherwise let a pathological plan run
+// unbounded. The lite adapter uses `SET LOCAL statement_timeout` in a read
+// transaction (auto-resets, never poisons a pooled connection); a ClickHouse
+// adapter MUST set `max_execution_time` equivalently. The DSL's max-window +
+// ceilings bound query *shape*; this bounds query *execution time*.
 type TelemetryStore interface {
 	// PersistSpan applies one span event with merge-on-write (LM-5).
 	PersistSpan(ctx context.Context, ev Event) error

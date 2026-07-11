@@ -103,11 +103,11 @@ func (s *Store) QueryScores(ctx context.Context, where string, args []any, order
 		sql += " ORDER BY " + order
 	}
 	sql += " LIMIT " + itoa(limit)
-	rows, err := s.pool.Query(ctx, sql, args...)
+	rows, done, err := s.queryRead(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer done()
 	var out []json.RawMessage
 	for rows.Next() {
 		var doc []byte

@@ -69,6 +69,8 @@ jobs:
           NODE_ENV=production pnpm --filter @llmobs/plugin-tracing build
       - name: SDK unit tests (hooks + @llmobs/plugin-sdk/testing utilities)
         run: pnpm --filter @llmobs/plugin-sdk test
+      - name: Tracing plugin unit tests (buildTree cycle/depth guards)
+        run: pnpm --filter @llmobs/plugin-tracing test
       - name: Typecheck the shell + SDK + tracing plugin
         run: |
           pnpm --filter @llmobs/shell typecheck

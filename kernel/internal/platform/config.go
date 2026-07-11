@@ -26,6 +26,7 @@ type Config struct {
 	BootstrapAdminEml  string `json:"bootstrap_admin_email"`
 	BootstrapAdminPwd  string `json:"bootstrap_admin_password"`
 	QueryMaxWindow     string `json:"query_max_window"`     // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
+	QueryStmtTimeout   string `json:"query_stmt_timeout"`   // server-side statement_timeout for DSL reads; e.g. "30s"
 	CookieSecure       bool   `json:"cookie_secure"`        // set Secure on session cookies
 	WebUIDir           string `json:"webui_dir"`            // dir of the built shell; empty => placeholder
 	PluginDir          string `json:"plugin_dir"`           // dir of dev-mode plugins; empty => none
@@ -69,6 +70,7 @@ func defaults() Config {
 		MigrateOnBoot:             true,
 		BootstrapProject:          "default",
 		QueryMaxWindow:            "720h",
+		QueryStmtTimeout:          "30s",
 		ServeShell:                true,
 		MetricsAddr:               ":9090",
 		ClockSkewThreshold:        "5m",
@@ -106,6 +108,7 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("BOOTSTRAP_ADMIN_EMAIL"), &c.BootstrapAdminEml)
 	envStr(brand.Env("BOOTSTRAP_ADMIN_PASSWORD"), &c.BootstrapAdminPwd)
 	envStr(brand.Env("QUERY_MAX_WINDOW"), &c.QueryMaxWindow)
+	envStr(brand.Env("QUERY_STMT_TIMEOUT"), &c.QueryStmtTimeout)
 	envStr(brand.Env("WEBUI_DIR"), &c.WebUIDir)
 	envStr(brand.Env("PLUGIN_DIR"), &c.PluginDir)
 	envStr(brand.Env("DEV_PLUGIN_REMOTES"), &c.DevPluginRemotes)

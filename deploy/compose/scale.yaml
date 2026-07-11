@@ -1,0 +1,78 @@
+# Scale profile (foundation): Postgres + ClickHouse + the kernel.
+#   docker compose -f deploy/compose/scale.yaml up -d
+#
+# Per RULING-MIG6 (permanent dual-read), Postgres is NOT replaced by ClickHouse —
+# it stays as the historical/lite store while ClickHouse takes new high-volume
+# telemetry, unified at the one Query API. L1 provisions the ClickHouse schema +
+# write side; the kernel's read path over ClickHouse lands in L2, so this compose
+# is the storage foundation, not yet a fully wired scale runtime.
+name: llmobs-scale
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: llmobs
+      POSTGRES_PASSWORD: llmobs
+      POSTGRES_DB: llmobs
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llmobs -d llmobs"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  clickhouse:
+    # R-CH5: pin the ClickHouse version; never :latest. Supported range documented
+    # in deploy/compose/clickhouse/README.md. 24.8 is an LTS.
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      CLICKHOUSE_DB: llmobs
+      CLICKHOUSE_USER: llmobs
+      CLICKHOUSE_PASSWORD: llmobs
+      # Let the bootstrap user self-manage grants in this single-node profile; a
+      # real cluster grants the exact set from clickhouse.RequiredGrants() (R-CH8).
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      # R-CH6: bound the system.*_log tables (profiler off + TTL).
+      - ./clickhouse/config.d/system-log-ttl.xml:/etc/clickhouse-server/config.d/system-log-ttl.xml:ro
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "llmobs", "--password", "llmobs", "-q", "SELECT 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  kernel:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/kernel.Dockerfile
+    environment:
+      LLMOBS_DATABASE_URL: "postgres://llmobs:llmobs@postgres:5432/llmobs?sslmode=disable"
+      # Native protocol DSN; credentials are URL-safe-encoded when built via
+      # clickhouse.BuildDSN (R-CH7). Read by the scale storage wiring in L2.
+      LLMOBS_CLICKHOUSE_URL: "clickhouse://llmobs:llmobs@clickhouse:9000/llmobs"
+      LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:-sk-e2e-demo-key}"
+      LLMOBS_BOOTSTRAP_ADMIN_EMAIL: "${LLMOBS_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
+      LLMOBS_BOOTSTRAP_ADMIN_PASSWORD: "${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:-admin-dev-password}"
+      LLMOBS_LOG_FORMAT: "text"
+      LLMOBS_OTLP_HTTP_ADDR: ":4318"
+      LLMOBS_OTLP_GRPC_ADDR: ":4317"
+      LLMOBS_API_ADDR: ":8080"
+      LLMOBS_METRICS_ADDR: ":9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "${LLMOBS_OTLP_PORT:-4318}:4318"
+      - "${LLMOBS_OTLP_GRPC_PORT:-4317}:4317"
+      - "${LLMOBS_API_PORT:-8080}:8080"
+      - "${LLMOBS_METRICS_PORT:-9090}:9090"
+
+volumes:
+  clickhouse-data:

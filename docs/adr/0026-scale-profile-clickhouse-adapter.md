@@ -76,9 +76,18 @@ Following `99-adapter-guidance.md` §2 (v4-validated — read-time joins/dedup o
 
 ### D3 — Dependency: `github.com/ClickHouse/clickhouse-go/v2` (Apache-2.0)
 
-The official ClickHouse Go driver, Apache-2.0 (license-clean per the AGPL/SSPL ban).
-It is a scale-profile storage dependency, not on the lite hot path; recorded here per
-the "new dependency needs an ADR" rule. Run `make license-check` when adding.
+The official ClickHouse Go driver, Apache-2.0 (license-clean per the AGPL/SSPL ban;
+verified against the module's `LICENSE`, and its build-reachable transitive closure —
+`ch-go`, `paulmach/orb`, `shopspring/decimal`, `klauspost/compress`, `otel` — is all
+Apache/MIT/BSD). It is a scale-profile storage dependency, not on the lite hot path;
+recorded here per the "new dependency needs an ADR" rule.
+
+**Pinned at `v2.42.0`, deliberately not the latest.** `v2.47.0` (and every release
+after `v2.42.0`) requires Go **1.25**, but the repo pins Go **1.24** (`mise.toml`).
+A repo-wide toolchain bump is a separate, deliberate decision that must not ride in
+on an L1 storage PR, so L1 pins the newest clickhouse-go whose dependency closure
+(driver `go 1.24.0`, `ch-go v0.69.0` `go 1.24.0`, `otel v1.39.0`) stays on Go 1.24.
+When the toolchain is bumped to 1.25 in its own change, this pin can float forward.
 
 ### D4 — Migrations learn every Langfuse scar (R-CH1–8)
 

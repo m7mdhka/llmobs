@@ -86,8 +86,14 @@ tokens are subtracted from, so the residual (`input − Σ(buckets reducing inpu
 is computed by iterating the entry's rates — never a hardcoded "cache_read subtracts
 from input" branch. A new detail key with a new rate and a `reduces` value just works.
 `tiers` is a JSONB array of `{ key, threshold_tokens, per_token }` above-threshold
-rates (R7). The derivation arithmetic itself lands in M2; M1 establishes the shape and
-the store so the enrich stage is pure data-in.
+rates (R7). The composition of residual (§7.4) and tiers (§7.5) is ruled in
+`06-usage-cost.md` §7.7: **reduce first, then tier the residual** (never the raw base,
+which would double-count the specially-priced buckets toward the threshold), and tiers
+are **graduated** (tax-bracket), never cliff. The `tiers` shape + reduce-then-tier
+order already support graduated MULTI-breakpoint pricing; M2 implements single-
+breakpoint (§7.5), with graduated multi-breakpoint a shape-ready follow-on. The
+derivation arithmetic itself lands in M2; M1 establishes the shape and the store so the
+enrich stage is pure data-in.
 
 ### D6 — Global entries (admin-gated), per-project discount (project-gated)
 

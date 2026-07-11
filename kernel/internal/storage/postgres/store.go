@@ -15,6 +15,7 @@ import (
 type Store struct {
 	pool           *pgxpool.Pool
 	suppressionTTL time.Duration // erasure-tombstone retention (G3)
+	queryTimeout   time.Duration // server-side statement_timeout for DSL reads (0 = off)
 }
 
 // defaultSuppressionTTL retains erasure tombstones long enough to outlast
@@ -31,6 +32,48 @@ func (s *Store) SetErasureSuppressionTTL(d time.Duration) {
 	if d > 0 {
 		s.suppressionTTL = d
 	}
+}
+
+// SetQueryTimeout sets a server-side statement_timeout applied to DSL read queries
+// (a backstop so a client cancel or a pathological plan cannot run unbounded — a
+// client-side timeout only stops the *client*, not the server). Non-positive
+// disables it (queries run directly on the pool). This is a REQUIRED behavior of any
+// storage adapter's read path (the ClickHouse adapter must set `max_execution_time`).
+func (s *Store) SetQueryTimeout(d time.Duration) {
+	if d > 0 {
+		s.queryTimeout = d
+	}
+}
+
+// queryRead runs a read query under the configured server-side statement_timeout and
+// returns the rows plus a done() the caller MUST defer (it closes the rows and ends
+// the bounding transaction). When no timeout is configured it runs directly on the
+// pool. SET LOCAL scopes the timeout to this transaction and auto-resets at its end,
+// so a pooled connection is never left with a lingering timeout.
+func (s *Store) queryRead(ctx context.Context, sql string, args ...any) (pgx.Rows, func(), error) {
+	if s.queryTimeout <= 0 {
+		rows, err := s.pool.Query(ctx, sql, args...)
+		if err != nil {
+			return nil, nil, err
+		}
+		return rows, func() { rows.Close() }, nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The value is a kernel-controlled integer (milliseconds), never user input.
+	if _, err := tx.Exec(ctx, "SET LOCAL statement_timeout = "+itoa(int(s.queryTimeout.Milliseconds()))); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, nil, err
+	}
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, nil, err
+	}
+	// Read-only: rollback (not commit) releases the connection with no side effects.
+	return rows, func() { rows.Close(); _ = tx.Rollback(ctx) }, nil
 }
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
@@ -214,11 +257,11 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 		sql += " ORDER BY " + order
 	}
 	sql += " LIMIT " + itoa(limit)
-	rows, err := s.pool.Query(ctx, sql, args...)
+	rows, done, err := s.queryRead(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer done()
 	var out []json.RawMessage
 	for rows.Next() {
 		var (
@@ -305,11 +348,11 @@ func (s *Store) QuerySpans(ctx context.Context, where string, args []any, order 
 		sql += " ORDER BY " + order
 	}
 	sql += " LIMIT " + itoa(limit)
-	rows, err := s.pool.Query(ctx, sql, args...)
+	rows, done, err := s.queryRead(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer done()
 	var out []json.RawMessage
 	for rows.Next() {
 		var doc []byte

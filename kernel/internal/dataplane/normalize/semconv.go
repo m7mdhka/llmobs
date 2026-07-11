@@ -16,14 +16,42 @@ func (s *SemConv) Name() string { return "otel-genai" }
 func (s *SemConv) Detect(SpanInput) bool { return true }
 
 // consumed keys are promoted out of the attributes bag (invariant 6: their value
-// is preserved as the promoted field).
+// is preserved as the promoted field). The usage aliases (usageAliases) are added
+// to this set in init() so every mapped token bucket is consumed, not duplicated.
 var consumedKeys = map[string]bool{
 	"gen_ai.operation.name": true, "gen_ai.provider.name": true, "gen_ai.system": true,
 	"gen_ai.request.model": true, "gen_ai.response.model": true,
 	"gen_ai.input.messages": true, "gen_ai.output.messages": true,
-	"gen_ai.usage.input_tokens": true, "gen_ai.usage.output_tokens": true,
 	"deployment.environment": true, "deployment.environment.name": true,
 	"service.version": true, "session.id": true, "gen_ai.conversation.id": true, "user.id": true,
+}
+
+// usageAliases maps the de-facto OTel GenAI usage attribute keys onto the
+// well-known canonical token buckets (06-usage-cost.md §3.1). First present alias
+// per bucket wins. These are PURE ALIASES only (F3) — a rename, never a
+// reinterpretation: cache_read/cache_write/reasoning are stored verbatim as
+// additive detail keys and are NEVER subtracted from input. Emitters spell the
+// cache/reasoning keys several ways (Anthropic-style, OTel-nested, the
+// #14902 input_cached alias), so the common spellings are covered here to avoid
+// silently dropping the bucket into the raw bag.
+var usageAliases = []struct{ attr, bucket string }{
+	{"gen_ai.usage.input_tokens", "input"},
+	{"gen_ai.usage.output_tokens", "output"},
+	{"gen_ai.usage.total_tokens", "total"}, // de-facto extension key (not core semconv)
+	{"gen_ai.usage.input_cached_tokens", "cache_read"},
+	{"gen_ai.usage.cache_read_input_tokens", "cache_read"},
+	{"gen_ai.usage.cache_read.input_tokens", "cache_read"},
+	{"gen_ai.usage.cache_creation_input_tokens", "cache_write"},
+	{"gen_ai.usage.input_cache_creation", "cache_write"},
+	{"gen_ai.usage.cache_creation.input_tokens", "cache_write"},
+	{"gen_ai.usage.reasoning_tokens", "reasoning"},
+	{"gen_ai.usage.output_reasoning_tokens", "reasoning"},
+}
+
+func init() {
+	for _, al := range usageAliases {
+		consumedKeys[al.attr] = true
+	}
 }
 
 var requestParamKeys = []string{
@@ -89,11 +117,19 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 		out["user_id"] = uid
 	}
 
-	// opaque input/output
+	// opaque input/output. I/O may arrive on span ATTRIBUTES (classic) or, on OTel
+	// GenAI semconv v1.37+ emitters, on a span EVENT (e.g. the
+	// gen_ai.client.inference.operation.details event) — scan attributes first, then
+	// fall back to events so modern emitters don't yield null I/O (#14930). Stored
+	// opaque: whatever string the messages carry (incl. the `parts:[…]` shape).
 	if v := getStr(in.Attributes, "gen_ai.input.messages"); v != "" {
+		out["input"] = v
+	} else if v := eventStr(in.Events, "gen_ai.input.messages"); v != "" {
 		out["input"] = v
 	}
 	if v := getStr(in.Attributes, "gen_ai.output.messages"); v != "" {
+		out["output"] = v
+	} else if v := eventStr(in.Events, "gen_ai.output.messages"); v != "" {
 		out["output"] = v
 	}
 
@@ -112,8 +148,12 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 		if params := requestParams(in.Attributes); len(params) > 0 {
 			out["model_parameters"] = params
 		}
-		if usage := providedUsage(in.Attributes); len(usage) > 0 {
+		if usage, mismatch := providedUsage(in.Attributes); len(usage) > 0 {
 			out["provided_usage_details"] = usage
+			if mismatch {
+				// Advisory (#14875): provided value buckets sum past the provided total.
+				attrs["llmobs.dq.usage_total_mismatch"] = true
+			}
 		}
 		// Provided cost (LM-4 provided-wins): when the client sends cost, preserve
 		// it verbatim as provided_cost_details, stamp cost_source=provided, and
@@ -192,20 +232,82 @@ func requestParams(a map[string]any) map[string]any {
 	return out
 }
 
-func providedUsage(a map[string]any) map[string]any {
+// providedUsage maps the provider's token counts verbatim into the well-known
+// canonical buckets (F3: no reinterpretation, cache never subtracted from input).
+// It returns the map and whether the provided total is inconsistent with the value
+// buckets (the advisory #14875 signal — the caller stamps the dq attribute).
+func providedUsage(a map[string]any) (usage map[string]any, totalMismatch bool) {
 	out := map[string]any{}
-	if v, ok := toInt(a["gen_ai.usage.input_tokens"]); ok {
-		out["input"] = v
-	}
-	if v, ok := toInt(a["gen_ai.usage.output_tokens"]); ok {
-		out["output"] = v
-	}
-	if in, iok := out["input"].(int64); iok {
-		if o, ook := out["output"].(int64); ook {
-			out["total"] = in + o
+	providerTotal := false
+	for _, al := range usageAliases {
+		if _, exists := out[al.bucket]; exists {
+			continue // first alias present per bucket wins
+		}
+		if v, ok := toInt(a[al.attr]); ok {
+			out[al.bucket] = v
+			if al.bucket == "total" {
+				providerTotal = true
+			}
 		}
 	}
-	return out
+	if len(out) == 0 {
+		return out, false
+	}
+	if !providerTotal {
+		// Synthesize total from the two PRIMARY buckets only. cache_read/cache_write
+		// (a detail of input) and reasoning (a detail of output) are NOT summed in —
+		// adding them would double-count when the provider's input/output already
+		// include them (F3: we cannot assume otherwise). Matches read-time reduction (§6).
+		if in, iok := out["input"].(int64); iok {
+			if o, ook := out["output"].(int64); ook {
+				out["total"] = in + o
+			}
+		}
+	} else {
+		totalMismatch = usageBucketsExceedTotal(out)
+	}
+	return out, totalMismatch
+}
+
+// usageBucketsExceedTotal reports whether the sum of the non-total value buckets
+// exceeds the provided total beyond a tolerance of max(1, total*1%) — the #14875
+// double-count-suspect heuristic (e.g. an inclusive `input` reported alongside a
+// separate cache bucket, with `total` the smaller real figure). ADVISORY ONLY: the
+// values are still stored verbatim; this only raises a dq flag for a consumer to
+// weigh, and may false-positive on a provider whose `input` is genuinely inclusive
+// of cache (F3 forbids us assuming either way).
+func usageBucketsExceedTotal(u map[string]any) bool {
+	total, ok := u["total"].(int64)
+	if !ok {
+		return false
+	}
+	var sum int64
+	for k, v := range u {
+		if k == "total" {
+			continue
+		}
+		if n, ok := v.(int64); ok {
+			sum += n
+		}
+	}
+	tol := total / 100
+	if tol < 1 {
+		tol = 1
+	}
+	return sum > total+tol
+}
+
+// eventStr returns the first string value of key found across a span's events.
+// GenAI I/O (semconv v1.37+) migrated from span attributes onto a span EVENT
+// (e.g. gen_ai.client.inference.operation.details); scanning by attribute key
+// rather than event name keeps this robust to the exact event chosen.
+func eventStr(events []SpanEventInput, key string) string {
+	for _, e := range events {
+		if v, ok := e.Attributes[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // providedCost maps client-sent cost into provided_cost_details (LM-4). Amounts

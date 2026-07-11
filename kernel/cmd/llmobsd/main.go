@@ -123,6 +123,9 @@ func run() error {
 	if ttl, terr := time.ParseDuration(cfg.ErasureSuppressionTTL); terr == nil {
 		store.SetErasureSuppressionTTL(ttl) // G3 tombstone retention
 	}
+	if qt, terr := time.ParseDuration(cfg.QueryStmtTimeout); terr == nil {
+		store.SetQueryTimeout(qt) // K1.5: server-side statement_timeout backstop for DSL reads
+	}
 	// Durable event bus (H6): Postgres-backed for lite (no new infra). Publishes
 	// span.ingested from the pipeline; plugins subscribe via poll/ack.
 	eventBus := bus.New(postgres.NewEventStore(pool), int64(cfg.EventBacklogCap))

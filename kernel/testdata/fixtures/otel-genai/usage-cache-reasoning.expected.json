@@ -1,0 +1,28 @@
+[
+  {
+    "attributes": {
+      "resource.service.name": "chat-svc"
+    },
+    "end_time": "2024-07-03T09:46:41Z",
+    "environment": "default",
+    "id": "cace000000000001",
+    "kind": "generation",
+    "model": "claude-3-5-sonnet",
+    "name": "chat claude-3-5-sonnet",
+    "project_id": "proj_demo",
+    "provided_usage_details": {
+      "cache_read": 300,
+      "cache_write": 50,
+      "input": 1000,
+      "output": 200,
+      "reasoning": 80,
+      "total": 1200
+    },
+    "raw_kind": "chat",
+    "start_time": "2024-07-03T09:46:40Z",
+    "status": {
+      "code": "unset"
+    },
+    "trace_id": "5cf92f3577b34da6a3ce929d0e0e4736"
+  }
+]

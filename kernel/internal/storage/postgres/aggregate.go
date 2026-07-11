@@ -37,11 +37,11 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	// A bounded safety limit on group cardinality.
 	sql += " LIMIT 10000"
 
-	rows, err := s.pool.Query(ctx, sql, args...)
+	rows, done, err := s.queryRead(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer done()
 
 	fields := rows.FieldDescriptions()
 	names := make([]string, len(fields))

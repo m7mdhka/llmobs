@@ -1,0 +1,41 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "chat-svc" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "hindsight", "version": "1.37.0" },
+          "spans": [
+            {
+              "traceId": "6df92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "e0e0e0e0e0e0e0e0",
+              "name": "chat gpt-4o",
+              "kind": 2,
+              "startTimeUnixNano": "1720000000000000000",
+              "endTimeUnixNano": "1720000001000000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o" } }
+              ],
+              "events": [
+                {
+                  "name": "gen_ai.client.inference.operation.details",
+                  "timeUnixNano": "1720000000500000000",
+                  "attributes": [
+                    { "key": "gen_ai.input.messages", "value": { "stringValue": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"summarize ticket 42\"}]}]" } },
+                    { "key": "gen_ai.output.messages", "value": { "stringValue": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"resolved\"}],\"finish_reason\":\"stop\"}]" } },
+                    { "key": "gen_ai.response.finish_reasons", "value": { "stringValue": "[\"stop\"]" } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

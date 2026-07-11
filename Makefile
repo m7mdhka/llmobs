@@ -82,6 +82,8 @@ test: ## Run unit tests (Go + TS)
 	@pnpm --filter @llmobs/schema-form build >/dev/null
 	@pnpm --filter @llmobs/plugin-sdk build >/dev/null
 	@pnpm --filter @llmobs/plugin-sdk test
+	@echo ">> test: (TS) tracing plugin (buildTree guards)"
+	@pnpm --filter @llmobs/plugin-tracing test
 
 .PHONY: plugin-python-test
 plugin-python-test: ## Python plugin backend tests (cross-language interop + Langfuse translation)

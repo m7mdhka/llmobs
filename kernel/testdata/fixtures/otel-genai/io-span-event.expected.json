@@ -1,0 +1,33 @@
+[
+  {
+    "attributes": {
+      "resource.service.name": "chat-svc"
+    },
+    "end_time": "2024-07-03T09:46:41Z",
+    "environment": "default",
+    "events": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"summarize ticket 42\"}]}]",
+          "gen_ai.output.messages": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"resolved\"}],\"finish_reason\":\"stop\"}]",
+          "gen_ai.response.finish_reasons": "[\"stop\"]"
+        },
+        "name": "gen_ai.client.inference.operation.details",
+        "timestamp": "2024-07-03T09:46:40.5Z"
+      }
+    ],
+    "id": "e0e0e0e0e0e0e0e0",
+    "input": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"summarize ticket 42\"}]}]",
+    "kind": "generation",
+    "model": "gpt-4o",
+    "name": "chat gpt-4o",
+    "output": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"resolved\"}],\"finish_reason\":\"stop\"}]",
+    "project_id": "proj_demo",
+    "raw_kind": "chat",
+    "start_time": "2024-07-03T09:46:40Z",
+    "status": {
+      "code": "unset"
+    },
+    "trace_id": "6df92f3577b34da6a3ce929d0e0e4736"
+  }
+]

@@ -36,6 +36,12 @@ type Handler struct {
 	limiter  *rateLimiter
 	secure   bool // set Secure on cookies (behind TLS/where the deployment is https)
 	cookieNS string
+	// Authority seams (Arc O / O3), injectable so the fast authz-matrix unit tests can drive
+	// the decision without a DB. Nil in production → the pool-backed resolvers in authority.go.
+	// They answer "is this user an instance admin?" and "may this user write config in this
+	// project's org?" — the two axes O3 gates pricing, api-keys, and create-org on.
+	instanceAdminFn func(ctx context.Context, userID string) (bool, error)
+	projectWriteFn  func(ctx context.Context, userID, projectID string) (bool, error)
 }
 
 // New builds the auth handler. secure controls the cookie Secure attribute.

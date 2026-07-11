@@ -50,8 +50,24 @@ func (f *fakeReprice) StartReprice(snapshotRefID, projectID string) (string, boo
 }
 
 func withRole(r *http.Request, role, csrf string) *http.Request {
-	sess := controlplane.Session{CSRFToken: csrf, User: controlplane.User{ID: "u1", Email: "a@b.c", Role: role}}
+	// User.ID is set to the role so the injected authority seams (O3) can key the decision
+	// on it without a DB — the fast authz-matrix path. In production these seams resolve the
+	// role from org_memberships against the target org (see authority.go).
+	sess := controlplane.Session{CSRFToken: csrf, User: controlplane.User{ID: role, Email: "a@b.c", Role: role}}
 	return r.WithContext(context.WithValue(r.Context(), sessionKey, sess))
+}
+
+// grantInstanceAdminTo injects the pricing authority seams so a session whose User.ID is in
+// `admins` is treated as instance-admin (global price / reprice authority). Everyone else,
+// including a viewer, is denied — the same authorized-vs-not decision the DB path makes,
+// without a DB.
+func grantInstanceAdminTo(h *Handler, admins ...string) {
+	set := map[string]bool{}
+	for _, a := range admins {
+		set[a] = true
+	}
+	h.instanceAdminFn = func(_ context.Context, userID string) (bool, error) { return set[userID], nil }
+	h.projectWriteFn = func(_ context.Context, userID, _ string) (bool, error) { return set[userID], nil }
 }
 
 // TestPricingWriteAuthz is the price-edit write-path proof (a NEW write surface): an
@@ -63,6 +79,7 @@ func TestPricingWriteAuthz(t *testing.T) {
 	store := &fakePriceOps{}
 	mux := http.NewServeMux()
 	h.RegisterPricing(mux, store, &fakeReprice{})
+	grantInstanceAdminTo(h, "owner") // global price edits require instance-admin (O3)
 
 	body := `{"provider":"openai","model":"gpt-4o","effective_from":"2026-01-01T00:00:00Z","rates":{"input":{"per_token":0.0000025}}}`
 	post := func(mod func(*http.Request) *http.Request) *httptest.ResponseRecorder {
@@ -77,7 +94,7 @@ func TestPricingWriteAuthz(t *testing.T) {
 		t.Fatalf("anonymous price edit must be 401, got %d", rec.Code)
 	}
 	// Admin session but NO CSRF → 403 (RequireAuth).
-	if rec := post(func(r *http.Request) *http.Request { return withRole(r, "admin", "tok") }); rec.Code != http.StatusForbidden {
+	if rec := post(func(r *http.Request) *http.Request { return withRole(r, "owner", "tok") }); rec.Code != http.StatusForbidden {
 		t.Fatalf("price edit without CSRF must be 403, got %d", rec.Code)
 	}
 	// Viewer session WITH CSRF → 403 (canWrite: no config authority).
@@ -93,7 +110,7 @@ func TestPricingWriteAuthz(t *testing.T) {
 	}
 	// Admin + CSRF → 201, store reached.
 	rec := post(func(r *http.Request) *http.Request {
-		r = withRole(r, "admin", "tok")
+		r = withRole(r, "owner", "tok")
 		r.Header.Set(csrfHeader, "tok")
 		return r
 	})
@@ -123,6 +140,7 @@ func TestRepriceTriggerAuthz(t *testing.T) {
 	rp := &fakeReprice{}
 	mux := http.NewServeMux()
 	h.RegisterPricing(mux, store, rp)
+	grantInstanceAdminTo(h, "owner") // price-scope reprice requires instance-admin (O3)
 
 	body := `{"scope":"price","provider":"Google","model":"gemini-1.5-pro","version":1}`
 	post := func(mod func(*http.Request) *http.Request) *httptest.ResponseRecorder {
@@ -143,7 +161,7 @@ func TestRepriceTriggerAuthz(t *testing.T) {
 	}); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer reprice must be 403, got %d", rec.Code)
 	}
-	if rec := post(func(r *http.Request) *http.Request { return withRole(r, "admin", "tok") }); rec.Code != http.StatusForbidden {
+	if rec := post(func(r *http.Request) *http.Request { return withRole(r, "owner", "tok") }); rec.Code != http.StatusForbidden {
 		t.Fatalf("reprice without CSRF must be 403, got %d", rec.Code)
 	}
 	if rp.started {
@@ -152,7 +170,7 @@ func TestRepriceTriggerAuthz(t *testing.T) {
 
 	// Admin + CSRF → 202, launcher reached with the CANONICALIZED ref id (Google→gemini).
 	rec := post(func(r *http.Request) *http.Request {
-		r = withRole(r, "admin", "tok")
+		r = withRole(r, "owner", "tok")
 		r.Header.Set(csrfHeader, "tok")
 		return r
 	})

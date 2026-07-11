@@ -23,10 +23,18 @@ func (s *authenticateStage) Name() string { return "authenticate" }
 func (s *authenticateStage) Process(ctx context.Context, ing *Ingestion) error {
 	id, err := controlplane.Authenticate(ctx, s.pool, ing.Bearer)
 	if err != nil {
+		// Invalid/missing credentials are PERMANENT (the key won't become valid) — the
+		// durable spool must dead-letter them, not requeue forever, or a flood of
+		// bad-auth records (acked before auth on the async-ack path) would accumulate
+		// and wedge ingest. A non-ErrUnauthorized error (auth DB down) stays transient
+		// so a valid record is preserved through an auth-backend outage.
+		if errors.Is(err, controlplane.ErrUnauthorized) {
+			return errors.Join(ErrPermanent, err)
+		}
 		return err
 	}
 	if !id.HasScope("ingest") {
-		return errors.New("api key lacks ingest scope")
+		return errors.Join(ErrPermanent, errors.New("api key lacks ingest scope"))
 	}
 	ing.Identity = id
 	return nil

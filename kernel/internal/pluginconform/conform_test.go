@@ -67,7 +67,7 @@ func TestFirstPartyPluginsConform(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: settingsSchema %q unreadable: %v", name, m.Spec.SettingsSchema, err)
 				}
-				for _, r := range CheckSettingsSchema(schemaRaw).Results {
+				for _, r := range CheckSettingsSchema(schemaRaw, false).Results {
 					if !r.Pass {
 						t.Errorf("%s: settings schema check %q failed: %s", name, r.Check, r.Detail)
 					}
@@ -81,12 +81,12 @@ func TestFirstPartyPluginsConform(t *testing.T) {
 // using an unsupported field type fails the subset check (J2).
 func TestSettingsSchemaConformance(t *testing.T) {
 	good := []byte(`{"type":"object","required":["k"],"properties":{"k":{"type":"string","writeOnly":true},"n":{"type":"integer","minimum":1}}}`)
-	if rep := CheckSettingsSchema(good); !rep.OK() {
+	if rep := CheckSettingsSchema(good, false); !rep.OK() {
 		t.Fatalf("supported schema should pass: %+v", rep.Results)
 	}
 	// A nested-object field is outside the flat subset → must fail.
 	bad := []byte(`{"type":"object","properties":{"nested":{"type":"object"}}}`)
-	rep := CheckSettingsSchema(bad)
+	rep := CheckSettingsSchema(bad, false)
 	if rep.OK() {
 		t.Fatal("unsupported schema must fail conformance")
 	}

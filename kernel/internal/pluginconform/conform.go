@@ -63,7 +63,11 @@ type Manifest struct {
 		Capabilities   []string `yaml:"capabilities"`
 		Permissions    []string `yaml:"permissions"`
 		SettingsSchema string   `yaml:"settingsSchema"`
-		Frontend       *struct {
+		// SettingsView (N2) selects schema vs custom mode; a runner passes
+		// (SettingsView == "custom") to CheckSettingsSchema so a custom plugin's
+		// intentionally non-subset schema is validated for secrets, not the flat subset.
+		SettingsView string `yaml:"settingsView"`
+		Frontend     *struct {
 			RemoteName    string `yaml:"remoteName"`
 			ExposedModule string `yaml:"exposedModule"`
 			Entry         string `yaml:"entry"`
@@ -158,19 +162,31 @@ func CheckManifest(raw []byte) (Report, *Manifest) {
 	return rep, &m
 }
 
-// CheckSettingsSchema verifies a plugin's settings JSON Schema (J2) is within the
-// supported subset the kernel + SchemaForm both validate — so a settings tab renders
-// and writes validate identically. Called by conformance when the manifest declares
-// a settingsSchema; the caller supplies the loaded schema bytes.
-func CheckSettingsSchema(raw []byte) Report {
+// CheckSettingsSchema verifies a plugin's settings JSON Schema (J2/N2). In SCHEMA mode it
+// must be within the supported flat subset the kernel + SchemaForm both validate (so a
+// settings tab renders and writes validate identically). In CUSTOM mode the plugin owns
+// validation of its opaque non-secret values, so the schema is checked only for valid
+// writeOnly (secret) declarations — non-subset property types are allowed. Called by
+// conformance when the manifest declares settings; the caller supplies the loaded schema
+// bytes (may be empty in custom mode) and whether the plugin is in custom mode.
+func CheckSettingsSchema(raw []byte, custom bool) Report {
 	var rep Report
+	if len(raw) == 0 {
+		// A custom plugin may carry no schema (no secrets); schema mode requires one.
+		rep.add("settings-schema-json", custom, "schema mode requires a settingsSchema")
+		return rep
+	}
 	if !json.Valid(raw) {
 		rep.add("settings-schema-json", false, "not valid JSON")
 		return rep
 	}
 	rep.add("settings-schema-json", true, "")
-	_, err := pluginsettings.ParseSchema(raw)
-	rep.add("settings-schema-subset", err == nil, detailErr(err))
+	_, err := pluginsettings.ParseSchema(raw, custom)
+	label := "settings-schema-subset"
+	if custom {
+		label = "settings-schema-secrets"
+	}
+	rep.add(label, err == nil, detailErr(err))
 	return rep
 }
 

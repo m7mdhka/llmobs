@@ -38,10 +38,20 @@ type Field struct {
 }
 
 // Model is the parsed settings schema: a flat set of fields (settings are one level;
-// nested objects/arrays are a future arc, ADR-0024).
+// nested objects/arrays are a future arc, ADR-0024). In CUSTOM mode (N2) the plugin
+// mounts its own settings view and non-secret values are stored opaquely; Fields then
+// holds ONLY the declared secret (writeOnly) fields, so H4 (encrypt + never return) still
+// applies, while any other key is accepted and persisted as-is (bounded by MaxValueBytes).
 type Model struct {
 	Fields []Field
+	Custom bool
 }
+
+// MaxValueBytes bounds the serialized size of a CUSTOM plugin's stored settings document
+// (opaque non-secret values are un-schema'd, so they need an explicit ceiling — a plugin
+// must not turn its project-shared settings row into unbounded storage). 64 KiB is far
+// beyond any real settings form and well under a problematic row size.
+const MaxValueBytes = 64 << 10
 
 // Field returns the named field, or false.
 func (m *Model) Field(name string) (Field, bool) {
@@ -89,7 +99,14 @@ type propSpec struct {
 // fields. Field order follows the schema's property order is not defined by JSON, so
 // fields are sorted by name for a stable, deterministic Model (rendering order in the
 // form is the client's concern).
-func ParseSchema(raw []byte) (*Model, error) {
+func ParseSchema(raw []byte, custom bool) (*Model, error) {
+	// Custom mode: the plugin renders its own view and stores opaque non-secret JSON. A
+	// schema is OPTIONAL and read ONLY for its writeOnly (secret) string fields (so H4
+	// holds); an empty/absent schema simply means "no secrets, everything opaque". We do
+	// NOT reject non-subset property types here — the custom view owns validation.
+	if custom {
+		return parseCustom(raw)
+	}
 	var rs rawSchema
 	if err := json.Unmarshal(raw, &rs); err != nil {
 		return nil, fmt.Errorf("parse settings schema: %w", err)
@@ -120,6 +137,32 @@ func ParseSchema(raw []byte) (*Model, error) {
 			Enum: p.Enum, Secret: p.WriteOnly, Required: required[name],
 			Default: p.Default, MinLength: p.MinLength, Minimum: p.Minimum, Maximum: p.Maximum,
 		})
+	}
+	sort.Slice(m.Fields, func(i, j int) bool { return m.Fields[i].Name < m.Fields[j].Name })
+	return m, nil
+}
+
+// parseCustom builds a custom-mode model: only the schema's writeOnly string fields
+// become (secret) Fields; everything else is opaque. A nil/empty schema yields a model
+// with no secrets. A writeOnly field that is not a string is still rejected (a secret is
+// an encrypted string, same as schema mode).
+func parseCustom(raw []byte) (*Model, error) {
+	m := &Model{Custom: true}
+	if len(raw) == 0 {
+		return m, nil
+	}
+	var rs rawSchema
+	if err := json.Unmarshal(raw, &rs); err != nil {
+		return nil, fmt.Errorf("parse settings schema: %w", err)
+	}
+	for name, p := range rs.Properties {
+		if !p.WriteOnly {
+			continue // non-secret fields are opaque in custom mode
+		}
+		if FieldType(p.Type) != TypeString {
+			return nil, fmt.Errorf("settings field %q: writeOnly (secret) is only supported for string", name)
+		}
+		m.Fields = append(m.Fields, Field{Name: name, Type: TypeString, Title: p.Title, Description: p.Description, Secret: true})
 	}
 	sort.Slice(m.Fields, func(i, j int) bool { return m.Fields[i].Name < m.Fields[j].Name })
 	return m, nil

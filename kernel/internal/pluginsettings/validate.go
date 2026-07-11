@@ -30,6 +30,9 @@ func (e *ValidationError) Error() string {
 // A provided secret value of "" is treated as "not provided" (the preserve signal),
 // handled by the store; Validate does not fault an empty secret.
 func Validate(m *Model, incoming map[string]json.RawMessage, alreadySet map[string]bool) error {
+	if m.Custom {
+		return validateCustom(m, incoming)
+	}
 	for name := range incoming {
 		if _, ok := m.Field(name); !ok {
 			return &ValidationError{Field: name, Reason: "unknown field (not in settings schema)"}
@@ -48,6 +51,30 @@ func Validate(m *Model, incoming map[string]json.RawMessage, alreadySet map[stri
 		}
 		if err := validateValue(f, raw); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateCustom checks a custom-mode write (N2): the plugin owns validation of its
+// opaque non-secret values, so the kernel only enforces that (a) a declared SECRET field
+// is a string (or empty = preserve — it is stored encrypted), and (b) every value is
+// itself valid JSON. The total-size ceiling is enforced by the store against the merged
+// document (MaxValueBytes). Unknown keys are ALLOWED (that is the whole point of custom
+// mode) — but a key colliding with a declared secret name must obey the secret rule.
+func validateCustom(m *Model, incoming map[string]json.RawMessage) error {
+	for name, raw := range incoming {
+		if !json.Valid(raw) {
+			return &ValidationError{Field: name, Reason: "must be valid JSON"}
+		}
+		if f, ok := m.Field(name); ok && f.Secret {
+			if isEmptyString(raw) {
+				continue // preserve signal
+			}
+			var s string
+			if err := json.Unmarshal(raw, &s); err != nil {
+				return &ValidationError{Field: name, Reason: "secret must be a string"}
+			}
 		}
 	}
 	return nil

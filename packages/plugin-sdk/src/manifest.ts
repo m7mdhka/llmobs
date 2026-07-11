@@ -61,6 +61,10 @@ export interface PluginManifest {
     permissions?: string[];
     frontend?: PluginFrontend;
     settingsSchema?: string;
+    /** How settings are edited/stored (N2). "schema" (default): SchemaForm + flat-subset
+     *  validation. "custom": the plugin mounts its own settings view and non-secret values
+     *  are stored as opaque JSON; declared writeOnly fields stay encrypted + never returned. */
+    settingsView?: "schema" | "custom";
     backend?: PluginBackend;
     store?: PluginStore;
     jobs?: PluginJob[];

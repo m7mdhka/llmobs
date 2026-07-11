@@ -85,11 +85,11 @@ func TestDirSourceScanAndServe(t *testing.T) {
 	}
 	// The settings schema (J2) is loaded from the manifest-relative path and served
 	// by SchemaFor for the settings store.
-	schema, ok := SchemaFor(ds, "acme/demo")
+	schema, _, ok := SchemaFor(ds, "acme/demo")
 	if !ok || !strings.Contains(string(schema), "writeOnly") {
 		t.Fatalf("SchemaFor must return the loaded settings schema, got ok=%v schema=%s", ok, schema)
 	}
-	if _, ok := SchemaFor(ds, "acme/nope"); ok {
+	if _, _, ok := SchemaFor(ds, "acme/nope"); ok {
 		t.Fatal("SchemaFor must report false for an unknown plugin")
 	}
 

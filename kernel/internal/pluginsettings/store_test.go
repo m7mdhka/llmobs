@@ -38,7 +38,7 @@ func testSchema(t *testing.T) *Model {
 	    "apiKey": {"type": "string", "writeOnly": true}
 	  }
 	}`)
-	m, err := ParseSchema(raw)
+	m, err := ParseSchema(raw, false)
 	if err != nil {
 		t.Fatalf("parse schema: %v", err)
 	}
@@ -182,5 +182,133 @@ func TestRequiredSecretSatisfiedByExisting(t *testing.T) {
 		"endpoint": json.RawMessage(`"https://a2"`),
 	}); err != nil {
 		t.Fatalf("omitting an already-set required secret must be allowed: %v", err)
+	}
+}
+
+// customModel is a custom-mode (N2) model declaring one secret; everything else is opaque.
+func customModel(t *testing.T) *Model {
+	t.Helper()
+	m, err := ParseSchema([]byte(`{"type":"object","properties":{"apiKey":{"type":"string","writeOnly":true}}}`), true)
+	if err != nil {
+		t.Fatalf("parse custom schema: %v", err)
+	}
+	if !m.Custom {
+		t.Fatal("model should be custom")
+	}
+	return m
+}
+
+// TestCustomModeOpaqueRoundTripAndSecret: custom mode persists arbitrary nested non-secret
+// JSON verbatim, keeps the declared secret encrypted + never-returned (H4), and the raw
+// stored KV bytes never contain the secret plaintext.
+func TestCustomModeOpaqueRoundTripAndSecret(t *testing.T) {
+	m := customModel(t)
+	s, kv := newStore(t)
+	ctx := context.Background()
+	const plugin, project = "acme/custom", "projA"
+	const secretVal = "sk-custom-super-secret"
+
+	nested := json.RawMessage(`[{"when":{"op":"eq"},"then":["a","b"]}]`)
+	if err := s.Set(ctx, m, plugin, project, map[string]json.RawMessage{
+		"rules":  nested,
+		"apiKey": json.RawMessage(`"` + secretVal + `"`),
+	}); err != nil {
+		t.Fatalf("custom set: %v", err)
+	}
+
+	view, err := s.Get(ctx, m, plugin, project)
+	if err != nil {
+		t.Fatalf("custom get: %v", err)
+	}
+	if !bytes.Equal(view.Values["rules"], nested) {
+		t.Fatalf("opaque nested value not round-tripped: %s", view.Values["rules"])
+	}
+	if !view.Secrets["apiKey"] {
+		t.Fatal("apiKey should be reported set")
+	}
+	if _, leaked := view.Values["apiKey"]; leaked {
+		t.Fatal("secret must never be in custom-mode values")
+	}
+	// H4 at the storage layer: the raw KV bytes never contain the plaintext.
+	raw, _, _ := kv.Get(ctx, plugin, project, settingsKey)
+	if bytes.Contains(raw, []byte(secretVal)) {
+		t.Fatalf("secret plaintext found in stored KV: %s", raw)
+	}
+}
+
+// TestCustomModeSecretPreserveOnEmpty: re-saving a custom form with an empty secret keeps
+// the stored secret (the plugin didn't retype it) — same guarantee as schema mode.
+func TestCustomModeSecretPreserveOnEmpty(t *testing.T) {
+	m := customModel(t)
+	s, _ := newStore(t)
+	ctx := context.Background()
+	const plugin, project = "acme/custom", "projA"
+
+	if err := s.Set(ctx, m, plugin, project, map[string]json.RawMessage{"apiKey": json.RawMessage(`"first-secret"`)}); err != nil {
+		t.Fatal(err)
+	}
+	// Re-save with an empty secret + a changed opaque value.
+	if err := s.Set(ctx, m, plugin, project, map[string]json.RawMessage{"apiKey": json.RawMessage(`""`), "note": json.RawMessage(`"hi"`)}); err != nil {
+		t.Fatal(err)
+	}
+	view, _ := s.Get(ctx, m, plugin, project)
+	if !view.Secrets["apiKey"] {
+		t.Fatal("secret must be preserved when re-saved empty")
+	}
+	if string(view.Values["note"]) != `"hi"` {
+		t.Fatalf("opaque value not saved: %s", view.Values["note"])
+	}
+}
+
+// TestCustomModeSizeCap: an oversized opaque blob is rejected (a plugin can't turn
+// project-shared settings into unbounded storage).
+func TestCustomModeSizeCap(t *testing.T) {
+	m := customModel(t)
+	s, _ := newStore(t)
+	ctx := context.Background()
+	big := make([]byte, MaxValueBytes+100)
+	for i := range big {
+		big[i] = 'x'
+	}
+	blob, _ := json.Marshal(string(big))
+	err := s.Set(ctx, m, "acme/custom", "projA", map[string]json.RawMessage{"blob": blob})
+	if ve, ok := AsValidationError(err); !ok {
+		t.Fatalf("oversized custom settings must be a validation error, got %v", err)
+	} else if ve.Field != "" {
+		_ = ve
+	}
+}
+
+// TestCustomModeReclassifiedSecretNotLeaked is the prove-the-negative for the review's
+// H4 edge: a value stored as OPAQUE under a name, then that name is later reclassified as
+// a secret (a trusted manifest evolution), must NEVER be returned in the clear by Get.
+// The read seam excludes declared-secret keys by construction (invariant #11).
+func TestCustomModeReclassifiedSecretNotLeaked(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	const plugin, project = "acme/custom", "projA"
+
+	// v1: apiKey is a plain opaque value (not writeOnly).
+	noSecret, err := ParseSchema([]byte(`{"type":"object","properties":{}}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set(ctx, noSecret, plugin, project, map[string]json.RawMessage{"apiKey": json.RawMessage(`"sk-was-plaintext"`)}); err != nil {
+		t.Fatal(err)
+	}
+
+	// v1.1: apiKey is now declared writeOnly (secret). A GET must not return the stale
+	// plaintext lingering under that name.
+	withSecret := customModel(t) // declares apiKey writeOnly
+	view, err := s.Get(ctx, withSecret, plugin, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, leaked := view.Values["apiKey"]; leaked {
+		t.Fatalf("reclassified secret leaked as plaintext value: %s", view.Values["apiKey"])
+	}
+	// It reports not-set (no ciphertext yet), never the plaintext.
+	if view.Secrets["apiKey"] {
+		t.Fatal("apiKey should report not-set until a secret is sealed")
 	}
 }

@@ -365,7 +365,7 @@ func run() error {
 	// (secret) fields are envelope-encrypted with the same box as secrets and never
 	// returned. The schema comes from the registry (loaded from the manifest).
 	settingsStore := pluginsettings.NewStore(postgres.NewPluginKV(pool), secretBox)
-	settingsSchema := func(pluginID string) (json.RawMessage, bool) { return registry.SchemaFor(regSource, pluginID) }
+	settingsSchema := func(pluginID string) (json.RawMessage, bool, bool) { return registry.SchemaFor(regSource, pluginID) }
 	// Settings WRITES require configuration authority (admins today, #21 seam): the
 	// session role must carry a write scope. The frontend token already bounded the
 	// plugin + tenant; this is the "who may administer" half so a viewer cannot

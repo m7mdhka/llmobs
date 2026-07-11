@@ -198,6 +198,14 @@ the `kv` primitive made frontend-reachable and schema-aware — not a new primit
   that omits the field or sends `""` **preserves** the stored secret (re-saving a form
   never wipes a secret the user did not retype). This is the settings analogue of the
   `secrets` never-return guarantee.
+- **Custom settings view — `spec.settingsView: "custom"` (N2).** A plugin whose settings
+  need a rule-builder or visual editor the flat subset can't express opts into **custom**
+  mode: it **mounts its own settings view** (the neutral frontend contract, §8) and the
+  same `/get`/`/set` endpoints store its non-secret values as **opaque JSON** (any shape,
+  bounded to 64 KiB) — the kernel does not subset-validate them; the custom view owns that.
+  A `writeOnly` field declared in `settingsSchema` (optional here, read only for its
+  secret declarations) is **still** encrypted and never returned — H4 holds identically in
+  custom mode. Schema mode (SchemaForm) stays the default; custom is the escape hatch.
 
 ## 8. Frontend mount contract (framework-neutral, ADR-0030 / N1)
 

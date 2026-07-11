@@ -120,7 +120,34 @@ externally-consumed schema (MCP tool schemas included): **the advertised/seriali
 schema MUST stay within the representable subset; strict validation is a separate
 server-side layer, never expressed as an advertised `pattern`.**
 
+## Amended (N2 / ADR-0030) — the custom-settings-view escape
+
+The flat subset renders standard fields; a plugin needing a **custom** settings UI (a
+rule-builder, a visual editor) could not persist its complex shape. N2 adds an escape
+**without** widening the subset or the secret rule:
+
+- A plugin declares `spec.settingsView: "custom"`. Schema mode (SchemaForm + flat-subset
+  validation) stays the **default** — the 80% get consistency for free.
+- In custom mode the plugin **mounts its own settings view** via the neutral frontend
+  contract (ADR-0030) and reads/writes through the same `useSettings` hook + `/get`/`/set`
+  endpoints. Non-secret values are stored as **opaque JSON** (any shape), bounded by a
+  fixed ceiling (`pluginsettings.MaxValueBytes`, 64 KiB) so a plugin can't turn
+  project-shared settings into unbounded storage.
+- **Secrets are unchanged (H4 holds).** A `writeOnly` field declared in `settingsSchema`
+  (optional in custom mode, read ONLY for its secret declarations) is still
+  envelope-encrypted, preserved-on-empty, and **never returned** — proven in custom mode
+  by `pluginsettings` + settings-handler tests. A secret name is never written to the
+  plaintext values map, so it cannot be read back even as opaque data.
+  A declared secret is excluded from the returned values on the READ seam AND reaped from
+  the plaintext map on the WRITE seam, so even a field **reclassified** opaque→`writeOnly`
+  across a manifest evolution can never be read back in the clear (invariant #11 — the
+  guard lives on both convergence seams, not just write).
+- The kernel does not validate the opaque shape (the custom view owns that); it enforces
+  only valid-JSON, the secret-is-a-string rule, and the size ceiling. Conformance checks a
+  custom plugin's schema only for valid `writeOnly` declarations, not the flat subset.
+
 ## Deferred
 
-Richer schema dialect (nested objects, arrays, conditional fields); per-field RBAC on
-settings; settings history/audit. Tracked; not needed to close B9.
+Per-field RBAC on settings; settings history/audit. (Richer schema dialect for the
+*schema-form* path is subsumed by the custom-view escape above.) Tracked; not needed to
+close B9.

@@ -1,0 +1,9 @@
+{
+  "$comment": "Invalid: id does not encode provider/model#version; rates is empty (a price entry must carry at least one rate); a rate object omits per_token.",
+  "id": "gpt-4o",
+  "provider": "openai",
+  "model": "gpt-4o",
+  "version": 0,
+  "effective_from": "not-a-timestamp",
+  "rates": {}
+}

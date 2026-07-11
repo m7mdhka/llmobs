@@ -132,6 +132,17 @@ for the derivation. This makes historical cost **re-derivable**: a later price
 correction does not silently invalidate stored costs, and a re-pricing run can
 recompute `cost_details` for the affected spans.
 
+**Encoding (Normative) — ADR-0029.** The price table (`api/schemas/pricing/v1alpha1`)
+stores price entries as immutable, versioned rows keyed `(provider, model, version)`,
+whose primary key `id = "<provider-canonical>/<model-canonical>#<version>"`. The
+`pricing_snapshot_ref` is `{ type: "price", id: <that entry id>, label:
+"<provider>/<model> v<version>" }`. Because a version row is immutable and carries its
+**whole** rate schedule — base rates, per-bucket detail rates, AND the tier schedule
+(§7.5) — the single `id` fully identifies everything needed to re-derive; the tier
+schedule version is the entry version, not a separate field. A re-pricing backfill
+(below) matches spans by `pricing_snapshot_ref.id` and re-derives against the newest
+applicable version.
+
 Re-pricing MUST be performed as a **backfill job on the kernel `jobs` primitive**
 (not an inline mutation): a job reads spans whose `pricing_snapshot_ref` matches
 the corrected price entry and re-emits `upsert` events recomputing `cost_details`,

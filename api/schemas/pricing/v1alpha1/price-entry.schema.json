@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmobs.dev/schemas/pricing/v1alpha1/price-entry.schema.json",
+  "title": "LLMObs price entry (v1alpha1)",
+  "description": "One immutable, versioned pricing snapshot for a (provider, model) \u2014 the artifact cost derivation reads (ADR-0029; 06-usage-cost.md \u00a74\u2013\u00a75, \u00a77). Instance-global reference metadata: rates are data-driven (\u00a77.4), the entry is never mutated (an edit creates a new version), and its id encodes provider/model/version so it IS the pricing_snapshot_ref (\u00a75).",
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "This is the STORED shape. On a create request (POST /v1alpha1/pricing) the readOnly fields (id, version, source, created_by, created_at) are server-assigned and ignored if sent; only provider, model, effective_from, and rates are required as input.",
+  "required": [
+    "provider",
+    "model",
+    "effective_from",
+    "rates"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^.+/.+#[0-9]+$",
+      "readOnly": true,
+      "description": "Server-assigned. Primary key and pricing_snapshot_ref id: \"<provider-canonical>/<model-canonical>#<version>\". Encodes everything a re-pricing backfill needs (D4)."
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical provider (D3, e.g. openai, anthropic, google). Aliases (vertex_ai/gemini/google_ai) collapse to one via the single provider-canonicalization table."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical model key (D3). A provider-prefixed name (openai/gpt-4o) normalizes to the same key at load AND lookup (R6)."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Server-assigned. Monotonic version per (provider, model). An edit appends the next version; prior versions are retained for re-derivability.",
+      "readOnly": true
+    },
+    "effective_from": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Derivation applies this entry to a span when it is the newest version with effective_from <= span.start_time (time-correct pricing)."
+    },
+    "rates": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Data-driven unit rates (\u00a77.4/R4). Keyed by usage-detail key (input, output, cache_read, cache_write, reasoning, audio, image, and any future key). Presence of a key's rate \u2014 not a hardcoded provider/bucket list \u2014 is what makes a bucket specially priced.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "per_token"
+        ],
+        "properties": {
+          "per_token": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Cost per token/unit for this bucket. float64 in Go/JSON; Decimal64(12) on the ClickHouse adapter (D7)."
+          },
+          "reduces": {
+            "enum": [
+              "input",
+              "output"
+            ],
+            "description": "Which base count this bucket's tokens are subtracted from when computing the residual (\u00a77.4/R3): base residual = base \u2212 \u03a3(bucket counts whose reduces == base). Absent = a standalone additive bucket (does not reduce a base). Makes the residual data-driven, never a hardcoded 'cache_read subtracts from input' branch."
+          }
+        }
+      }
+    },
+    "tiers": {
+      "type": "array",
+      "default": [],
+      "description": "Above-threshold (tiered) rates (\u00a77.5/R7). Tokens of `key` above `threshold_tokens` bill at `per_token` instead of the base rate. The applied tier schedule is captured by the entry version (D4), so re-pricing is deterministic.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "threshold_tokens",
+          "per_token"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The usage-detail key this tier applies to (e.g. input)."
+          },
+          "threshold_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Tokens above this count bill at the tier rate (e.g. 200000 for a >200k context tier)."
+          },
+          "per_token": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Rate for tokens above the threshold."
+          }
+        }
+      }
+    },
+    "source": {
+      "enum": [
+        "default",
+        "override"
+      ],
+      "default": "default",
+      "description": "Server-assigned. Provenance: 'default' seeded by the kernel; 'override' written by an operator. Informative only.",
+      "readOnly": true
+    },
+    "raw_provider": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The verbatim provider string an operator supplied, preserved alongside the canonical provider (\u00a70/D6). Never used for lookup."
+    },
+    "created_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Server-assigned. Actor that wrote this version (session identity), for audit. Null for seeded defaults.",
+      "readOnly": true
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Server-assigned. When this version row was inserted.",
+      "readOnly": true
+    }
+  }
+}

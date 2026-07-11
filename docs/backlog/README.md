@@ -88,7 +88,7 @@ rule+fixture set for that arc is in [§ Enrich-stage build spec](#enrich-stage-b
 | B3 | SSO/domain data model (client secret separate, never-exported; per-domain enforcement as a record) | feature | M | issue-21 notes §6 (#14713) | #21 |
 | B4 | SCIM under the one-shared-guard rule (authz at handler entry before any I/O) | feature | M | issue-21 notes (#14448) | #21 |
 | B5 | Server-resolved subject == client-supplied identity (audit integrity) | enforce-pinned-rule | S | issue-21 notes (#14790) | #21 |
-| B6 | **Plugin-token revocation seam** (per-plugin/`jti` denylist in verify path) — LIVE CODE gap, gates pilot→prod | feature | M | ADR-0025 R3; issue-21 §… ; **#63** | #63 |
+| ~~B6~~ | ~~**Plugin-token revocation seam** (per-plugin/`jti` denylist in verify path) — LIVE CODE gap, gates pilot→prod~~ **RESOLVED — Arc O / O4, PR #128 (`6b0b631`).** Revocation epoch store checked inside `plugintoken.Signer.Verify*` (the one chokepoint); per-user/plugin/`jti` denial with `revoked_at >= issued_at` (still-within-TTL denied); `RevokeUser` cascade; one supervisor disable seam. ADR-0033. | feature | M | ADR-0025 R3; ADR-0033; **#63** | #63 ✅ |
 | B8 | Agent-callable identity tools privileged + scope-gated; H3 intersection on agent tokens | enforce-pinned-rule | S | ADR-0025 R5 | #21 |
 | B9 | MCP OAuth dynamic client registration (RFC 7591) for agent/plugin surfaces | feature | M | round-02 §5 (#7093); issue-21 §7 | #21 |
 | B10 | Group-mappable workspace + per-user project/dataset isolation | feature | M | round-02 §5 (#3327); issue-21 §7 | #21 |
@@ -187,8 +187,8 @@ Build order from `issue-21-auth-rbac-design-notes.md` §6, with the harvest addi
 3. **SSO/domain data model (B3)** — client secret separate/never-exported; per-domain
    enforcement as a record, not an env var.
 4. **SCIM under the one-shared-guard rule (B4)** — authz at handler entry before any I/O.
-5. **Lifecycle (B5, B6, B7)** — server-resolved subject == client identity; the
-   **revocation seam (#63, gates pilot→prod)**; refresh-at-ratio.
+5. **Lifecycle (B5, ~~B6~~, B7)** — server-resolved subject == client identity; the
+   **revocation seam (~~#63~~ ✅ RESOLVED, Arc O / O4, PR #128)**; refresh-at-ratio.
 6. **Agent/MCP surfaces (B8, B9, B10)** — privileged scope-gated identity tools; RFC-7591
    dynamic client registration; group-mappable workspace + per-user isolation.
 
@@ -263,7 +263,7 @@ amendment, trigger = first untrusted third-party frontend) and a **`blobs` primi
 ## Issue index
 
 - **#13** enrich/cost-derivation (Cluster A) · **#21** auth/RBAC (Cluster B) ·
-  **#63** plugin-token revocation (B6) · **#69** compose hardening (D1) ·
+  ~~**#63** plugin-token revocation (B6)~~ ✅ (O4, PR #128) · **#69** compose hardening (D1) ·
   **#14/#16** scale bus/adapter (Cluster D) · **#12** sampling stage · **#5** SDK
   prevalidation (relates C3) · **#25** Tier-3 plugins · **#35–#42** demand.
 - **New (filed by this consolidation):** **#70** name/slug tenant-scope verify (P0) ·

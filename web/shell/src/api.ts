@@ -135,8 +135,10 @@ export async function mintFrontendToken(
  * makeFrontendTokenProvider returns a getter the SDK calls before each request. It
  * caches the current token and re-mints once it is within `skewMs` of expiry, so a
  * long-lived plugin surface never presents an expired token. On a mint failure it
- * returns undefined — the SDK then falls back to the session cookie (unconfined),
- * which is the documented same-origin behavior, not a hard failure.
+ * returns undefined — and the SDK now FAILS CLOSED on undefined (G1): the plugin's
+ * kernel call throws rather than silently running at the user's full session scope.
+ * A persistent mint failure surfaces as the plugin surface's error/unavailable state,
+ * never as an unconfined (full-privilege) data read.
  */
 export function makeFrontendTokenProvider(
   pluginId: string,

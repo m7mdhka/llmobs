@@ -103,20 +103,30 @@ func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *Compi
 		return s.authPlugin(r, op, reqPerm, svcTok, assertion)
 	}
 
-	// Case 1b — a plugin FRONTEND token (J1). A kernel-minted identity assertion the
-	// shell handed the plugin's frontend; its scopes are ALREADY the plugin-grant ∩
-	// user-session ∩ project intersection, so they are used directly. Two guards keep
-	// this from being widened: a distinct header, AND a signed PurposeFrontend marker
-	// (verified below) that ONLY the frontend mint sets — so a proxy/jobs-minted
-	// identity assertion (which carries un-intersected full-role scopes) cannot be
-	// replayed here for more than it was granted.
+	// Case 1b — a plugin FRONTEND request (J1/G1). A kernel-minted frontend token whose
+	// scopes are ALREADY the plugin-grant ∩ user-session ∩ project intersection, used
+	// directly. Two guards keep it from being widened: a distinct header, AND a signed
+	// PurposeFrontend marker (verified in authFrontend) that ONLY the frontend mint sets
+	// — so a proxy/jobs-minted identity assertion (un-intersected full-role scopes)
+	// cannot be replayed here for more than it was granted.
 	//
-	// SECURITY NOTE — least-privilege-by-default, NOT a boundary. A plugin frontend
-	// runs in the shell's origin (ADR-0004) and can bypass this token by calling with
-	// the ambient session cookie (Case 2) directly. This case CONFINES a cooperating
-	// SDK-using frontend; it does not contain a hostile one. Origin isolation is the
-	// future boundary (ADR-0004 amendment). See frontendtoken.Handler.
-	if ft := r.Header.Get(pluginproto.FrontendTokenHeader); ft != "" && svcTok == "" {
+	// G1 — FAIL CLOSED on the frontend path. A request is plugin-originated if it
+	// carries EITHER the frontend token OR the plugin-frontend marker (the SDK sends the
+	// marker on every plugin call). Such a request MUST resolve through the intersected
+	// frontend token and MUST NOT fall through to the session-cookie full-scope path
+	// (Case 2) below: a marked request with a missing/expired/invalid token is REJECTED,
+	// not silently run at the user's full permissions. This is what actually enforces
+	// least-privilege for a cooperating frontend — the escalation this fix closes.
+	//
+	// SECURITY NOTE — least-privilege-by-default, NOT a boundary. A HOSTILE same-origin
+	// frontend can still omit BOTH the marker and the token and call with the ambient
+	// session cookie (Case 2); containing that is origin isolation, the deferred future
+	// boundary (ADR-0004 amendment). This case confines a cooperating SDK-using frontend.
+	ft := r.Header.Get(pluginproto.FrontendTokenHeader)
+	if svcTok == "" && (ft != "" || r.Header.Get(pluginproto.PluginFrontendHeader) != "") {
+		if ft == "" {
+			return controlplane.Identity{}, errf("unauthorized", 401, "plugin frontend request requires a frontend token")
+		}
 		return s.authFrontend(op, reqPerm, ft)
 	}
 
@@ -202,6 +212,17 @@ func (s *Server) authFrontend(op, reqPerm, token string) (controlplane.Identity,
 	ac, err := s.signer.VerifyFrontendToken(token, time.Now())
 	if err != nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "invalid frontend token")
+	}
+	// Capability gate — mirror authPlugin (server.go authPlugin), enforced at THIS seam
+	// (invariant #11). An op with no plugin capability (CapForOp == "") is forbidden to
+	// ALL plugins, backend and frontend alike — today GDPR erasure ("delete"). Without
+	// this, a plugin whose manifest declared traces:delete would, under an admin session,
+	// mint a frontend token carrying that data perm and perform erasure — making the
+	// frontend credential strictly MORE powerful than the backend double token, which
+	// the capability gate refuses. A frontend token may never authorize a plugin-
+	// forbidden primitive, however it was minted.
+	if perm.CapForOp(op) == "" {
+		return controlplane.Identity{}, errf("unauthorized", 403, "plugin frontends may not perform %q", op)
 	}
 	if !perm.Has(ac.Scopes, reqPerm) {
 		return controlplane.Identity{}, errf("unauthorized", 403, "outside the permission intersection for %s", reqPerm)

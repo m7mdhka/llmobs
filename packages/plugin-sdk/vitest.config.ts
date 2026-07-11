@@ -6,7 +6,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "jsdom",
-    include: ["test/**/*.test.tsx"],
+    include: ["test/**/*.test.{ts,tsx}"],
     globals: true,
   },
 });

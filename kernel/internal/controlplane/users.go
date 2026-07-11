@@ -10,10 +10,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
-// User is a resolved account. v1alpha1 has a single admin; role is carried now so
-// RBAC slots in without a migration.
+// User is a resolved account. Role (Arc O / O1) is the user's server-resolved membership
+// role in the ACTIVE org — set by ResolveSession from org_memberships (default org in the
+// single-org profiles O1 ships). It is NOT the legacy flat users.role and NOT a per-
+// project authority: O2 replaces this ambient field with per-project resolution
+// (RoleInOrg(user, OrgForProject(project))) at the request seam. Do not treat it as
+// authoritative for a project in a non-default org.
 type User struct {
 	ID    string
 	Email string
@@ -46,10 +52,32 @@ func BootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, email, password str
 	if ierr != nil {
 		return false, ierr
 	}
-	if _, err = pool.Exec(ctx,
+	// The first admin is the org OWNER (Arc O / O1). Bootstrap (org/project) runs before
+	// this, so the default org exists. The user insert AND the owner grant are ATOMIC (one
+	// transaction): a partial failure must never leave an admin with no membership — that
+	// would resolve to zero authority (fail closed) AND never self-heal (a later boot
+	// no-ops on "a user exists"), permanently locking out the operator.
+	orgID, oerr := DefaultOrgID(ctx, pool)
+	if oerr != nil {
+		return false, fmt.Errorf("resolve default org for admin membership: %w", oerr)
+	}
+	tx, terr := pool.Begin(ctx)
+	if terr != nil {
+		return false, terr
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err = tx.Exec(ctx,
 		`INSERT INTO users (id, email, password_hash, role) VALUES ($1,$2,$3,'admin')`,
 		id, email, hash); err != nil {
 		return false, fmt.Errorf("insert admin: %w", err)
+	}
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1,$2,$3)`,
+		id, orgID, perm.RoleOwner); err != nil {
+		return false, fmt.Errorf("grant admin owner membership: %w", err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit admin bootstrap: %w", err)
 	}
 	return true, nil
 }
@@ -62,8 +90,16 @@ var ErrBadCredentials = errors.New("bad credentials")
 func VerifyPassword(ctx context.Context, pool *pgxpool.Pool, email, password string) (User, error) {
 	var u User
 	var hash string
+	// Resolve the authoritative membership role (default org), exactly as ResolveSession
+	// does — so the login response and /auth/me agree and the legacy users.role is never
+	// surfaced to a client. No membership → "" → no scopes (fail closed).
 	err := pool.QueryRow(ctx,
-		`SELECT id, email, role, password_hash FROM users WHERE lower(email)=lower($1)`,
+		`SELECT u.id, u.email, COALESCE(m.role, ''), u.password_hash
+		   FROM users u
+		   LEFT JOIN org_memberships m
+		     ON m.user_id = u.id
+		    AND m.org_id = (SELECT org_id FROM projects ORDER BY created_at ASC LIMIT 1)
+		  WHERE lower(u.email) = lower($1)`,
 		strings.TrimSpace(email)).Scan(&u.ID, &u.Email, &u.Role, &hash)
 	if err == pgx.ErrNoRows {
 		// Verify against a dummy hash so a missing user and a wrong password take

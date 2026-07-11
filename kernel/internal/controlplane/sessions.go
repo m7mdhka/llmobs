@@ -58,9 +58,18 @@ func ResolveSession(ctx context.Context, pool *pgxpool.Pool, token string) (Sess
 	}
 	var s Session
 	var expires time.Time
+	// The session's role is the user's SERVER-RESOLVED membership role in the active org
+	// (the default org's, in the lite single-org profile) — NOT the legacy flat
+	// users.role, and never a client-supplied claim. A user with no membership resolves to
+	// role "" → perm.RoleScopes returns no scopes (fail closed). O2 wires per-project-org
+	// resolution; O1 resolves the default org here (OrgForProject/RoleInOrg exist for it).
 	err := pool.QueryRow(ctx,
-		`SELECT s.csrf_token, s.expires_at, u.id, u.email, u.role
-		   FROM sessions s JOIN users u ON u.id = s.user_id
+		`SELECT s.csrf_token, s.expires_at, u.id, u.email, COALESCE(m.role, '')
+		   FROM sessions s
+		   JOIN users u ON u.id = s.user_id
+		   LEFT JOIN org_memberships m
+		     ON m.user_id = u.id
+		    AND m.org_id = (SELECT org_id FROM projects ORDER BY created_at ASC LIMIT 1)
 		  WHERE s.token_hash = $1`, hashToken(token)).
 		Scan(&s.CSRFToken, &expires, &s.User.ID, &s.User.Email, &s.User.Role)
 	if err == pgx.ErrNoRows {

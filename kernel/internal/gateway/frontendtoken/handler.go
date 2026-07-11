@@ -73,7 +73,10 @@ func (h *Handler) Mint(w http.ResponseWriter, r *http.Request) {
 	// The intersection: plugin manifest perms ∩ the user's session perms. The
 	// plugin can never exceed its own grant OR the user's, and the project is the
 	// session's (a plugin cannot request another tenant).
-	userPerms := perm.RoleScopes(sess.User.Role)
+	// DataPermsOnly: strip management scopes (owner/admin hold them) so a frontend token
+	// can never carry members:manage/org:manage — even if the manifest grant were somehow
+	// to include one. Belt-and-suspenders with the admission-time strip on pluginPerms.
+	userPerms := perm.DataPermsOnly(perm.RoleScopes(sess.User.Role))
 	effective := pluginproto.Intersect(pluginPerms, userPerms)
 
 	tok, claims, err := h.signer.MintFrontendToken(

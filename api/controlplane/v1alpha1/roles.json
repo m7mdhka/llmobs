@@ -1,0 +1,55 @@
+{
+  "$comment": "Canonical Role → Scope[] map (Arc O / O1, ADR-0031). The SOURCE OF TRUTH the kernel perm package mirrors; a conformance test asserts perm.RoleScopes equals this exactly, so the two never drift. Data scopes (traces:*/scores:*) are the shared currency with plugin grants; management scopes (members:manage/org:manage/actions:execute) are RBAC-only. Roles listed highest-privilege first.",
+  "version": "v1alpha1",
+  "dataScopes": [
+    "traces:read.metadata",
+    "traces:read.payloads",
+    "traces:write",
+    "traces:delete",
+    "scores:read",
+    "scores:read.payloads",
+    "scores:write"
+  ],
+  "managementScopes": [
+    "members:manage",
+    "org:manage",
+    "actions:execute"
+  ],
+  "roles": {
+    "owner": [
+      "traces:read.metadata",
+      "traces:read.payloads",
+      "traces:write",
+      "traces:delete",
+      "scores:read",
+      "scores:read.payloads",
+      "scores:write",
+      "members:manage",
+      "org:manage",
+      "actions:execute"
+    ],
+    "admin": [
+      "traces:read.metadata",
+      "traces:read.payloads",
+      "traces:write",
+      "traces:delete",
+      "scores:read",
+      "scores:read.payloads",
+      "scores:write",
+      "members:manage",
+      "actions:execute"
+    ],
+    "member": [
+      "traces:read.metadata",
+      "traces:read.payloads",
+      "scores:read",
+      "scores:read.payloads",
+      "scores:write",
+      "actions:execute"
+    ],
+    "viewer": [
+      "traces:read.metadata",
+      "scores:read"
+    ]
+  }
+}

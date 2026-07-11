@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
 // DirSource is the dev-mode plugin registry: it scans a directory whose
@@ -147,7 +149,11 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 		ExposedModule: m.Spec.Frontend.ExposedModule,
 		Nav:           nav,
 		Capabilities:  m.Spec.Capabilities,
-		Permissions:   m.Spec.Permissions,
+		// A plugin grant is DATA-ONLY by construction (Arc O / O1): strip any management
+		// scope (members:manage/org:manage/actions:execute) a manifest declares, so a
+		// plugin can never be granted control-plane administration via its manifest — the
+		// enforced form of the "no plugin holds a management scope" invariant.
+		Permissions: perm.DataPermsOnly(m.Spec.Permissions),
 	}
 	// Dev hot-reload (J3): when a live dev-server remoteEntry is configured for this
 	// plugin, advertise it directly and DON'T read the built dist (it may not exist —

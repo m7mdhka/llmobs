@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 	"github.com/m7mdhka/llmobs/kernel/internal/jobs"
 	"github.com/m7mdhka/llmobs/kernel/internal/plugindata"
 )
@@ -140,7 +141,9 @@ func (d *DirProvider) Plugins() []PluginSpec {
 		out = append(out, PluginSpec{
 			ID:                  m.Metadata.ID,
 			GrantedCapabilities: m.Spec.Capabilities,
-			GrantedScopes:       m.Spec.Permissions,
+			// Data-only grant (Arc O / O1): strip management scopes so a backend service
+			// token can never carry control-plane administration (mirror of dirsource).
+			GrantedScopes: perm.DataPermsOnly(m.Spec.Permissions),
 			Backend: executors.Backend{
 				URL:        m.Spec.Backend.URL,
 				InfoPath:   m.Spec.Backend.InfoPath,

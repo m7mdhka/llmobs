@@ -25,6 +25,8 @@ Covers:
 - The `llmobs-plugin.yaml` manifest.
 - [The inner loop — `make dev` (create → dev → edit → reload)](dev-loop.md) (J3).
 - [Settings — a schema-form tab with no backend](settings.md) (J2).
+- **[What you can and can't do — and why](what-you-can-and-cant-do.md)** — the honest map
+  of the plugin boundary: every intentional wall, why it's there, and its supported escape.
 - The [plugin trust model](trust-model.md) — what the frontend token confines (J1).
 - [Composing with other plugins](composing-plugins.md) — the island model + the HTTP
   escape (a plugin exposes its own API; others integrate as strangers).

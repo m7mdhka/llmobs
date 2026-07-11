@@ -244,6 +244,37 @@ shipped. When the stage is built it MUST honor them:
   (Evidence: Opik #5621 strips the prefix at load but not at lookup → all LiteLLM OTel
   spans record `cost = 0`; Opik #6928 routes Vertex AI models to `provider='gemini'`,
   breaking both pricing and credentials.)
+- **7.7 Order of operations: REDUCE FIRST, THEN TIER THE RESIDUAL; tiers are
+  GRADUATED, never cliff.** This resolves how §7.4 (residual) and §7.5 (tiers)
+  compose; both are normative.
+  - **7.7.1 Reduce before tiering.** Derivation MUST compute the residual base FIRST
+    (§7.4: `residual = base − Σ(specially-priced buckets whose rate declares it
+    reduces that base)`), and MUST apply tier breakpoints to that **residual**, never
+    to the raw base count. The specially-priced buckets (`cache_read`, `audio`,
+    `reasoning`, …) are already billed at their own rates, so counting them toward a
+    tier threshold on the raw base double-counts them — the same enumerate-and-double
+    failure class §7.4 names, surfacing as a wrong tier boundary. Concretely: with
+    `input = 210k`, `cache_read = 30k` (reduces input), and an input tier at `>200k`,
+    the residual input is `180k`, which is **below** the 200k breakpoint — so the tier
+    does NOT apply; billing the raw `210k` would wrongly cross it. A conformance
+    fixture MUST prove this, including the crossover case (residual just-under vs
+    just-over the breakpoint) computes correctly.
+  - **7.7.2 Graduated (tax-bracket), never cliff.** When a breakpoint is crossed, only
+    the tranche of tokens **above** the threshold bills at the tier rate; tokens up to
+    the threshold bill at the base rate. Derivation MUST NOT reprice the whole amount
+    at the crossed rate (a "cliff"), which produces a discontinuous cost jump at the
+    boundary that does not match real provider pricing. For a single breakpoint `T`
+    with residual `r > T`: `cost = T·base_rate + (r − T)·tier_rate`.
+  - **7.7.3 Single-breakpoint now; graduated multi-breakpoint is a shape-ready
+    follow-on.** The price-entry `tiers` shape (an array of `{key, threshold_tokens,
+    per_token}`, ADR-0029) and the reduce-then-tier order already support graduated
+    pricing across MORE than one breakpoint per key. The first derivation
+    implementation MUST implement and fixture the single-breakpoint case (§7.5); true
+    graduated multi-breakpoint pricing (≥2 tranches per key, each at its own rate) is
+    a tracked follow-on built on the same shape — the spec defines its semantics
+    (7.7.2 generalizes tranche-by-tranche) so the implementation is additive, never a
+    contract change. Until it lands, an entry SHOULD carry at most one breakpoint per
+    key; a second breakpoint's exact multi-tranche arithmetic is not yet guaranteed.
 
 > **Cross-adapter note.** 7.4–7.6 are pinned from a second incumbent (Opik / Comet,
 > a Java+ClickHouse codebase architecturally unlike Langfuse). Where a rule cites both

@@ -251,9 +251,15 @@ export interface LLMObsCanonicalTraceV1Alpha1 {
     /**
      * Set semantics; union-merged on update (03-trace.md §2).
      */
-    tags?:    string[];
-    userID?:  null | string;
-    version?: null | string;
+    tags?: string[];
+    /**
+     * Derived trace-level cost: SUM of NON-aggregate spans' total_cost (06-usage-cost.md §7.1;
+     * agent_step/tool_call excluded to avoid double-counting). Query-time derived like
+     * end_time; null when the trace has no leaf cost.
+     */
+    totalCost?: number | null;
+    userID?:    null | string;
+    version?:   null | string;
 }
 
 /**

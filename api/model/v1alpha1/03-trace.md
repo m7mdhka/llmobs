@@ -25,6 +25,7 @@ trace-level promoted fields and dimensions; the detail lives in its spans.
 | `session_id` | string | yes | no | Session dimension (`01-entities.md` §4.1). |
 | `user_id` | string | yes | no | User dimension. |
 | `attributes` | map<string, value> | no | no | Open map; raw attributes preserved (`02-span.md` §6). Defaults `{}`. |
+| `total_cost` | decimal \| null | yes | no | **Derived** trace-level cost: `SUM(span.total_cost)` over the trace's **non-aggregate** spans (`06-usage-cost.md` §7.1 — an `agent_step`/`tool_call` span's cost duplicates its child model calls, so it is excluded to avoid double-counting). Null when the trace has no leaf cost. A query-time derived field like `end_time`/`span_count`. Both adapters round the roll-up to a shared fixed decimal scale (Postgres sums exact `NUMERIC`, ClickHouse accumulates `Float64`), so the result is **byte-identical** cross-adapter — conformance-tested, not merely within a tolerance. |
 
 - A trace has **no** `kind` and **no** generation fields — those are span-only.
 - Trace `input`/`output`/`status` are independent of any span's; they are set by

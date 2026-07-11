@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
 // MergeTraces unifies traces across the boundary. A trace is synthesized FROM
@@ -71,10 +73,12 @@ func SynthesizeTrace(spans []json.RawMessage) json.RawMessage {
 		return nil
 	}
 	type sp struct {
-		id, parent, name, env, rel, ver, sess, user, status string
-		start                                               time.Time
-		end                                                 *time.Time
-		attrs                                               map[string]any
+		id, parent, name, env, rel, ver, sess, user, status, kind string
+		start                                                     time.Time
+		end                                                       *time.Time
+		attrs                                                     map[string]any
+		cost                                                      float64
+		hasCost                                                   bool
 	}
 	var parsed []sp
 	ids := map[string]bool{}
@@ -103,6 +107,11 @@ func SynthesizeTrace(spans []json.RawMessage) json.RawMessage {
 		if a, ok := m["attributes"].(map[string]any); ok {
 			p.attrs = a
 		}
+		p.kind = asString(m["kind"])
+		if c, ok := m["total_cost"].(float64); ok {
+			p.cost = c
+			p.hasCost = true
+		}
 		parsed = append(parsed, p)
 		ids[p.id] = true
 		if projectID == "" {
@@ -129,6 +138,8 @@ func SynthesizeTrace(spans []json.RawMessage) json.RawMessage {
 	anyError := false
 	isOpen := false
 	incomplete := false
+	var traceCost float64
+	hasTraceCost := false
 	for _, p := range parsed {
 		if p.start.Before(minStart) {
 			minStart = p.start
@@ -146,6 +157,13 @@ func SynthesizeTrace(spans []json.RawMessage) json.RawMessage {
 		}
 		if p.parent != "" && !ids[p.parent] {
 			incomplete = true // orphan-with-parent-ref (Collector dropped the parent)
+		}
+		// trace-level cost (§7.1): sum only NON-aggregate spans' cost, matching the SQL
+		// projections' `kind NOT IN (agg kinds)` so a re-synthesized split trace's
+		// total_cost is identical to a single-store one.
+		if p.hasCost && !storage.IsAggregateKind(p.kind) {
+			traceCost += p.cost
+			hasTraceCost = true
 		}
 	}
 	lastActivity := maxStart
@@ -178,6 +196,11 @@ func SynthesizeTrace(spans []json.RawMessage) json.RawMessage {
 	}
 	if maxEnd != nil {
 		doc["end_time"] = maxEnd.UTC().Format(time.RFC3339Nano)
+	}
+	if hasTraceCost {
+		// Round to the shared scale so a re-synthesized split trace's total_cost is
+		// byte-identical to a single-store adapter's rounded projection.
+		doc["total_cost"] = storage.RoundCost(traceCost)
 	}
 	if root.attrs != nil {
 		doc["attributes"] = root.attrs

@@ -16,6 +16,7 @@
 package frontendtoken
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -34,10 +35,14 @@ type Handler struct {
 	signer  *plugintoken.Signer
 	source  registry.Source
 	project func(*http.Request) (string, error)
+	// role resolves the session user's membership role in the org that owns a project
+	// (Arc O / O2) — the token is scoped to the user's role IN THAT PROJECT'S ORG, not an
+	// ambient default-org role. Injected so this package need not import the pool.
+	role func(ctx context.Context, userID, projectID string) (string, error)
 }
 
-func New(signer *plugintoken.Signer, source registry.Source, project func(*http.Request) (string, error)) *Handler {
-	return &Handler{signer: signer, source: source, project: project}
+func New(signer *plugintoken.Signer, source registry.Source, project func(*http.Request) (string, error), role func(context.Context, string, string) (string, error)) *Handler {
+	return &Handler{signer: signer, source: source, project: project, role: role}
 }
 
 // Mint issues a frontend token for the requested plugin, scoped to the plugin's
@@ -73,10 +78,17 @@ func (h *Handler) Mint(w http.ResponseWriter, r *http.Request) {
 	// The intersection: plugin manifest perms ∩ the user's session perms. The
 	// plugin can never exceed its own grant OR the user's, and the project is the
 	// session's (a plugin cannot request another tenant).
-	// DataPermsOnly: strip management scopes (owner/admin hold them) so a frontend token
-	// can never carry members:manage/org:manage — even if the manifest grant were somehow
-	// to include one. Belt-and-suspenders with the admission-time strip on pluginPerms.
-	userPerms := perm.DataPermsOnly(perm.RoleScopes(sess.User.Role))
+	// The user half is the session user's role IN THE PROJECT'S ORG (O2), not an ambient
+	// default-org role — a user who is viewer in this project's org mints a viewer-scoped
+	// token even if they are owner elsewhere. A non-member → "" → no scopes → an empty
+	// token (fail closed). DataPermsOnly strips management scopes (owner/admin hold them)
+	// so a frontend token can never carry members:manage/org:manage.
+	role, rerr := h.role(r.Context(), sess.User.ID, projectID)
+	if rerr != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "role resolution failed"})
+		return
+	}
+	userPerms := perm.DataPermsOnly(perm.RoleScopes(role))
 	effective := pluginproto.Intersect(pluginPerms, userPerms)
 
 	tok, claims, err := h.signer.MintFrontendToken(

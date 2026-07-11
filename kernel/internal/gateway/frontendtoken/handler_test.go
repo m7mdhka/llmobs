@@ -1,6 +1,7 @@
 package frontendtoken
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +28,11 @@ func newHandler(t *testing.T, plugins []registry.Plugin) (*Handler, *plugintoken
 		t.Fatal(err)
 	}
 	proj := func(*http.Request) (string, error) { return "projA", nil }
-	return New(signer, fakeSource{plugins: plugins}, proj), signer
+	// The role resolver returns the user's per-project-org role; the tests key User.ID to
+	// the role. Because it ignores sess.User.Role, these tests also prove O2 authorizes off
+	// the resolved per-project role, not the ambient session field.
+	role := func(_ context.Context, userID, _ string) (string, error) { return userID, nil }
+	return New(signer, fakeSource{plugins: plugins}, proj, role), signer
 }
 
 func mint(t *testing.T, h *Handler, sess *controlplane.Session, body string) *httptest.ResponseRecorder {
@@ -54,7 +59,7 @@ func TestMintIntersectsGrantAndSession(t *testing.T) {
 
 	// Admin: effective = plugin ∩ All = the plugin's full grant.
 	t.Run("admin_gets_full_grant", func(t *testing.T) {
-		sess := &controlplane.Session{User: controlplane.User{Email: "a@x", Role: "admin"}}
+		sess := &controlplane.Session{User: controlplane.User{ID: "admin", Email: "a@x", Role: "admin"}}
 		w := mint(t, h, sess, `{"plugin":"acme/dash"}`)
 		if w.Code != http.StatusOK {
 			t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
@@ -89,7 +94,7 @@ func TestMintIntersectsGrantAndSession(t *testing.T) {
 	// Viewer: effective = plugin ∩ {metadata, scores:read} — payloads dropped by the
 	// USER half even though the plugin's grant includes them.
 	t.Run("viewer_capped_by_session", func(t *testing.T) {
-		sess := &controlplane.Session{User: controlplane.User{Email: "v@x", Role: "viewer"}}
+		sess := &controlplane.Session{User: controlplane.User{ID: "viewer", Email: "v@x", Role: "viewer"}}
 		w := mint(t, h, sess, `{"plugin":"acme/dash"}`)
 		if w.Code != http.StatusOK {
 			t.Fatalf("want 200, got %d", w.Code)
@@ -109,7 +114,7 @@ func TestMintIntersectsGrantAndSession(t *testing.T) {
 
 func TestMintRejections(t *testing.T) {
 	h, _ := newHandler(t, []registry.Plugin{{ID: "acme/dash", Permissions: []string{perm.TracesReadMetadata}}})
-	admin := &controlplane.Session{User: controlplane.User{Email: "a@x", Role: "admin"}}
+	admin := &controlplane.Session{User: controlplane.User{ID: "admin", Email: "a@x", Role: "admin"}}
 
 	t.Run("unauthenticated", func(t *testing.T) {
 		if w := mint(t, h, nil, `{"plugin":"acme/dash"}`); w.Code != http.StatusUnauthorized {

@@ -33,8 +33,8 @@ func mpSetup(t *testing.T) *pgxpool.Pool {
 		`DELETE FROM org_memberships WHERE user_id LIKE 'usr_o1test%'`,
 		`DELETE FROM sessions WHERE user_id LIKE 'usr_o1test%'`,
 		`DELETE FROM users WHERE id LIKE 'usr_o1test%'`,
-		`DELETE FROM projects WHERE org_id IN ('org_o1a','org_o1b')`,
-		`DELETE FROM organizations WHERE id IN ('org_o1a','org_o1b')`,
+		`DELETE FROM projects WHERE org_id IN ('org_o1a','org_o1b','org_o1c')`,
+		`DELETE FROM organizations WHERE id IN ('org_o1a','org_o1b','org_o1c')`,
 	} {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
 			t.Fatalf("clean: %v", err)
@@ -90,6 +90,57 @@ func TestMembershipIsPerOrg(t *testing.T) {
 	}
 	if s := perm.RoleScopes(roleB); len(s) != 0 {
 		t.Fatalf("non-member must have NO scopes in org B, got %v", s)
+	}
+}
+
+// TestRoleForProjectCrossOrg is the O2 headline prove-the-negative: a user who is OWNER in
+// org A and VIEWER in org B resolves to VIEWER scope when acting on org B's project — never
+// their org-A owner role — and to NO scope on a project in an org they don't belong to
+// (fail closed). This is the cross-org isolation the ambient default-org role masked.
+func TestRoleForProjectCrossOrg(t *testing.T) {
+	pool := mpSetup(t)
+	ctx := context.Background()
+	seedOrg(t, pool, "org_o1a")
+	seedOrg(t, pool, "org_o1b")
+	// A third org the user is NOT a member of.
+	if _, err := pool.Exec(ctx, `INSERT INTO organizations (id,name) VALUES ('org_o1c','c') ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatalf("seed org c: %v", err)
+	}
+	// A project in each org.
+	for _, p := range [][2]string{{"proj_o1a", "org_o1a"}, {"proj_o1b", "org_o1b"}, {"proj_o1c", "org_o1c"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO projects (id,org_id,name) VALUES ($1,$2,$1) ON CONFLICT DO NOTHING`, p[0], p[1]); err != nil {
+			t.Fatalf("seed project %s: %v", p[0], err)
+		}
+	}
+	seedUser(t, pool, "usr_o1test_x", "x@o1.test")
+	if err := SetMembership(ctx, pool, "usr_o1test_x", "org_o1a", perm.RoleOwner); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetMembership(ctx, pool, "usr_o1test_x", "org_o1b", perm.RoleViewer); err != nil {
+		t.Fatal(err)
+	}
+
+	// Owner in A's project → full authority.
+	if r, _ := RoleForProject(ctx, pool, "usr_o1test_x", "proj_o1a"); r != perm.RoleOwner {
+		t.Fatalf("role for org-A project = %q, want owner", r)
+	}
+	// Viewer in B's project → viewer, NOT the ambient owner. THE cross-org negative.
+	rB, _ := RoleForProject(ctx, pool, "usr_o1test_x", "proj_o1b")
+	if rB != perm.RoleViewer {
+		t.Fatalf("role for org-B project = %q, want viewer (not the org-A owner role)", rB)
+	}
+	if perm.HasWriteAuthority(perm.RoleScopes(rB)) {
+		t.Fatal("on org-B's project the user must have viewer (no write) authority, not owner")
+	}
+	// No membership in org C → no role → no scopes → fail closed.
+	rC, _ := RoleForProject(ctx, pool, "usr_o1test_x", "proj_o1c")
+	if rC != "" || len(perm.RoleScopes(rC)) != 0 {
+		t.Fatalf("non-member must resolve to no scope on org-C project, got role %q", rC)
+	}
+	// Unknown project → no role (fail closed), no error.
+	rU, err := RoleForProject(ctx, pool, "usr_o1test_x", "proj_does_not_exist")
+	if err != nil || rU != "" {
+		t.Fatalf("unknown project must resolve to '' with no error, got role %q err %v", rU, err)
 	}
 }
 

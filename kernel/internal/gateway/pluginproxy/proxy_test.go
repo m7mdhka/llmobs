@@ -1,6 +1,7 @@
 package pluginproxy
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -27,6 +28,7 @@ func (f fakeBackends) BackendFor(string) (string, bool) { return f.url, f.runnin
 // gateway auth middleware would.
 func withSession(r *http.Request) *http.Request {
 	var sess controlplane.Session
+	sess.User.ID = "admin"
 	sess.User.Email = "admin@example.com"
 	sess.User.Role = "admin"
 	return r.WithContext(authhttp.WithSession(r.Context(), sess))
@@ -36,6 +38,7 @@ func newProxy(url string, running bool) (*Proxy, *plugintoken.Signer) {
 	signer, _ := plugintoken.NewSigner()
 	p := New(fakeBackends{url: url, running: running}, signer,
 		func(*http.Request) (string, error) { return "proj_default", nil },
+		func(_ context.Context, userID, _ string) (string, error) { return userID, nil },
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return p, signer
 }
@@ -108,6 +111,7 @@ func TestProxyUnknownPlugin(t *testing.T) {
 	signer, _ := plugintoken.NewSigner()
 	p := New(fakeBackends{url: "", running: false}, signer,
 		func(*http.Request) (string, error) { return "proj_default", nil },
+		func(_ context.Context, userID, _ string) (string, error) { return userID, nil },
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r := withSession(httptest.NewRequest(http.MethodGet, "/api/plugins/acme/ghost/x", nil))
 	rec := httptest.NewRecorder()

@@ -333,13 +333,19 @@ func run() error {
 		}
 		return controlplane.DefaultProjectID(r.Context(), pool)
 	}
-	apiMux.Handle("/api/plugins/", pluginproxy.New(sup, pluginSigner, projectResolver, log).Handler("/api/plugins/"))
+	// roleResolver resolves a user's membership role in the org that owns a project (O2) —
+	// the per-request-per-project authority the plugin mints and the query seam use. Same
+	// currency for humans and plugins; a non-member/unknown project yields "" (no scope).
+	roleResolver := func(ctx context.Context, userID, projectID string) (string, error) {
+		return controlplane.RoleForProject(ctx, pool, userID, projectID)
+	}
+	apiMux.Handle("/api/plugins/", pluginproxy.New(sup, pluginSigner, projectResolver, roleResolver, log).Handler("/api/plugins/"))
 	// Frontend-token mint (J1): session-authed; the shell mints a per-plugin,
 	// short-TTL, audience-bound frontend token scoped to plugin-grant ∩ session ∩
 	// project. Least-privilege-by-default for cooperating frontends, NOT a boundary
 	// against a hostile one (same-origin — see frontendtoken.Handler).
 	apiMux.HandleFunc("/v1alpha1/plugin-frontend-token",
-		frontendtoken.New(pluginSigner, regSource, projectResolver).Mint)
+		frontendtoken.New(pluginSigner, regSource, projectResolver, roleResolver).Mint)
 	// Plugin data primitives (H4+): a plugin backend reaches these with its double
 	// token; each is capability-gated and tenant-scoped from the assertion.
 	pluginAuthz := pluginauth.New(pluginSigner, nil)
@@ -370,9 +376,19 @@ func run() error {
 	// session role must carry a write scope. The frontend token already bounded the
 	// plugin + tenant; this is the "who may administer" half so a viewer cannot
 	// overwrite project-shared config/secrets.
-	canWriteSettings := func(r *http.Request) bool {
+	canWriteSettings := func(r *http.Request, projectID string) bool {
 		sess, ok := authhttp.SessionFrom(r.Context())
-		return ok && perm.HasWriteAuthority(perm.RoleScopes(sess.User.Role))
+		if !ok {
+			return false
+		}
+		// O2: resolve the user's role IN THE TARGET PROJECT'S ORG (not the ambient
+		// default-org role) — a viewer in this project's org cannot write its settings even
+		// if they are an owner of another org. Fail closed on any resolution error.
+		role, err := controlplane.RoleForProject(r.Context(), pool, sess.User.ID, projectID)
+		if err != nil {
+			return false
+		}
+		return perm.HasWriteAuthority(perm.RoleScopes(role))
 	}
 	pluginapi.NewSettings(pluginAuthz, settingsStore, settingsSchema, canWriteSettings).Register(apiMux, "/v1alpha1/plugin/settings")
 	// Events: durable subscribe (poll/ack) over the Postgres event bus.

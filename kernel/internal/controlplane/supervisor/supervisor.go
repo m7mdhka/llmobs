@@ -116,6 +116,14 @@ type Supervisor struct {
 
 	provisioner Provisioner // provisions store collections in the starting phase (nil => none)
 
+	// Token revocation hooks (Arc O / O4, #63). revokeTokens denies a plugin's already-issued
+	// kernel-signed service token immediately when the plugin is disabled — clearing the local
+	// copy (rt.token) is NOT enough, the issued token verifies until TTL otherwise. reinstate
+	// clears the plugin's revocation on re-enable so freshly minted tokens are unaffected. Both
+	// nil => no revocation store (tests, or a store-less run).
+	revokeTokens    func(pluginID, reason string)
+	reinstateTokens func(pluginID string)
+
 	mu       sync.Mutex
 	plugins  map[string]*pluginRuntime
 	disabled map[string]string // operator-disabled id -> reason (persists across reconcile)
@@ -124,6 +132,14 @@ type Supervisor struct {
 // SetProvisioner attaches the store-collection provisioner (H5). Migration failure
 // becomes a health signal: the plugin degrades rather than reaching running.
 func (s *Supervisor) SetProvisioner(p Provisioner) { s.provisioner = p }
+
+// SetTokenRevoker wires immediate plugin-token revocation (Arc O / O4). revoke is called when
+// a plugin is disabled (its issued service token is denied at the next verify, not at TTL);
+// reinstate is called on re-enable. main.go backs these with controlplane.RevokePluginTokens
+// / Unrevoke over the pool.
+func (s *Supervisor) SetTokenRevoker(revoke func(pluginID, reason string), reinstate func(pluginID string)) {
+	s.revokeTokens, s.reinstateTokens = revoke, reinstate
+}
 
 // New builds a supervisor. now may be nil (defaults to time.Now).
 func New(p Provider, exec executors.Executor, signer *plugintoken.Signer, mreg *metrics.Registry, log *slog.Logger, cfg Config, now func() time.Time) *Supervisor {
@@ -144,7 +160,9 @@ func (s *Supervisor) Reconcile(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	present := make(map[string]struct{})
 	for _, spec := range s.provider.Plugins() {
+		present[spec.ID] = struct{}{}
 		rt := s.plugins[spec.ID]
 		if rt == nil {
 			rt = &pluginRuntime{spec: spec, state: StateInstalled}
@@ -157,6 +175,20 @@ func (s *Supervisor) Reconcile(ctx context.Context) {
 			continue
 		}
 		s.reconcileOne(ctx, rt)
+	}
+	// Uninstall (O4/#63): a plugin removed from the provider drops out of the loop above, so
+	// its lingering runtime — and its already-issued service token — would otherwise never be
+	// revoked and live to TTL. Revoke and forget any runtime no longer present.
+	for id, rt := range s.plugins {
+		if _, ok := present[id]; ok {
+			continue
+		}
+		if s.revokeTokens != nil {
+			s.revokeTokens(id, "plugin uninstalled")
+		}
+		s.log.Info("plugin uninstalled", "plugin_id", id, "was_state", string(rt.state))
+		delete(s.plugins, id)
+		delete(s.disabled, id)
 	}
 	s.publishMetrics()
 }
@@ -258,10 +290,13 @@ func (s *Supervisor) fault(rt *pluginRuntime, reason string) {
 	rt.restartAttempts++
 	rt.lastError = reason
 	if rt.faults >= s.cfg.MaxFaults {
-		rt.state = StateDisabled
-		rt.disabledReason = "auto-disabled after " + itoa(rt.faults) + " consecutive faults: " + reason
-		rt.token, rt.exp = "", 0 // revoke; touches no plugin data
-		s.log.Warn("plugin auto-disabled", "plugin_id", rt.spec.ID, "reason", rt.disabledReason)
+		// Route auto-disable through the SAME seam as operator-disable (toDisabled) so the
+		// plugin's already-issued service token is revoked here too (O4/#63) — clearing
+		// rt.token alone would leave a compromised plugin's token valid for its full TTL after
+		// the operator sees "disabled". One disable seam, one revoke (invariant #11).
+		reason = "auto-disabled after " + itoa(rt.faults) + " consecutive faults: " + reason
+		s.log.Warn("plugin auto-disabled", "plugin_id", rt.spec.ID, "reason", reason)
+		s.toDisabled(rt, reason)
 		return
 	}
 	rt.state = StateDegraded
@@ -279,14 +314,23 @@ func (s *Supervisor) markRunning(rt *pluginRuntime) {
 	rt.disabledReason = ""
 }
 
+// toDisabled is THE ONE seam every disable path funnels through — operator Disable, the
+// Reconcile disabled-branch, and fault() auto-disable. It transitions the plugin to disabled,
+// drops the local token copy, and — on the TRANSITION into disabled — revokes the plugin's
+// already-issued kernel-signed tokens (O4/#63). Dropping rt.token only stops us re-handing it
+// out; the token already in the plugin's hands verifies until TTL unless we record the
+// revocation here. Gating the revoke on the transition avoids a redundant DB write on every
+// reconcile tick for an already-disabled plugin. A future disable path inherits the revoke by
+// calling this (invariant #11).
 func (s *Supervisor) toDisabled(rt *pluginRuntime, reason string) {
-	if rt.state != StateDisabled {
-		s.log.Info("plugin disabled by operator", "plugin_id", rt.spec.ID, "reason", reason)
-	}
+	transition := rt.state != StateDisabled
 	rt.state = StateDisabled
 	rt.disabledReason = reason
-	rt.token, rt.exp = "", 0 // revoke token; supervision stops; no data touched
+	rt.token, rt.exp = "", 0
 	rt.faults = 0
+	if transition && s.revokeTokens != nil {
+		s.revokeTokens(rt.spec.ID, "plugin disabled: "+reason)
+	}
 }
 
 func (s *Supervisor) backoffFor(faults int) time.Duration {
@@ -370,6 +414,9 @@ func (s *Supervisor) Disable(id, reason string) {
 	}
 	s.disabled[id] = reason
 	if rt := s.plugins[id]; rt != nil {
+		if rt.state != StateDisabled {
+			s.log.Info("plugin disabled by operator", "plugin_id", id, "reason", reason)
+		}
 		s.toDisabled(rt, reason)
 	}
 }
@@ -386,6 +433,12 @@ func (s *Supervisor) Enable(id string) {
 		rt.disabledReason = ""
 		rt.nextAttempt = time.Time{}
 		rt.token, rt.exp = "", 0
+	}
+	// Clear the plugin's revocation (O4) so the freshly minted tokens after re-enable are not
+	// caught by the stale epoch. (Not required for correctness — a new token's issued-at is
+	// after the old revoked_at — but keeps the store clean and removes any boundary doubt.)
+	if s.reinstateTokens != nil {
+		s.reinstateTokens(id)
 	}
 }
 

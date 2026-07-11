@@ -78,7 +78,7 @@ func TestProxyStripsCookieInjectsAssertion(t *testing.T) {
 		t.Fatalf("identity assertion must be injected; headers=%v", echo.Headers)
 	}
 	// The plugin can verify it, bound to its own audience.
-	claims, err := signer.VerifyIdentityAssertion(asr, pluginproto.PluginSubject("acme/widget"), time.Now())
+	claims, err := signer.VerifyIdentityAssertion(context.Background(), asr, pluginproto.PluginSubject("acme/widget"), time.Now())
 	if err != nil {
 		t.Fatalf("plugin should verify its assertion: %v", err)
 	}

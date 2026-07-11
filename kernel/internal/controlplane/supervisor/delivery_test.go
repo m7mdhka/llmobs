@@ -32,7 +32,7 @@ func TestTokenDeliveredAndScoped(t *testing.T) {
 	if tok == "" {
 		t.Fatal("service token must be delivered to the plugin (H7c)")
 	}
-	claims, err := signer.VerifyServiceToken(tok, clk.now().Add(time.Minute))
+	claims, err := signer.VerifyServiceToken(context.Background(), tok, clk.now().Add(time.Minute))
 	if err != nil {
 		t.Fatalf("delivered token must verify: %v", err)
 	}
@@ -102,11 +102,11 @@ func TestTokenDeliveryPerPluginNoCrossDelivery(t *testing.T) {
 	if ta == tb {
 		t.Fatal("each plugin must receive a distinct token")
 	}
-	ca, err := signer.VerifyServiceToken(ta, clk.now().Add(time.Minute))
+	ca, err := signer.VerifyServiceToken(context.Background(), ta, clk.now().Add(time.Minute))
 	if err != nil || ca.PluginID != "acme/a" {
 		t.Fatalf("plugin A's backend must hold A's token, got %s (%v)", ca.PluginID, err)
 	}
-	cb, err := signer.VerifyServiceToken(tb, clk.now().Add(time.Minute))
+	cb, err := signer.VerifyServiceToken(context.Background(), tb, clk.now().Add(time.Minute))
 	if err != nil || cb.PluginID != "acme/b" {
 		t.Fatalf("plugin B's backend must hold B's token, got %s (%v)", cb.PluginID, err)
 	}

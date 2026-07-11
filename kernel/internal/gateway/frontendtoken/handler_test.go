@@ -76,7 +76,7 @@ func TestMintIntersectsGrantAndSession(t *testing.T) {
 		}
 		// The token verifies as a FRONTEND token (carries the signed purpose marker);
 		// the generic identity-assertion verify must REJECT it (class separation).
-		ac, err := signer.VerifyFrontendToken(resp.Token, time.Now())
+		ac, err := signer.VerifyFrontendToken(context.Background(), resp.Token, time.Now())
 		if err != nil {
 			t.Fatalf("token must verify as a frontend token: %v", err)
 		}
@@ -86,7 +86,7 @@ func TestMintIntersectsGrantAndSession(t *testing.T) {
 		if ac.ProjectID != "projA" {
 			t.Fatalf("token project must be the session project, got %s", ac.ProjectID)
 		}
-		if _, err := signer.VerifyIdentityAssertion(resp.Token, pluginproto.PluginSubject("acme/dash"), time.Now()); err == nil {
+		if _, err := signer.VerifyIdentityAssertion(context.Background(), resp.Token, pluginproto.PluginSubject("acme/dash"), time.Now()); err == nil {
 			t.Fatal("a frontend token must NOT verify on the generic identity-assertion path")
 		}
 	})

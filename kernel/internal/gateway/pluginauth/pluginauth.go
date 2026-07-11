@@ -54,12 +54,12 @@ func (a *Authorizer) Require(r *http.Request, capability string) (Caller, int, e
 		return Caller{}, http.StatusUnauthorized, errors.New("service token + identity assertion required")
 	}
 	now := a.now()
-	stc, err := a.signer.VerifyServiceToken(svc, now)
+	stc, err := a.signer.VerifyServiceToken(r.Context(), svc, now)
 	if err != nil {
 		return Caller{}, http.StatusUnauthorized, fmt.Errorf("invalid service token: %w", err)
 	}
 	// The assertion MUST be bound to THIS plugin's audience (token-confusion defence).
-	ac, err := a.signer.VerifyIdentityAssertion(asr, pluginproto.PluginSubject(stc.PluginID), now)
+	ac, err := a.signer.VerifyIdentityAssertion(r.Context(), asr, pluginproto.PluginSubject(stc.PluginID), now)
 	if err != nil {
 		return Caller{}, http.StatusUnauthorized, fmt.Errorf("invalid identity assertion: %w", err)
 	}
@@ -85,7 +85,7 @@ func (a *Authorizer) RequireFrontend(r *http.Request) (Caller, int, error) {
 	if tok == "" {
 		return Caller{}, http.StatusUnauthorized, errors.New("frontend token required")
 	}
-	ac, err := a.signer.VerifyFrontendToken(tok, a.now())
+	ac, err := a.signer.VerifyFrontendToken(r.Context(), tok, a.now())
 	if err != nil {
 		return Caller{}, http.StatusUnauthorized, fmt.Errorf("invalid frontend token: %w", err)
 	}
@@ -110,7 +110,7 @@ func (a *Authorizer) RequirePluginToken(r *http.Request, capability string) (plu
 	if svc == "" {
 		return "", http.StatusUnauthorized, errors.New("service token required")
 	}
-	stc, err := a.signer.VerifyServiceToken(svc, a.now())
+	stc, err := a.signer.VerifyServiceToken(r.Context(), svc, a.now())
 	if err != nil {
 		return "", http.StatusUnauthorized, fmt.Errorf("invalid service token: %w", err)
 	}

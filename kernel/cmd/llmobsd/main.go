@@ -263,6 +263,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Immediate revocation (Arc O / O4, #63): make EVERY signed-token verify consult the
+	// revocation store by construction. All plugin-token verification (Query auth, plugin
+	// primitives, jobs) funnels through pluginSigner.Verify*, so one injected checker covers
+	// them all — a revoked user's frontend token / assertion or a revoked plugin's service
+	// token is denied on the next request, not at TTL. Fails closed on a store error.
+	pluginSigner.SetRevocationChecker(func(ctx context.Context, jti, pluginID, userEmail string, issuedAt time.Time) (bool, error) {
+		return controlplane.TokenLive(ctx, pool, jti, pluginID, userEmail, issuedAt)
+	})
 
 	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
 	qsrv := query.NewServer(store, pool, log, maxWindow, mreg, pluginSigner)
@@ -276,6 +284,16 @@ func run() error {
 	// below).
 	sup := supervisor.New(supervisor.NewDirProvider(cfg.PluginDir, log),
 		executors.NewExternalURL(5*time.Second), pluginSigner, mreg, log, supervisor.Config{}, nil)
+	// Immediate plugin-token revocation on disable (Arc O / O4): a disabled plugin's issued
+	// service token is denied at the next verify, not at TTL; re-enable clears the revocation.
+	sup.SetTokenRevoker(
+		func(id, reason string) {
+			if err := controlplane.RevokePluginTokens(rootCtx, pool, id, reason); err != nil {
+				log.Error("revoke plugin tokens failed", "plugin_id", id, "err", err)
+			}
+		},
+		func(id string) { _ = controlplane.Unrevoke(rootCtx, pool, controlplane.RevokeKindPlugin, id) },
+	)
 
 	// Job scheduler (H6b): Postgres-backed, runs on the supervisor's leader cadence.
 	// The runner presents a system assertion scoped to the plugin's OWN grant on the
@@ -295,6 +313,9 @@ func run() error {
 	// sibling enters ONE shared gate resolved against the TARGET org; roles are capped
 	// strictly below the actor's. create-org gates on instance-admin (default-org owner).
 	auth.RegisterProvisioning(apiMux)
+	// User revocation (Arc O / O4, #63): instance-admin disables an account and denies its
+	// entire credential subtree immediately (sessions + minted keys + live plugin tokens).
+	auth.RegisterRevocation(apiMux)
 	// Price table management (ADR-0029): session-authed; reads open to any session,
 	// writes gated to admin (config authority). Global entries carry no project; the
 	// per-project discount is scoped to the caller's own project.

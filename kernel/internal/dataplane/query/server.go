@@ -144,7 +144,7 @@ func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *Compi
 		if ft == "" {
 			return controlplane.Identity{}, errf("unauthorized", 401, "plugin frontend request requires a frontend token")
 		}
-		return s.authFrontend(op, reqPerm, ft)
+		return s.authFrontend(r.Context(), op, reqPerm, ft)
 	}
 
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -191,18 +191,19 @@ func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *Compi
 }
 
 // authPlugin computes the double-token intersection for a plugin→kernel call.
-func (s *Server) authPlugin(_ *http.Request, op, reqPerm, svcTok, assertion string) (controlplane.Identity, *CompileError) {
+func (s *Server) authPlugin(r *http.Request, op, reqPerm, svcTok, assertion string) (controlplane.Identity, *CompileError) {
 	if s.signer == nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "plugin auth unavailable")
 	}
+	ctx := r.Context()
 	now := time.Now()
-	stc, err := s.signer.VerifyServiceToken(svcTok, now)
+	stc, err := s.signer.VerifyServiceToken(ctx, svcTok, now)
 	if err != nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "invalid service token")
 	}
 	// The assertion MUST have been minted for THIS plugin's audience — an assertion
 	// for another plugin is rejected (token-confusion defence).
-	ac, err := s.signer.VerifyIdentityAssertion(assertion, pluginproto.PluginSubject(stc.PluginID), now)
+	ac, err := s.signer.VerifyIdentityAssertion(ctx, assertion, pluginproto.PluginSubject(stc.PluginID), now)
 	if err != nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "invalid identity assertion")
 	}
@@ -230,11 +231,11 @@ func (s *Server) authPlugin(_ *http.Request, op, reqPerm, svcTok, assertion stri
 // and shares the claim shape. Frontend tokens carry NO capability markers, so they
 // can only read/write data within the intersected perms — never reach a
 // capability-gated primitive.
-func (s *Server) authFrontend(op, reqPerm, token string) (controlplane.Identity, *CompileError) {
+func (s *Server) authFrontend(ctx context.Context, op, reqPerm, token string) (controlplane.Identity, *CompileError) {
 	if s.signer == nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "plugin auth unavailable")
 	}
-	ac, err := s.signer.VerifyFrontendToken(token, time.Now())
+	ac, err := s.signer.VerifyFrontendToken(ctx, token, time.Now())
 	if err != nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "invalid frontend token")
 	}

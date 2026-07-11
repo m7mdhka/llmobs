@@ -89,24 +89,28 @@ var ErrBadCredentials = errors.New("bad credentials")
 // argon2id verify runs even on unknown emails to keep timing uniform.
 func VerifyPassword(ctx context.Context, pool *pgxpool.Pool, email, password string) (User, error) {
 	var u User
-	var hash string
+	var hash *string // NULL for an SSO-only account (no local password)
 	var revoked bool
+	var localPwDisabled bool
 	// Resolve the authoritative membership role (default org), exactly as ResolveSession
 	// does — so the login response and /auth/me agree and the legacy users.role is never
 	// surfaced to a client. No membership → "" → no scopes (fail closed). The revoked flag
-	// (Arc O / O4) is fetched in the SAME query so a revoked account incurs NO extra
-	// round-trip — the "revoked" vs "wrong password" timing is identical (no account-state
-	// enumeration by timing), and there's no second DB hit on the login hot path.
+	// (O4) and the default org's local-password-disabled flag (O5) are fetched in the SAME
+	// query so no branch incurs an extra round-trip — the timing is identical across "wrong
+	// password", "revoked", and "SSO-only" (no account-state enumeration by timing).
 	err := pool.QueryRow(ctx,
 		`SELECT u.id, u.email, COALESCE(m.role, ''), u.password_hash,
 		        EXISTS(SELECT 1 FROM revocations r
-		                WHERE r.principal_kind = 'user' AND r.principal_id = lower(u.email))
+		                WHERE r.principal_kind = 'user' AND r.principal_id = lower(u.email)),
+		        COALESCE((SELECT s.local_password_disabled FROM sso_providers s
+		                   WHERE s.org_id = (SELECT org_id FROM projects ORDER BY created_at ASC LIMIT 1)
+		                     AND s.enabled = true), false)
 		   FROM users u
 		   LEFT JOIN org_memberships m
 		     ON m.user_id = u.id
 		    AND m.org_id = (SELECT org_id FROM projects ORDER BY created_at ASC LIMIT 1)
 		  WHERE lower(u.email) = lower($1)`,
-		strings.TrimSpace(email)).Scan(&u.ID, &u.Email, &u.Role, &hash, &revoked)
+		strings.TrimSpace(email)).Scan(&u.ID, &u.Email, &u.Role, &hash, &revoked, &localPwDisabled)
 	if err == pgx.ErrNoRows {
 		// Verify against a dummy hash so a missing user and a wrong password take
 		// the same time (mitigates user-enumeration by timing).
@@ -116,13 +120,24 @@ func VerifyPassword(ctx context.Context, pool *pgxpool.Pool, email, password str
 	if err != nil {
 		return User{}, err
 	}
-	ok, verr := verifyArgon2id(password, hash)
+	// An SSO-only account (NULL hash) can NEVER log in locally. Still run the dummy verify so
+	// the timing matches a normal wrong-password attempt.
+	if hash == nil {
+		_, _ = verifyArgon2id(password, dummyHash)
+		return User{}, ErrBadCredentials
+	}
+	ok, verr := verifyArgon2id(password, *hash)
 	if verr != nil || !ok {
 		return User{}, ErrBadCredentials
 	}
 	// A revoked user must not be able to mint a fresh session and restart the derivation tree.
 	// Denied as ErrBadCredentials so the response never reveals the account exists-but-revoked.
 	if revoked {
+		return User{}, ErrBadCredentials
+	}
+	// If the org has disabled local passwords (O5), only OWNERS retain local login — the
+	// break-glass path that makes last-owner lockout impossible. Everyone else must use SSO.
+	if localPwDisabled && u.Role != perm.RoleOwner {
 		return User{}, ErrBadCredentials
 	}
 	return u, nil

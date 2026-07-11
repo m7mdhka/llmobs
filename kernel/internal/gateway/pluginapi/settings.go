@@ -27,10 +27,14 @@ type SchemaSource func(pluginID string) (schema json.RawMessage, custom, ok bool
 // plugin id + project come from the token, never the body. Settings is `kv` made
 // frontend-reachable and schema-aware (ADR-0024).
 type Settings struct {
-	authz    *pluginauth.Authorizer
-	store    SettingsStore
-	schema   SchemaSource
-	canWrite func(*http.Request) bool
+	authz  *pluginauth.Authorizer
+	store  SettingsStore
+	schema SchemaSource
+	// canWrite reports whether the session user may administer settings IN THE PROJECT the
+	// write targets (Arc O / O2). It takes the token-resolved projectID so authority is
+	// checked against the user's role in THAT project's org — never an ambient default-org
+	// role. The tenant of the write and the authority for it must be the same org.
+	canWrite func(r *http.Request, projectID string) bool
 }
 
 // NewSettings builds the handler. canWrite gates state-changing writes on the
@@ -39,9 +43,9 @@ type Settings struct {
 // plugin/tenant, and canWrite (session role) proves the caller may administer it —
 // the same split the supervisor uses (admins today, #21 RBAC seam). Reads are open
 // to any valid frontend token for the plugin. A nil canWrite denies all writes.
-func NewSettings(authz *pluginauth.Authorizer, store SettingsStore, schema SchemaSource, canWrite func(*http.Request) bool) *Settings {
+func NewSettings(authz *pluginauth.Authorizer, store SettingsStore, schema SchemaSource, canWrite func(r *http.Request, projectID string) bool) *Settings {
 	if canWrite == nil {
-		canWrite = func(*http.Request) bool { return false }
+		canWrite = func(*http.Request, string) bool { return false }
 	}
 	return &Settings{authz: authz, store: store, schema: schema, canWrite: canWrite}
 }
@@ -96,9 +100,11 @@ type settingsSetReq struct {
 
 func (h *Settings) set(w http.ResponseWriter, r *http.Request, c pluginauth.Caller, m *pluginsettings.Model) {
 	// Writing project-shared plugin config (and its secrets) requires configuration
-	// authority — a read-only viewer must not overwrite it. Plugin/tenant scoping came
-	// from the token; this is the "who may administer" half.
-	if !h.canWrite(r) {
+	// authority IN THIS PROJECT'S ORG — a viewer (in this project's org) must not overwrite
+	// it even if they are an admin elsewhere. The project comes from the token (c.ProjectID)
+	// and the authority is resolved against THAT project's org, so tenant and authority
+	// match (O2 — no ambient default-org role gates a cross-org write).
+	if !h.canWrite(r, c.ProjectID) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "settings write requires configuration authority"})
 		return
 	}

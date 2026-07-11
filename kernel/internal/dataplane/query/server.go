@@ -34,6 +34,18 @@ type Server struct {
 	signer    *plugintoken.Signer // verifies plugin service tokens + user assertions (H3)
 	dialect   Dialect             // SQL dialect the compiler emits for this store
 	dual      *dualstore.Store    // when set, reads unify lite∪scale (RULING-MIG6); nil = single store
+	// role resolves a session user's membership role in the org that owns a project
+	// (Arc O / O2) — the per-request-per-project authority the session (Case 2) auth path
+	// intersects. Defaults to controlplane.RoleForProject over the pool; injectable so the
+	// seam is testable without a DB.
+	role func(ctx context.Context, userID, projectID string) (string, error)
+}
+
+// SetRoleResolver overrides the per-project role resolver (tests). Nil is ignored.
+func (s *Server) SetRoleResolver(fn func(ctx context.Context, userID, projectID string) (string, error)) {
+	if fn != nil {
+		s.role = fn
+	}
 }
 
 // SetDualStore enables permanent dual-read: every read unifies the historical
@@ -64,7 +76,12 @@ func (s *Server) reads() pointReads {
 }
 
 func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration, reg *metrics.Registry, signer *plugintoken.Signer) *Server {
-	return &Server{store: store, pool: pool, log: log, maxWindow: maxWindow, metrics: reg, signer: signer, dialect: PostgresDialect}
+	return &Server{
+		store: store, pool: pool, log: log, maxWindow: maxWindow, metrics: reg, signer: signer, dialect: PostgresDialect,
+		role: func(ctx context.Context, userID, projectID string) (string, error) {
+			return controlplane.RoleForProject(ctx, pool, userID, projectID)
+		},
+	}
 }
 
 // SetDialect selects the SQL dialect the compiler emits, matching the backing
@@ -133,15 +150,23 @@ func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *Compi
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 
 	// Case 2 — a browser session (shell). Effective = the user's role permissions ∩
-	// project. Admin => the full permission set, DERIVED from the role (the #21 RBAC
-	// seam), not a hardcoded verb list.
+	// project, where the role is resolved PER-PROJECT-PER-ORG (Arc O / O2): the user's
+	// membership role in the org that owns the requested project — NOT the ambient
+	// default-org role on the session. A user who is owner in org A and viewer in org B
+	// gets viewer scope when acting on org B's project; a non-member (or unknown project)
+	// gets role "" → RoleScopes("") = no scopes → 403 (fail closed). This is the cross-org
+	// isolation the ambient field masked.
 	if bearer == "" && svcTok == "" {
 		if sess, ok := authhttp.SessionFrom(r.Context()); ok {
 			projectID, err := s.sessionProject(r)
 			if err != nil {
 				return controlplane.Identity{}, errf("unauthorized", 403, "no project available")
 			}
-			userPerms := perm.RoleScopes(sess.User.Role)
+			role, rerr := s.role(r.Context(), sess.User.ID, projectID)
+			if rerr != nil {
+				return controlplane.Identity{}, errf("unauthorized", 403, "role resolution failed")
+			}
+			userPerms := perm.RoleScopes(role)
 			if !perm.Has(userPerms, reqPerm) {
 				return controlplane.Identity{}, errf("unauthorized", 403, "missing permission %s", reqPerm)
 			}

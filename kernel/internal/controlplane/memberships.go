@@ -35,6 +35,25 @@ func OrgForProject(ctx context.Context, pool *pgxpool.Pool, projectID string) (s
 	return orgID, err
 }
 
+// RoleForProject resolves a user's membership role in the org that OWNS a project — the
+// per-request-per-project authority the auth convergence seam uses (Arc O / O2). One
+// query: project → its org → the user's membership role there. Returns "" when the project
+// is unknown OR the user is not a member of its org → perm.RoleScopes("") = no scopes
+// (FAIL CLOSED). This is what makes a user who is owner in org A but viewer in org B get
+// VIEWER scope on org B's project — never their ambient default-org role.
+func RoleForProject(ctx context.Context, pool *pgxpool.Pool, userID, projectID string) (string, error) {
+	var role string
+	err := pool.QueryRow(ctx,
+		`SELECT COALESCE(m.role, '')
+		   FROM projects p
+		   LEFT JOIN org_memberships m ON m.org_id = p.org_id AND m.user_id = $1
+		  WHERE p.id = $2`, userID, projectID).Scan(&role)
+	if err == pgx.ErrNoRows {
+		return "", nil // unknown project → no authority (fail closed)
+	}
+	return role, err
+}
+
 // RoleInOrg returns a user's membership role in an org, or "" if they are not a member.
 // An empty role resolves (via perm.RoleScopes) to NO scopes — a user has zero authority
 // in an org they don't belong to (the cross-org prove-the-negative).

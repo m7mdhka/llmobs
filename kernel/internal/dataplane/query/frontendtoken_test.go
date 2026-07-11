@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -162,6 +163,9 @@ func TestFrontendTokenIsNotABoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{signer: signer}
+	// O2: the session (Case 2) resolves its per-project-org role — here an admin → full
+	// scopes. Injected (no DB in this unit test).
+	s.SetRoleResolver(func(_ context.Context, _, _ string) (string, error) { return "admin", nil })
 
 	// The plugin was minted a deliberately NARROW frontend token (metadata only)...
 	narrow := frontendReq(t, signer, "acme/a", []string{perm.TracesReadMetadata}, "projA", 0, time.Minute)

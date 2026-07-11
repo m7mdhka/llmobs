@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -33,6 +34,9 @@ func TestG1FrontendEnforcedAgainstAmbientSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{signer: signer}
+	// O2: the shell's own session (Case 2) resolves its per-project-org role (admin → full);
+	// injected (no DB in this unit test). G1 confines PLUGINS, not the first-party shell.
+	s.SetRoleResolver(func(_ context.Context, _, _ string) (string, error) { return "admin", nil })
 	const grantedProject, otherProject = "projA", "projB"
 
 	// The frontend token the shell mints for a METADATA-ONLY plugin: even though the

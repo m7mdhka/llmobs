@@ -8,6 +8,7 @@
 package pluginproxy
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -32,13 +33,18 @@ type Proxy struct {
 	backends BackendLookup
 	signer   *plugintoken.Signer
 	project  func(*http.Request) (string, error)
-	ttl      time.Duration
-	log      *slog.Logger
+	// role resolves the session user's membership role in the org that owns the proxied
+	// project (Arc O / O2) — the identity assertion carries the user's role IN THAT
+	// PROJECT'S ORG, not an ambient default-org role. Injected (no pool import here).
+	role func(ctx context.Context, userID, projectID string) (string, error)
+	ttl  time.Duration
+	log  *slog.Logger
 }
 
-// New builds a proxy. project resolves the tenant the request acts on.
-func New(backends BackendLookup, signer *plugintoken.Signer, project func(*http.Request) (string, error), log *slog.Logger) *Proxy {
-	return &Proxy{backends: backends, signer: signer, project: project, ttl: 2 * time.Minute, log: log}
+// New builds a proxy. project resolves the tenant the request acts on; role resolves the
+// user's per-project-org membership role.
+func New(backends BackendLookup, signer *plugintoken.Signer, project func(*http.Request) (string, error), role func(context.Context, string, string) (string, error), log *slog.Logger) *Proxy {
+	return &Proxy{backends: backends, signer: signer, project: project, role: role, ttl: 2 * time.Minute, log: log}
 }
 
 // Handler proxies {prefix}/{id}/* to the plugin backend.
@@ -70,12 +76,17 @@ func (p *Proxy) Handler(prefix string) http.Handler {
 			unavailable(w, http.StatusForbidden, "no_project", id)
 			return
 		}
-		// DataPermsOnly: a plugin identity assertion MUST NOT carry a management scope
-		// (members:manage/org:manage/actions:execute) even before the downstream
-		// intersection — the assertion is handed to plugin code. owner/admin roles hold
-		// management scopes; strip them here so no plugin credential can ever carry one.
+		// The assertion carries the user's role IN THE PROJECT'S ORG (O2), not an ambient
+		// default-org role. DataPermsOnly then strips management scopes so a plugin
+		// identity assertion can never carry members:manage/org:manage even before the
+		// downstream intersection (the assertion is handed to plugin code).
+		role, rerr := p.role(r.Context(), sess.User.ID, projectID)
+		if rerr != nil {
+			unavailable(w, http.StatusForbidden, "role_resolution_failed", id)
+			return
+		}
 		assertion, _, err := p.signer.MintIdentityAssertion(id, sess.User.Email, projectID,
-			"session:"+sess.User.Email, perm.DataPermsOnly(perm.RoleScopes(sess.User.Role)), time.Now(), p.ttl)
+			"session:"+sess.User.Email, perm.DataPermsOnly(perm.RoleScopes(role)), time.Now(), p.ttl)
 		if err != nil {
 			unavailable(w, http.StatusInternalServerError, "assertion_mint_failed", id)
 			return

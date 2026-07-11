@@ -36,10 +36,10 @@ const customSecretSchemaJSON = `{
 }`
 
 func settingsSetup(t *testing.T) (*Settings, *plugintoken.Signer) {
-	return settingsSetupAuthz(t, func(*http.Request) bool { return true })
+	return settingsSetupAuthz(t, func(*http.Request, string) bool { return true })
 }
 
-func settingsSetupAuthz(t *testing.T, canWrite func(*http.Request) bool) (*Settings, *plugintoken.Signer) {
+func settingsSetupAuthz(t *testing.T, canWrite func(*http.Request, string) bool) (*Settings, *plugintoken.Signer) {
 	t.Helper()
 	signer, err := plugintoken.NewSigner()
 	if err != nil {
@@ -173,6 +173,32 @@ func TestSettingsCustomModeOpaqueAndSecret(t *testing.T) {
 	}
 }
 
+// TestSettingsWriteAuthorityIsPerTokenProject is the O2 prove-the-negative for the
+// cross-org settings-write escalation: the write-authority gate is evaluated against the
+// TOKEN's project (c.ProjectID), so authority is resolved in that project's org — a user
+// who lacks write authority in the token's project's org is denied, even if they hold it
+// elsewhere (an ambient default-org role can never authorize a cross-org settings write).
+func TestSettingsWriteAuthorityIsPerTokenProject(t *testing.T) {
+	// canWrite grants authority ONLY for the project "projA" — modeling a user who is an
+	// admin in projA's org but a viewer in projB's org.
+	h, signer := settingsSetupAuthz(t, func(_ *http.Request, projectID string) bool {
+		return projectID == "projA"
+	})
+
+	// A token for projA (authorized org) → the write is allowed.
+	okTok := frontendTok(t, signer, "acme/dash", "projA")
+	if rec := callSettings(h, "set", okTok, `{"values":{"endpoint":"https://a","apiKey":"k"}}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("write with authority in the token's project must succeed, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// A token for projB (a project in an org where the user is only a viewer) → DENIED,
+	// because the gate resolves authority against projB, not the ambient default org.
+	crossOrgTok := frontendTok(t, signer, "acme/dash", "projB")
+	if rec := callSettings(h, "set", crossOrgTok, `{"values":{"endpoint":"https://b","apiKey":"k"}}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-org write (no authority in the token's project) must be 403, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSettingsRejections(t *testing.T) {
 	h, signer := settingsSetup(t)
 
@@ -198,7 +224,7 @@ func TestSettingsRejections(t *testing.T) {
 		// canWrite=false models a viewer (no configuration authority). The token is a
 		// valid frontend token, so plugin/tenant scoping passes — only the write
 		// authority gate stops it. Reads are still allowed.
-		h, signer := settingsSetupAuthz(t, func(*http.Request) bool { return false })
+		h, signer := settingsSetupAuthz(t, func(*http.Request, string) bool { return false })
 		tok := frontendTok(t, signer, "acme/dash", "projA")
 		if rec := callSettings(h, "set", tok, `{"values":{"endpoint":"https://x","apiKey":"k"}}`); rec.Code != http.StatusForbidden {
 			t.Fatalf("a viewer must not write settings, want 403 got %d", rec.Code)

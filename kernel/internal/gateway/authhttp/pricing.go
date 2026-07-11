@@ -52,6 +52,14 @@ type pricingHandler struct {
 }
 
 // canWrite reports whether the session may change pricing (admin/write authority).
+//
+// O2 note: this gates on the session's DEFAULT-ORG role (sess.User.Role). Pricing entries
+// are a GLOBAL, instance-wide table (no project/org), so "may edit prices" is genuinely a
+// global-admin question, not a per-project one — the default-org role is a defensible
+// residual in the single-org profiles. When multi-org lands (O3+), who may edit global
+// prices (a user who is admin in one org, viewer in another) is a ruled decision for that
+// arc; the per-project discount write should then resolve against the discount's project
+// org (perm via RoleForProject), like settings does.
 func (p *pricingHandler) canWrite(r *http.Request) (string, bool) {
 	sess, ok := SessionFrom(r.Context())
 	if !ok || !perm.HasWriteAuthority(perm.RoleScopes(sess.User.Role)) {

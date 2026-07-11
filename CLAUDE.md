@@ -48,6 +48,11 @@ cloud later; nothing in this repo is ever feature-gated.
 10. **Branding:** the product name exists only in `kernel/pkg/brand` and
     `packages/brand`. Never hardcode "llmobs" elsewhere (strings, tables,
     env prefixes use the brand constant).
+11. **Enforce invariants at the convergence seam, not per-caller** (ADR-0025 R6).
+    Put a guard at the ONE seam every path funnels through — the persist stage, the
+    Query API `auth()` intersection, the plugin-token verify — never re-checked at
+    each caller. A new caller must inherit the invariant by construction, not by
+    remembering to re-check it; per-entry-point guards drift and one new path forgets.
 
 ## Repo map (where things go)
 

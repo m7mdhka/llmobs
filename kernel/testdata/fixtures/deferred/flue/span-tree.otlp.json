@@ -1,0 +1,92 @@
+{
+  "_note": "BANKED SHAPE — Flue framework dialect (#14332). No normalizer exists yet; not run by any test. See ../README.md.",
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "flue-svc" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "@flue/opentelemetry", "version": "1.0.0" },
+          "spans": [
+            {
+              "traceId": "f1ded00000000000000000000000000f",
+              "spanId": "f1de000000000001",
+              "name": "workflow support",
+              "kind": 2,
+              "startTimeUnixNano": "1720000000000000000",
+              "endTimeUnixNano": "1720000005000000000",
+              "attributes": [
+                { "key": "flue.workflow.name", "value": { "stringValue": "support" } },
+                { "key": "flue.workflow.payload", "value": { "stringValue": "{\"ticket\":42}" } },
+                { "key": "flue.workflow.result", "value": { "stringValue": "{\"status\":\"resolved\"}" } }
+              ]
+            },
+            {
+              "traceId": "f1ded00000000000000000000000000f",
+              "spanId": "f1de000000000002",
+              "parentSpanId": "f1de000000000001",
+              "name": "chat gpt-4o",
+              "kind": 2,
+              "startTimeUnixNano": "1720000000500000000",
+              "endTimeUnixNano": "1720000001500000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
+                { "key": "flue.turn.input", "value": { "stringValue": "[{\"role\":\"user\",\"content\":\"help with 42\"}]" } },
+                { "key": "flue.turn.output", "value": { "stringValue": "[{\"role\":\"assistant\",\"content\":\"looking\"}]" } }
+              ]
+            },
+            {
+              "traceId": "f1ded00000000000000000000000000f",
+              "spanId": "f1de000000000003",
+              "parentSpanId": "f1de000000000002",
+              "name": "tool get_order",
+              "kind": 2,
+              "startTimeUnixNano": "1720000001600000000",
+              "endTimeUnixNano": "1720000002000000000",
+              "attributes": [
+                { "key": "flue.tool.name", "value": { "stringValue": "get_order" } },
+                { "key": "flue.tool.call_id", "value": { "stringValue": "call_1" } },
+                { "key": "flue.tool.arguments", "value": { "stringValue": "{\"id\":42}" } },
+                { "key": "flue.tool.result", "value": { "stringValue": "{\"total\":19.99}" } }
+              ]
+            },
+            {
+              "traceId": "f1ded00000000000000000000000000f",
+              "spanId": "f1de000000000004",
+              "parentSpanId": "f1de000000000001",
+              "name": "task refund-agent",
+              "kind": 2,
+              "startTimeUnixNano": "1720000002100000000",
+              "endTimeUnixNano": "1720000004000000000",
+              "attributes": [
+                { "key": "flue.task.id", "value": { "stringValue": "task_9" } },
+                { "key": "flue.task.agent", "value": { "stringValue": "refund-agent" } },
+                { "key": "flue.task.prompt", "value": { "stringValue": "process refund for 42" } },
+                { "key": "flue.task.result", "value": { "stringValue": "refunded" } }
+              ]
+            },
+            {
+              "traceId": "f1ded00000000000000000000000000f",
+              "spanId": "f1de000000000005",
+              "parentSpanId": "f1de000000000004",
+              "name": "operation db.write",
+              "kind": 2,
+              "startTimeUnixNano": "1720000002200000000",
+              "endTimeUnixNano": "1720000002300000000",
+              "attributes": [
+                { "key": "flue.operation.id", "value": { "stringValue": "op_3" } },
+                { "key": "flue.operation.kind", "value": { "stringValue": "db.write" } },
+                { "key": "flue.operation.result", "value": { "stringValue": "{\"ok\":true}" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

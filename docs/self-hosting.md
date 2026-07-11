@@ -176,3 +176,24 @@ DELETE /v1alpha1/spans?user_id=<id>&from=<rfc3339>&to=<rfc3339>   (delete scope)
 The filter is mandatory and bounded (a user plus a time window); the deletion is a
 hard delete (payloads removed, not merely hidden) and records an `erasure_audit`
 row (actor, filter, count, time) so the erasure is auditable.
+
+## Self-hosting constraints we hold ourselves to (ADR-0025 R7)
+
+The platform must self-host under **plain HTTP** and under a **subpath** (`PUBLIC_PATH`).
+We are compliant today — the Langfuse mine surfaced four ways a competitor broke this,
+and we verified we're immune. They are pinned as rules to honor if the relevant surface
+is ever introduced:
+
+- **No secure-context-only browser crypto.** `crypto.randomUUID` / `crypto.subtle`
+  throw off-`localhost` over plain HTTP — so we don't use them in any frontend path.
+  A future need uses a library with a non-secure-context fallback.
+- **Subpath-aware server redirects.** The kernel issues no HTTP redirects today; the
+  shell navigates client-side (`PUBLIC_PATH`-aware). Any future server-issued redirect
+  or `Location` header (an OIDC callback is the likely first) must prepend the base path.
+- **Precision-preserving payload rendering.** The trace payload viewer renders the
+  opaque IO string as-is; it does not round-trip it through `JSON.parse` (which loses
+  integers > 2^53). A future pretty-printer must use a lossless parser.
+- **Bounded responses.** Request bodies are size-capped; if a Query API response could
+  grow huge, cap it and return a typed 4xx rather than letting serialization fail.
+
+See ADR-0025 for the evidence (Langfuse #14498/#14397/#14449/#14398) and the full rule set.

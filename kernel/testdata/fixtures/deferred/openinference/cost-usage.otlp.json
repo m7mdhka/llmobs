@@ -1,0 +1,53 @@
+{
+  "_note": "BANKED SHAPE — OpenInference dialect (#14472). No normalizer exists yet; not run by any test. See ../README.md.",
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "agent-svc" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "openinference.instrumentation.anthropic", "version": "0.1.0" },
+          "spans": [
+            {
+              "traceId": "0f111111111111111111111111111111",
+              "spanId": "0f11000000000001",
+              "name": "ChatAnthropic",
+              "kind": 2,
+              "startTimeUnixNano": "1720000000000000000",
+              "endTimeUnixNano": "1720000001000000000",
+              "attributes": [
+                { "key": "openinference.span.kind", "value": { "stringValue": "LLM" } },
+                { "key": "llm.model_name", "value": { "stringValue": "claude-3-5-sonnet" } },
+                { "key": "llm.token_count.prompt", "value": { "intValue": "1000" } },
+                { "key": "llm.token_count.completion", "value": { "intValue": "200" } },
+                { "key": "llm.token_count.total", "value": { "intValue": "1200" } },
+                { "key": "llm.cost.total", "value": { "doubleValue": 0.000151 } },
+                { "key": "input.value", "value": { "stringValue": "[{\"role\":\"user\",\"content\":\"hi\"}]" } },
+                { "key": "output.value", "value": { "stringValue": "[{\"role\":\"assistant\",\"content\":\"hello\"}]" } }
+              ]
+            },
+            {
+              "traceId": "0f111111111111111111111111111111",
+              "spanId": "0f11000000000002",
+              "name": "ChatAnthropic (precedence fork)",
+              "kind": 2,
+              "startTimeUnixNano": "1720000001000000000",
+              "endTimeUnixNano": "1720000002000000000",
+              "attributes": [
+                { "key": "openinference.span.kind", "value": { "stringValue": "LLM" } },
+                { "key": "llm.model_name", "value": { "stringValue": "claude-3-5-sonnet" } },
+                { "key": "llm.token_count.prompt", "value": { "intValue": "500" } },
+                { "key": "llm.token_count.completion", "value": { "intValue": "100" } },
+                { "key": "gen_ai.usage.cost", "value": { "doubleValue": 0.00009 } },
+                { "key": "llm.cost.total", "value": { "doubleValue": 0.00012 } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

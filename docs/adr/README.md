@@ -42,3 +42,4 @@ order). New decisions continue the numbering:
 | [ADR-0022](0022-time-authority-policy.md) | Time authority policy — producer vs receive time (audit) |
 | [ADR-0023](0023-plugin-protocol.md) | Plugin protocol (Tier-3 backend): handshake, tokens, R1–R4 (Arc H) |
 | [ADR-0024](0024-plugin-settings-schemaform.md) | Plugin settings store + SchemaForm: kv-backed, frontend-token-scoped, `writeOnly` secrets never returned (Arc J / J2) |
+| [ADR-0025](0025-prelaunch-design-rules.md) | Pre-launch design-rules from the Langfuse merged-PR mine: cost-derivation, outbound-fetch + egress watchdog, token-revocation freshness, limiter fail-open/closed, agent-tool gating, convergence-point, self-hosting (Arc K / K2) |

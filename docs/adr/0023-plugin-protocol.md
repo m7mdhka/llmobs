@@ -39,6 +39,16 @@ kernel package a plugin backend imports — the dogfood rule).
   ready plugin with a watermark stale past `spec.backend.watermarkBudget` is
   `degraded`; a busy long-running job that keeps advancing its watermark is not
   (the B3 lesson).
+  - **Watermark refinements (validated, ADR-0025 / K2).** The Langfuse mine (#14680,
+    an event-propagation stuck-check) confirms two nuances to honor as the watermark
+    matures: (1) distinguish *"a run started recently"* from *"progress was made"* —
+    an idle plugin with an empty queue makes no progress but is **not stuck**, so
+    liveness must not be inferred from progress alone; and (2) any heartbeat/watermark
+    a probe keys on needs a **TTL / staleness bound**, or a restarted-but-wedged
+    plugin inherits a stale-but-present heartbeat and the liveness probe **self-defeats**
+    (a crash-loop the probe can't break). Our `watermarkBudget` already bounds
+    staleness; keep the started-vs-progress distinction in mind for idle-until-triggered
+    plugins (the H7c langfuse-compat seeding lesson).
 - **Two tokens, compact + Ed25519-signed** (`v1.<base64url(claims)>.<base64url(
   sig)>`, no JWT dependency): a **service token** (which plugin, what it may do;
   short-TTL + refresh) and a per-request **identity assertion** (who the user is,

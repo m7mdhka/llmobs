@@ -158,3 +158,33 @@ authoritative values are the maps and `total_cost`.
 > scalars by summing keys `startsWith("input")` / `startsWith("output")` and reading
 > `total` (study Ch. 06 §5.4). Recorded here as informative guidance for Query API
 > implementers; it is not a storage rule.
+
+## 7. Derivation stage rules (Normative) — ADR-0025 / K2
+
+The kernel enrichment stage that derives `usage_details`/`cost_details` (§3.2, §4) is
+**not built yet** (`pipeline/stages.go` is a no-op). These rules are pinned before it
+exists so it is built correct — each is a failure mode the Langfuse mine observed
+shipped. When the stage is built it MUST honor them:
+
+- **7.1 Aggregate spans MUST NOT double-count leaf usage.** An `agent_step` /
+  `invoke_agent` span frequently carries the *same* usage as its child model-call
+  span. Trace-level cost aggregation (a `SUM(total_cost)` over a trace's spans) MUST
+  NOT count both — that doubles the trace's cost. Derivation MUST treat an aggregate
+  span's usage as suspect: either it is excluded from trace-level cost roll-ups, or it
+  is flagged, but it is never summed alongside a child that carries the same usage.
+  (Evidence: Langfuse #14808 zeroes usage on AI-SDK agent spans.)
+- **7.2 Never sum `input + cache` as disjoint.** F3 (§3.1) forbids assuming whether
+  `input` is inclusive- or net-of-cache. Therefore the synthesized `total` (§3.2.1)
+  and any derived cost MUST be computed from `input + output` only; `cache_read`,
+  `cache_write`, and `reasoning` are additive **detail** keys and MUST NOT be summed
+  into `total` or multiplied-and-added as separate cost lines that also inflate the
+  input line. Summing input + cache is the mirror image of Langfuse's
+  subtract-cache-from-input bug (#14902/#14945) — F3 protects ingest, this rule
+  protects derivation.
+- **7.3 `model` without usage MUST NOT fabricate cost.** §3.2.2 permits usage
+  derivation only when a model resolves and `status.code != error` — but a
+  wrapper/agent span that has a `model` set and **no** provided usage MUST NOT be
+  tokenized into estimated usage and then priced. Gate estimation on the span being a
+  leaf generation whose usage is genuinely absent (not merely carried by a child),
+  or the trace accrues phantom cost. (Evidence: Langfuse #14945 — a model set without
+  usage flipped a span into estimated-usage mode.)

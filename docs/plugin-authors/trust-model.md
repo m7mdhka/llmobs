@@ -61,3 +61,31 @@ follow-up (ADR-0004 amendment, tracked in ADR-0023's deferred list). It will be 
 when running an untrusted third-party frontend is a real requirement (a marketplace,
 or a specific customer), not before. Until then, the rule above holds: **untrusted
 logic goes in a backend.**
+
+## Outbound calls from a plugin (egress rules, ADR-0025 R2)
+
+If your plugin backend calls an external service — an LLM provider for an eval, a
+webhook, anything at a URL — these rules are **non-optional**. They protect the
+platform, not just your plugin, because in the **lite profile every plugin shares one
+host process** (`runtimes/shared/`): one hung outbound call can starve *every* plugin
+in that process.
+
+- **Always set a hard timeout on the call and propagate the caller's cancellation.**
+  Never issue an un-timed-out request. An SDK's default timeout is not enough — some
+  providers/custom base-URLs ignore it; enforce your own ceiling around the fetch.
+- **Enumerate, don't allowlist.** If you support several providers, derive the set
+  from an enum, not a hand-maintained list — allowlists drift and leave one provider's
+  egress unbounded (this is exactly how Langfuse left three providers un-timed-out).
+- **Block internal / link-local hosts (SSRF).** If any part of the destination is
+  user- or config-influenced, refuse `127.0.0.0/8`, `10/8`, `169.254.0.0/16`,
+  `metadata.google.internal`, and friends — an eval/webhook that can be pointed at an
+  internal address is an SSRF primitive.
+- **Guard at the one convergence point**, not per-entry-point. Put the timeout +
+  host-check where every outbound path funnels through, so a new call site inherits
+  them by construction (per-entry guards drift; a new path forgets one).
+
+The kernel side of this is watchdogged: a plugin that pins the shared runtime with a
+hung call trips the two-signal health machinery (its functional watermark stalls →
+`degraded`) and the supervisor can restart it. But a restart is a blunt recovery —
+your plugin's own timeout is the first and best line. When the kernel grows its own
+outbound surface (evals, webhooks), it will carry these same rules built in (ADR-0025).

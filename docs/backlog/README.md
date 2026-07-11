@@ -224,6 +224,17 @@ home":
   there keeps one identity model rather than a parallel per-user scope in the settings
   store. Noted in `docs/plugin-authors/settings.md`.
 
+**Close-out verdict (Arc N complete — Bucket-C flexibility re-run).** Is "any language,
+any framework, plug-and-play" now true? **Yes, for the shapes real plugins take:**
+any-language backends (always), **any-framework frontends** (N1 — the #1 wall flipped from
+closed to open, provable by a working non-React plugin), plugin-owned queryable data
+(`store`), a free **or custom** settings UI (N2), and **localization + RTL** (N3). The
+remaining limits are documented as *designed* walls, each with a supported escape, in
+`docs/plugin-authors/what-you-can-and-cant-do.md` (N5). The two genuinely-additive gaps
+have named homes: **origin isolation** (untrusted-frontend hard confinement — ADR-0004
+amendment, trigger = first untrusted third-party frontend) and a **`blobs` primitive**
+(#120). Neither blocks the promise; both are honest deferrals, not silent gaps.
+
 ## Gaps found during consolidation (need a human ruling — NOT resolved here)
 
 1. **Round-3 Opik dispositions are unruled.** Rounds 1–2 were ruled and banked; the

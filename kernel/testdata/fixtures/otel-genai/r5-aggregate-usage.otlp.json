@@ -1,0 +1,46 @@
+{
+  "$comment": "R5 prove-the-negative (§7.1, dual-incumbent Langfuse #14808 + Opik #4695). A LangGraph/Vercel-AI-SDK-style trace: an invoke_agent AGGREGATE span that carries the SUM of its child's usage, plus the child chat LEAF span carrying the same usage. The normalizer MUST drop the aggregate span's usage (so trace-level cost == leaf, not 2x); the leaf keeps its usage. Synthetic.",
+  "resourceSpans": [
+    {
+      "resource": { "attributes": [ { "key": "service.name", "value": { "stringValue": "agent-svc" } } ] },
+      "scopeSpans": [
+        {
+          "scope": { "name": "otel-genai-demo", "version": "0.1.0" },
+          "spans": [
+            {
+              "traceId": "11112f3577b34da6a3ce929d0e0e4736",
+              "spanId": "a1a1a1a1a1a1a1a1",
+              "name": "invoke_agent planner",
+              "kind": 2,
+              "startTimeUnixNano": "1720000000000000000",
+              "endTimeUnixNano": "1720000004000000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "812" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "96" } }
+              ]
+            },
+            {
+              "traceId": "11112f3577b34da6a3ce929d0e0e4736",
+              "spanId": "b2b2b2b2b2b2b2b2",
+              "parentSpanId": "a1a1a1a1a1a1a1a1",
+              "name": "chat gpt-4o",
+              "kind": 3,
+              "startTimeUnixNano": "1720000000500000000",
+              "endTimeUnixNano": "1720000003500000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "812" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "96" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

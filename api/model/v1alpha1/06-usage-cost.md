@@ -51,7 +51,9 @@ SHOULD map onto them so that cross-provider aggregation works:
 | `cache_read` | Tokens served from a prompt cache (read). |
 | `cache_write` | Tokens written to a prompt cache. |
 | `reasoning` | Reasoning/thinking tokens (models that bill these separately). |
-| `audio` | Audio tokens/units. |
+| `audio` | Audio tokens/units (unspecified direction). |
+| `audio_input` | Audio input tokens (a detail of `input`, priced separately). |
+| `audio_output` | Audio output tokens (a detail of `output`, priced separately). |
 | `image` | Image tokens/units. |
 
 Additional keys are permitted (the map is open); adding a well-known key is

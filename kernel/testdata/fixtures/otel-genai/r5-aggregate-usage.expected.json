@@ -1,0 +1,46 @@
+[
+  {
+    "attributes": {
+      "resource.service.name": "agent-svc"
+    },
+    "end_time": "2024-07-03T09:46:44Z",
+    "environment": "default",
+    "id": "a1a1a1a1a1a1a1a1",
+    "kind": "agent_step",
+    "model": "gpt-4o",
+    "name": "invoke_agent planner",
+    "project_id": "proj_demo",
+    "provider": "openai",
+    "raw_kind": "invoke_agent",
+    "start_time": "2024-07-03T09:46:40Z",
+    "status": {
+      "code": "unset"
+    },
+    "trace_id": "11112f3577b34da6a3ce929d0e0e4736"
+  },
+  {
+    "attributes": {
+      "resource.service.name": "agent-svc"
+    },
+    "end_time": "2024-07-03T09:46:43.5Z",
+    "environment": "default",
+    "id": "b2b2b2b2b2b2b2b2",
+    "kind": "generation",
+    "model": "gpt-4o",
+    "name": "chat gpt-4o",
+    "parent_span_id": "a1a1a1a1a1a1a1a1",
+    "project_id": "proj_demo",
+    "provided_usage_details": {
+      "input": 812,
+      "output": 96,
+      "total": 908
+    },
+    "provider": "openai",
+    "raw_kind": "chat",
+    "start_time": "2024-07-03T09:46:40.5Z",
+    "status": {
+      "code": "unset"
+    },
+    "trace_id": "11112f3577b34da6a3ce929d0e0e4736"
+  }
+]

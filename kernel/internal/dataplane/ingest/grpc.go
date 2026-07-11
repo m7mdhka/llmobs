@@ -39,13 +39,12 @@ func (g *grpcTraceService) Export(ctx context.Context, req ptraceotlp.ExportRequ
 		bearer:      bearerFromMetadata(ctx),
 		receivedAt:  time.Now(),
 	}
-	select {
-	case g.r.queue <- j:
-		return ptraceotlp.NewExportResponse(), nil
-	default:
+	// Durable-append for the WAL spool (ack-after-durable); ErrSpoolFull sheds.
+	if err := g.r.spool.Append(j); err != nil {
 		g.r.shed("queue_full")
 		return ptraceotlp.NewExportResponse(), status.Error(codes.Unavailable, "ingestion unavailable: queue_full")
 	}
+	return ptraceotlp.NewExportResponse(), nil
 }
 
 // bearerFromMetadata pulls the token from the gRPC "authorization" metadata,

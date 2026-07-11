@@ -58,13 +58,12 @@ type Runner interface {
 
 // Receiver is the OTLP HTTP receiver + async worker pool.
 type Receiver struct {
-	queue     chan job
-	pipe      Runner
-	log       *slog.Logger
-	workers   int
-	highWater int
-	mreg      *metrics.Registry
-	signal    *ingesthealth.Signal // persist-health gate (nil => no backpressure on health)
+	spool   Spool
+	pipe    Runner
+	log     *slog.Logger
+	workers int
+	mreg    *metrics.Registry
+	signal  *ingesthealth.Signal // persist-health gate (nil => no backpressure on health)
 
 	wg         sync.WaitGroup
 	draining   atomic.Bool
@@ -74,8 +73,9 @@ type Receiver struct {
 	hardCancel context.CancelFunc
 }
 
-// NewReceiver builds a receiver with an in-process queue and worker pool. mreg may
-// be nil (instrumentation disabled). The persist-health signal is attached
+// NewReceiver builds a receiver with an in-memory spool and worker pool (lite
+// default). Call SetSpool to swap in the durable WAL spool for the scale profile.
+// mreg may be nil (instrumentation disabled). The persist-health signal is attached
 // separately via SetPersistSignal so backpressure-on-health is opt-in (G2).
 func NewReceiver(pipe Runner, log *slog.Logger, queueSize, workers int, mreg *metrics.Registry) *Receiver {
 	if queueSize <= 0 {
@@ -84,17 +84,12 @@ func NewReceiver(pipe Runner, log *slog.Logger, queueSize, workers int, mreg *me
 	if workers <= 0 {
 		workers = 4
 	}
-	hw := int(float64(queueSize) * highWaterFraction)
-	if hw < 1 {
-		hw = 1
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Receiver{
-		queue:      make(chan job, queueSize),
+		spool:      newMemSpool(queueSize),
 		pipe:       pipe,
 		log:        log,
 		workers:    workers,
-		highWater:  hw,
 		mreg:       mreg,
 		drainC:     make(chan struct{}),
 		hardCtx:    ctx,
@@ -102,25 +97,39 @@ func NewReceiver(pipe Runner, log *slog.Logger, queueSize, workers int, mreg *me
 	}
 }
 
+// SetSpool swaps the ack-window implementation (ADR-0027) — e.g. the durable WAL
+// spool in the scale profile. Must be called before Start.
+func (r *Receiver) SetSpool(s Spool) { r.spool = s }
+
 // SetPersistSignal attaches the persist-health gate used for readiness-consistent
 // backpressure (G2). When the signal reports unhealthy, the receivers shed new
 // work with a retryable 503/UNAVAILABLE instead of acking it.
 func (r *Receiver) SetPersistSignal(sig *ingesthealth.Signal) { r.signal = sig }
 
-// QueueLen / QueueCap expose queue occupancy for scrape-time gauges.
-func (r *Receiver) QueueLen() int { return len(r.queue) }
-func (r *Receiver) QueueCap() int { return cap(r.queue) }
+// QueueLen / QueueCap expose spool occupancy for scrape-time gauges.
+func (r *Receiver) QueueLen() int { return r.spool.Len() }
+func (r *Receiver) QueueCap() int { return r.spool.Cap() }
+
+// highWater is the spool-occupancy threshold (of capacity) at which new work is
+// shed (G2), computed from the current spool capacity.
+func (r *Receiver) highWater() int {
+	hw := int(float64(r.spool.Cap()) * highWaterFraction)
+	if hw < 1 {
+		hw = 1
+	}
+	return hw
+}
 
 // backpressure returns a non-empty reason when new work must be shed (503/
 // UNAVAILABLE) rather than acked: shutting down, persistence unhealthy, or the
-// queue past its high-water mark. Empty string => accept on the fast path.
+// spool past its high-water mark. Empty string => accept on the fast path.
 func (r *Receiver) backpressure() string {
 	switch {
 	case r.draining.Load():
 		return "draining"
 	case r.signal != nil && !r.signal.Healthy():
 		return "persist_unhealthy"
-	case len(r.queue) >= r.highWater:
+	case r.spool.Len() >= r.highWater():
 		return "high_water"
 	default:
 		return ""
@@ -160,10 +169,10 @@ func (r *Receiver) Handler() http.Handler {
 		bearer := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
 		ct := req.Header.Get("Content-Type")
 		j := job{body: body, contentType: ct, bearer: bearer, receivedAt: time.Now()}
-		select {
-		case r.queue <- j:
-		default:
-			// Last-resort backpressure: the queue filled between the check and here.
+		// Append is durable for the WAL spool (fsync before return), so the ack
+		// below is ack-after-durable. ErrSpoolFull is the last-resort backpressure
+		// (the spool filled between the check and here).
+		if err := r.spool.Append(j); err != nil {
 			r.shed("queue_full")
 			retryable503(w, "queue_full")
 			return
@@ -210,7 +219,7 @@ func (r *Receiver) worker() {
 	for {
 		// Priority guard: once the hard deadline has fired, stop immediately rather
 		// than let select randomly pull (and abandon) more queued jobs — so the
-		// dropped-on-shutdown count is exactly what remains queued, not fewer.
+		// residual count is exactly what remains buffered, not fewer.
 		if r.hardCtx.Err() != nil {
 			return
 		}
@@ -220,32 +229,70 @@ func (r *Receiver) worker() {
 		case <-r.drainC:
 			r.finalDrain()
 			return
-		case j := <-r.queue:
-			r.process(r.hardCtx, j)
+		default:
 		}
+		l, ok := r.spool.Next(r.hardCtx)
+		if !ok {
+			return
+		}
+		r.handle(r.hardCtx, l)
 	}
 }
 
-// finalDrain processes everything already queued, then returns — unless the hard
+// finalDrain processes everything already buffered, then returns — unless the hard
 // deadline elapsed (hardCtx cancelled), in which case it stops immediately and
-// DrainAndWait counts whatever remains as the dropped-on-shutdown floor.
+// DrainAndWait accounts for whatever remains.
 func (r *Receiver) finalDrain() {
 	for {
 		if r.hardCtx.Err() != nil {
 			return
 		}
-		select {
-		case j := <-r.queue:
-			r.process(r.hardCtx, j)
-		default:
+		l, ok := r.spool.tryNext()
+		if !ok {
 			return
 		}
+		r.handle(r.hardCtx, l)
+	}
+}
+
+// handle runs one leased record through the pipeline and settles it on the spool:
+// success/erasure-suppressed (pipe.Run returns nil for both) → Commit; a failure →
+// bounded retry, then dead-letter. This is where the WAL's ack-after-durable pays
+// off: a failed record is NOT committed, so it survives and replays.
+func (r *Receiver) handle(ctx context.Context, l leased) {
+	if err := r.pipe.Run(ctx, ingestionOf(l.j)); err != nil {
+		r.log.Warn("ingestion pipeline error", "err", err.Error())
+		if l.retry >= maxProcessRetries {
+			r.spool.deadLetter(l)
+			if r.mreg != nil {
+				r.mreg.CounterAdd("llmobs_ingest_wal_dead_lettered_total",
+					"Ingest records dead-lettered after exhausting in-process retries.", nil, 1)
+			}
+			return
+		}
+		l.retry++
+		r.spool.requeue(l)
+		return
+	}
+	r.spool.Commit(l)
+}
+
+func ingestionOf(j job) *pipeline.Ingestion {
+	return &pipeline.Ingestion{
+		Bearer:      j.bearer,
+		Body:        j.body,
+		ContentType: j.contentType,
+		ReceivedAt:  j.receivedAt,
 	}
 }
 
 // BeginDrain flips the receiver to draining so new OTLP requests are shed with a
 // retryable 503 immediately, before the listeners are torn down. Idempotent.
 func (r *Receiver) BeginDrain() { r.draining.Store(true) }
+
+// Close releases the spool (flushing the WAL's final checkpoint and stopping its
+// background checkpointer). Call after DrainAndWait.
+func (r *Receiver) Close() error { return r.spool.Close() }
 
 // DrainAndWait stops accepting new work and blocks until the in-flight queue is
 // fully persisted or the deadline in ctx elapses. If the deadline wins, the
@@ -268,25 +315,28 @@ func (r *Receiver) DrainAndWait(ctx context.Context) {
 		<-done
 	}
 
-	if dropped := len(r.queue); dropped > 0 {
-		r.log.Error("ingest queue not drained before shutdown deadline; acked spans dropped",
-			"dropped", dropped)
+	residual := r.spool.Len()
+	if residual == 0 {
+		return
+	}
+	if r.spool.Durable() {
+		// The WAL spool: undrained records are on disk and replay on next boot — not
+		// lost. Record them as deferred, not dropped.
+		r.log.Info("ingest drain deadline elapsed; undrained records are durable and will replay on boot",
+			"deferred", residual)
 		if r.mreg != nil {
-			r.mreg.CounterAdd("llmobs_ingest_queue_dropped_on_shutdown_total",
-				"Acked ingest jobs dropped because the shutdown drain deadline elapsed before the queue emptied.",
-				nil, float64(dropped))
+			r.mreg.CounterAdd("llmobs_ingest_records_deferred_to_replay_total",
+				"Acked ingest records still buffered at shutdown that are durable (WAL) and replay on boot.",
+				nil, float64(residual))
 		}
+		return
 	}
-}
-
-func (r *Receiver) process(ctx context.Context, j job) {
-	ing := &pipeline.Ingestion{
-		Bearer:      j.bearer,
-		Body:        j.body,
-		ContentType: j.contentType,
-		ReceivedAt:  j.receivedAt,
-	}
-	if err := r.pipe.Run(ctx, ing); err != nil {
-		r.log.Warn("ingestion pipeline error", "err", err.Error())
+	// The in-memory spool: this is the one unavoidable loss window.
+	r.log.Error("ingest queue not drained before shutdown deadline; acked spans dropped",
+		"dropped", residual)
+	if r.mreg != nil {
+		r.mreg.CounterAdd("llmobs_ingest_queue_dropped_on_shutdown_total",
+			"Acked ingest jobs dropped because the shutdown drain deadline elapsed before the queue emptied.",
+			nil, float64(residual))
 	}
 }

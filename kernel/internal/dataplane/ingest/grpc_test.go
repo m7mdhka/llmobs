@@ -31,10 +31,11 @@ func TestGRPCExportDoesNotTouchStorage(t *testing.T) {
 	if _, err := svc.Export(ctx, req); err != nil {
 		t.Fatalf("export should ack, got: %v", err)
 	}
-	if got := len(r.queue); got != 1 {
+	if got := r.QueueLen(); got != 1 {
 		t.Fatalf("expected exactly one enqueued job, got %d", got)
 	}
-	j := <-r.queue
+	lz, _ := r.spool.tryNext()
+	j := lz.j
 	if j.bearer != "my-key" {
 		t.Fatalf("bearer not extracted from metadata: %q", j.bearer)
 	}

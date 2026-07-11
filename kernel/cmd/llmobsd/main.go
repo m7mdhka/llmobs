@@ -138,6 +138,19 @@ func run() error {
 	})
 
 	receiver := ingest.NewReceiver(pipe, log, cfg.IngestQueueSize, 4, mreg)
+	// Scale profile: swap the in-memory ack-window for the durable WAL spool
+	// (ADR-0027) so the ack is ack-after-durable and undrained records replay on
+	// boot. Local WAL only for now (nil archive sink); the object-store tier is
+	// wired when an S3/MinIO sink is configured.
+	if cfg.IngestSpoolDir != "" {
+		spool, serr := ingest.NewWALSpool(cfg.IngestSpoolDir, cfg.IngestQueueSize, 0, nil, time.Second)
+		if serr != nil {
+			log.Error("durable ingest spool init failed; refusing to fall back to lossy in-memory queue", "err", serr.Error())
+			os.Exit(1)
+		}
+		receiver.SetSpool(spool)
+		log.Info("durable WAL ingest spool enabled", "dir", cfg.IngestSpoolDir)
+	}
 	receiver.SetPersistSignal(persistHealth) // shed 503/UNAVAILABLE when persistence is unhealthy
 	receiver.Start(rootCtx)
 	// Ingest queue occupancy is scrape-sampled so an operator can see saturation
@@ -377,6 +390,11 @@ func run() error {
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), drainTimeout)
 	defer drainCancel()
 	receiver.DrainAndWait(drainCtx)
+	// Flush the WAL's final checkpoint and stop its checkpointer (no-op for the
+	// in-memory spool). Undrained durable records replay on next boot.
+	if err := receiver.Close(); err != nil {
+		log.Warn("ingest spool close", "err", err.Error())
+	}
 	log.Info("stopped")
 	return nil
 }

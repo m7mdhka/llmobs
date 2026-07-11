@@ -53,6 +53,8 @@ type eventsReq struct {
 	Offset int64    `json:"offset,omitempty"`
 }
 
+const maxPollTopics = 64 // per-poll topic fan-out cap (DoS bound)
+
 func (h *Events) poll(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 	var req eventsReq
 	if err := decodeJSON(w, r, &req); err != nil {
@@ -61,6 +63,12 @@ func (h *Events) poll(w http.ResponseWriter, r *http.Request, c pluginauth.Calle
 	}
 	if len(req.Topics) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "topics required"})
+		return
+	}
+	// Cap the topic fan-out: each topic costs Offset+LatestID+After per poll, so an
+	// unbounded list turns one authorized call into O(topics) backend round-trips.
+	if len(req.Topics) > maxPollTopics {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "too many topics"})
 		return
 	}
 	events, err := h.bus.Poll(r.Context(), c.PluginID, c.ProjectID, req.Topics, req.Max)

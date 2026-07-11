@@ -6,6 +6,7 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.42.0
 	github.com/jackc/pgx/v5 v5.7.1
 	github.com/oapi-codegen/runtime v1.4.2
+	github.com/redis/go-redis/v9 v9.17.3
 	go.opentelemetry.io/collector/pdata v1.20.0
 	golang.org/x/crypto v0.46.0
 	google.golang.org/grpc v1.67.1
@@ -17,6 +18,7 @@ require (
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect

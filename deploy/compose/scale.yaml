@@ -46,6 +46,18 @@ services:
       timeout: 3s
       retries: 40
 
+  valkey:
+    # R-EV3: Valkey (Redis-protocol-compatible) for the scale event bus. Version
+    # pinned; the adapter feature-detects (DisableIdentity) rather than version-gating.
+    image: valkey/valkey:8
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+    volumes:
+      - valkey-data:/data
+
   kernel:
     build:
       context: ../..
@@ -62,6 +74,9 @@ services:
       # this local WAL, and undrained records replay on boot. Backed by a volume so
       # the WAL survives container restarts.
       LLMOBS_INGEST_SPOOL_DIR: "/var/lib/llmobs/wal"
+      # Scale event bus (ADR-0028): Redis/Valkey Streams instead of Postgres. For HA,
+      # set LLMOBS_EVENT_REDIS_MASTER_NAME + LLMOBS_EVENT_REDIS_SENTINEL_ADDRS (R-EV1).
+      LLMOBS_EVENT_REDIS_URL: "redis://valkey:6379/0"
       LLMOBS_LOG_FORMAT: "text"
       LLMOBS_OTLP_HTTP_ADDR: ":4318"
       LLMOBS_OTLP_GRPC_ADDR: ":4317"
@@ -71,6 +86,8 @@ services:
       postgres:
         condition: service_healthy
       clickhouse:
+        condition: service_healthy
+      valkey:
         condition: service_healthy
     volumes:
       - kernel-wal:/var/lib/llmobs/wal
@@ -83,3 +100,4 @@ services:
 volumes:
   clickhouse-data:
   kernel-wal:
+  valkey-data:

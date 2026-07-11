@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/bus"
+	"github.com/m7mdhka/llmobs/kernel/internal/bus/redisstore"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/executors"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
@@ -126,9 +127,28 @@ func run() error {
 	if qt, terr := time.ParseDuration(cfg.QueryStmtTimeout); terr == nil {
 		store.SetQueryTimeout(qt) // K1.5: server-side statement_timeout backstop for DSL reads
 	}
-	// Durable event bus (H6): Postgres-backed for lite (no new infra). Publishes
-	// span.ingested from the pipeline; plugins subscribe via poll/ack.
-	eventBus := bus.New(postgres.NewEventStore(pool), int64(cfg.EventBacklogCap))
+	// Durable event bus (H6): Postgres-backed for lite (no new infra); the scale
+	// profile uses the Redis/Valkey Streams backend when configured (ADR-0028). The
+	// shared bus.Bus (replay/at-least-once/backlog-cap/DLQ) is identical either way —
+	// only the Store differs. Publishes span.ingested; plugins subscribe via poll/ack.
+	var eventStore bus.Store = postgres.NewEventStore(pool)
+	if cfg.EventRedisURL != "" || len(cfg.EventRedisSentinelAddrs) > 0 {
+		rdb, rerr := redisstore.Dial(rootCtx, redisstore.Config{
+			URL:              cfg.EventRedisURL,
+			MasterName:       cfg.EventRedisMasterName,
+			SentinelAddrs:    cfg.EventRedisSentinelAddrs,
+			Password:         cfg.EventRedisPassword,
+			SentinelPassword: cfg.EventRedisSentinelPassword,
+		})
+		if rerr != nil {
+			log.Error("scale event bus (Redis/Valkey) init failed", "err", rerr.Error())
+			os.Exit(1)
+		}
+		defer func() { _ = rdb.Close() }()
+		eventStore = redisstore.New(rdb, strings.ToLower(brand.Name))
+		log.Info("scale event bus enabled (Redis/Valkey Streams)")
+	}
+	eventBus := bus.New(eventStore, int64(cfg.EventBacklogCap))
 	reg := normalize.Default()
 	skew, _ := time.ParseDuration(cfg.ClockSkewThreshold)
 	presets, customRules := parseRedactConfig(cfg.RedactPresets, cfg.RedactCustomJSON)

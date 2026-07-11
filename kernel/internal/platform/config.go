@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/m7mdhka/llmobs/kernel/pkg/brand"
 )
@@ -61,6 +62,14 @@ type Config struct {
 	// (project, topic) before the overflow is dead-lettered (H6) — bounds a dead
 	// subscriber so it cannot pin the event log.
 	EventBacklogCap int `json:"event_backlog_cap"`
+	// Scale event bus (ADR-0028): when EventRedisURL or EventRedisSentinelAddrs is
+	// set, the event bus uses the Redis/Valkey Streams backend instead of Postgres.
+	// Sentinel (MasterName + SentinelAddrs) gives HA failover (R-EV1); empty => lite.
+	EventRedisURL              string   `json:"event_redis_url"`
+	EventRedisMasterName       string   `json:"event_redis_master_name"`
+	EventRedisSentinelAddrs    []string `json:"event_redis_sentinel_addrs"`
+	EventRedisPassword         string   `json:"event_redis_password"`
+	EventRedisSentinelPassword string   `json:"event_redis_sentinel_password"`
 }
 
 func defaults() Config {
@@ -127,6 +136,11 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("ERASURE_SUPPRESSION_TTL"), &c.ErasureSuppressionTTL)
 	envStr(brand.Env("PLUGIN_RECONCILE_INTERVAL"), &c.PluginReconcileInterval)
 	envInt(brand.Env("EVENT_BACKLOG_CAP"), &c.EventBacklogCap)
+	envStr(brand.Env("EVENT_REDIS_URL"), &c.EventRedisURL)
+	envStr(brand.Env("EVENT_REDIS_MASTER_NAME"), &c.EventRedisMasterName)
+	envStrList(brand.Env("EVENT_REDIS_SENTINEL_ADDRS"), &c.EventRedisSentinelAddrs)
+	envStr(brand.Env("EVENT_REDIS_PASSWORD"), &c.EventRedisPassword)
+	envStr(brand.Env("EVENT_REDIS_SENTINEL_PASSWORD"), &c.EventRedisSentinelPassword)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)
@@ -145,6 +159,22 @@ func envBool(key string, dst *bool) {
 			*dst = b
 		}
 	}
+}
+
+// envStrList reads a comma-separated env var into a string slice (trimmed, empties
+// dropped) — used for the Sentinel address list.
+func envStrList(key string, dst *[]string) {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return
+	}
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	*dst = out
 }
 
 func envInt(key string, dst *int) {

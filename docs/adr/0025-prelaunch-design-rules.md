@@ -91,11 +91,16 @@ misses, survived revocation until TTL; they added a flush-all + negative-cache p
   moment a plugin must be forcibly cut off mid-session (compromised plugin, emergency
   disable), a still-unexpired token keeps verifying until it expires. The
   supervisor's `disabled` state stops *delivering* new tokens but does not *revoke*
-  outstanding ones. This is a genuine gap on shipped code. **Tracked for
-  implementation (Deferred, below); not built in K2.** A minimal fix is a
+  outstanding ones. This is a genuine gap on shipped code. **Tracked as issue #63
+  (linked to the auth arc #21); not built in K2.** A minimal fix is a
   per-plugin/`jti` denylist consulted in the verify path, or a signer-key rotation
   scoped to a plugin. The in-memory signing key (lite) already invalidates *all*
   tokens on kernel restart — that is the current blunt break-glass.
+  - **Named trigger (#63):** *immediate revocation is required before any real
+    multi-tenant / production deployment; TTL-only is acceptable ONLY at single-tenant
+    pilot scale.* This item gates the pilot→production transition for the plugin-token
+    surface — it must be closed (or consciously waived for a single-tenant pilot)
+    before onboarding untrusted plugins or multiple tenants.
 
 ### R4 — Limiters: availability fail-open, resource-protection fail-closed (validated)
 
@@ -157,9 +162,10 @@ plain HTTP + `PUBLIC_PATH` subpath" pillar:
 
 ## Deferred (tracked, not built in K2)
 
-- **Plugin-token revocation seam (R3)** — the one real gap on live code. Implement a
-  verify-path denylist (per-plugin / `jti`) or plugin-scoped key rotation so a
-  `disabled` plugin's outstanding tokens stop verifying immediately, not at TTL.
+- **Plugin-token revocation seam (R3) — tracked as issue #63.** The one real gap on
+  live code. Implement a verify-path denylist (per-plugin / `jti`) or plugin-scoped key
+  rotation so a `disabled` plugin's outstanding tokens stop verifying immediately, not
+  at TTL. **Gates pilot→production** (see R3's named trigger).
 - **The outbound-fetch surface itself (R2)** — kernel evals/webhooks + the plugin
   egress watchdog land with the feature that needs them; the rules pre-commit the
   shape.

@@ -116,6 +116,14 @@ func run() error {
 			"email", cfg.BootstrapAdminEml)
 	}
 
+	// Price table (ADR-0029, Arc M): seed default per-token prices so cost derivation
+	// works out of the box. Idempotent (ON CONFLICT DO NOTHING) — an operator's edits
+	// (new versions) are never clobbered by a re-seed on the next boot.
+	priceStore := postgres.NewPriceStore(pool)
+	if err := priceStore.SeedDefaults(rootCtx); err != nil {
+		return err
+	}
+
 	// Metrics registry, shared across pipeline + query. Pool stats are sampled at
 	// scrape time. Labels are project_id only — never trace/user ids (cardinality).
 	mreg := metrics.New()
@@ -273,6 +281,10 @@ func run() error {
 	platform.NewHealth(pool, persistHealth).Register(apiMux)
 	auth.Register(apiMux)
 	auth.RegisterKeys(apiMux)
+	// Price table management (ADR-0029): session-authed; reads open to any session,
+	// writes gated to admin (config authority). Global entries carry no project; the
+	// per-project discount is scoped to the caller's own project.
+	auth.RegisterPricing(apiMux, priceStore)
 	var regSource registry.Source = registry.EmptySource{}
 	if cfg.PluginDir != "" {
 		var opts []registry.DirOption

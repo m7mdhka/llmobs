@@ -22,3 +22,23 @@ executors.
 - **Executors, not the socket.** Supervisor reconciliation happens through the
   cli-compose, operator, gitops, or external-url executors — never by the kernel
   calling Docker/K8s directly.
+
+## Checklists harvested from the Opik cross-over mine (verify our charts/bundle)
+
+Second-incumbent (Opik/Comet) self-hosting pain — each is a thing to confirm our
+deploy assets already handle (`docs/research/opik-issues/round-02-findings.md`):
+
+- **Airgap must survive a vanished upstream image.** Opik #3172/#3305: a self-host
+  deploy broke because a referenced upstream image (a MinIO/bitnami tag) no longer
+  existed in the registry. Confirm `deploy/airgap` bundles every image by digest and
+  never resolves a floating upstream tag at install time (ties the "no external URLs"
+  rule above) — the bundle must install even if the upstream image was deleted.
+- **Helm-values coverage checklist.** Opik repeatedly patched flexibility gaps —
+  sub-path ingress (#3291, `example.com/tools/opik`), custom service labels (#3783),
+  duplicate labels (#3089), configurable ExternalSecrets `ClusterSecretStore` name
+  (#4033). Verify our chart exposes (and documents, per the rule above): ingress path
+  prefix / sub-path, custom pod+service labels with no duplicates, and configurable
+  external-secret-store references.
+- **Image hygiene (low priority).** Opik #7107 dropped an unused `perl` interpreter to
+  clear a CVE. Audit `deploy/compose/kernel.Dockerfile` (and any runtime image) for
+  unused interpreters/toolchains that only enlarge the CVE surface.

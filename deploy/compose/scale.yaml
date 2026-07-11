@@ -67,6 +67,15 @@ services:
       # Native protocol DSN; credentials are URL-safe-encoded when built via
       # clickhouse.BuildDSN (R-CH7). Read by the scale storage wiring in L2.
       LLMOBS_CLICKHOUSE_URL: "clickhouse://llmobs:llmobs@clickhouse:9000/llmobs"
+      # Setting CLICKHOUSE_URL turns on PERMANENT dual-read (ADR-0026 RULING-MIG6):
+      # historical Postgres-lite data and new ClickHouse-scale data are unified on
+      # every Query-API read, so nothing is stranded crossing the boundary (L5). The
+      # OPTIONAL lite→scale backfill (below) moves cold rows onto scale over time; it
+      # is resumable, runs on its own budget, and is decoupled from boot readiness —
+      # a partial backfill is fully correct via dual-read. Off by default; enable with:
+      #   LLMOBS_BACKFILL_ON_BOOT: "true"     # start the background backfill on boot
+      #   LLMOBS_BACKFILL_CHUNK_SIZE: "500"   # rows per bounded batch
+      #   LLMOBS_BACKFILL_BUDGET: "30m"       # SEPARATE execution budget per run (not the read timeout)
       LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:-sk-e2e-demo-key}"
       LLMOBS_BOOTSTRAP_ADMIN_EMAIL: "${LLMOBS_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
       LLMOBS_BOOTSTRAP_ADMIN_PASSWORD: "${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:-admin-dev-password}"

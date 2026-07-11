@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"google.golang.org/grpc"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/bus"
@@ -42,8 +44,21 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/metrics"
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/secretbox"
 	"github.com/m7mdhka/llmobs/kernel/internal/pluginsettings"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage/backfill"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage/clickhouse"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage/dualstore"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 	"github.com/m7mdhka/llmobs/kernel/pkg/brand"
+)
+
+// The dual-read resurrection guard (dualstore.EraseSpans) requires the lite store to
+// resolve erase-candidate ids and the scale store to suppress explicit ids. Assert the
+// real adapters satisfy those capabilities at compile time, so a regression that drops
+// either method fails the build rather than silently re-opening the erasure gap.
+var (
+	_ dualstore.EraseIDResolver = (*postgres.Store)(nil)
+	_ dualstore.EraseSuppressor = (*clickhouse.Store)(nil)
 )
 
 func main() {
@@ -127,6 +142,49 @@ func run() error {
 	if qt, terr := time.ParseDuration(cfg.QueryStmtTimeout); terr == nil {
 		store.SetQueryTimeout(qt) // K1.5: server-side statement_timeout backstop for DSL reads
 	}
+
+	// Scale dual-read (ADR-0026 RULING-MIG6). When a ClickHouse-scale store is
+	// configured, the kernel runs the PERMANENT dual-read layer: writeStore becomes
+	// the dual decorator (writes → scale with seed-on-migrate), and the query server
+	// unifies lite∪scale on every read. This is the boundary crossing that never
+	// strands a self-hoster — no read window where a just-written span is missing.
+	// Empty ClickHouseURL => single-store lite (unchanged).
+	var writeStore storage.TelemetryStore = store
+	var dual *dualstore.Store
+	if cfg.ClickHouseURL != "" {
+		scale, closeScale, cErr := buildScaleStore(rootCtx, cfg, log)
+		if cErr != nil {
+			log.Error("scale (ClickHouse) store init failed", "err", cErr.Error())
+			os.Exit(1)
+		}
+		defer closeScale()
+		dual = dualstore.New(store, scale)
+		writeStore = dual
+		log.Info("scale dual-read enabled (Postgres-lite ∪ ClickHouse-scale)")
+
+		// Optional lite→scale backfill (L5). Convenience-only: dual-read already makes
+		// lite data readable, so this just moves cold rows onto scale in the background.
+		// Runs on its OWN generous execution budget (NOT the interactive read timeout),
+		// resumable across restarts, and fully DECOUPLED from boot readiness — /readyz
+		// never waits on it and a partial backfill is correct via dual-read.
+		if cfg.BackfillOnBoot {
+			budget, _ := time.ParseDuration(cfg.BackfillBudget)
+			runner := backfill.New(store, scale, backfill.Config{
+				ChunkSize: cfg.BackfillChunkSize, Budget: budget,
+			}, log)
+			go func() {
+				log.Info("lite→scale backfill started (background, resumable)")
+				res, berr := runner.Run(rootCtx)
+				if berr != nil {
+					log.Error("lite→scale backfill stopped with error (resumable on next boot)", "err", berr.Error())
+					return
+				}
+				log.Info("lite→scale backfill run finished",
+					"spans_migrated", res.SpansMigrated, "scores_migrated", res.ScoresMigrated,
+					"dead_lettered", res.DeadLettered, "complete", res.Complete)
+			}()
+		}
+	}
 	// Durable event bus (H6): Postgres-backed for lite (no new infra); the scale
 	// profile uses the Redis/Valkey Streams backend when configured (ADR-0028). The
 	// shared bus.Bus (replay/at-least-once/backlog-cap/DLQ) is identical either way —
@@ -152,7 +210,7 @@ func run() error {
 	reg := normalize.Default()
 	skew, _ := time.ParseDuration(cfg.ClockSkewThreshold)
 	presets, customRules := parseRedactConfig(cfg.RedactPresets, cfg.RedactCustomJSON)
-	pipe := pipeline.New(pool, store, reg, eventBus, pipeline.Config{
+	pipe := pipeline.New(pool, writeStore, reg, eventBus, pipeline.Config{
 		Metrics: mreg, SkewThreshold: skew, RedactPresets: presets, RedactCustom: customRules,
 		Signal: persistHealth,
 	})
@@ -190,6 +248,9 @@ func run() error {
 
 	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
 	qsrv := query.NewServer(store, pool, log, maxWindow, mreg, pluginSigner)
+	if dual != nil {
+		qsrv.SetDualStore(dual) // reads unify lite∪scale (RULING-MIG6); see query.DualRouter
+	}
 
 	// Plugin supervisor (H2): discovers backend plugins (spec.backend) from the
 	// plugin dir, handshakes + health-probes them via the external-URL executor,
@@ -417,6 +478,40 @@ func run() error {
 	}
 	log.Info("stopped")
 	return nil
+}
+
+// buildScaleStore dials the ClickHouse-scale adapter, migrates it on boot (if
+// enabled), and applies the mandatory per-query resource caps (RULING-CH9 — the
+// adapter fails closed until all four are set). Returns the store and a close func.
+func buildScaleStore(ctx context.Context, cfg platform.Config, log *slog.Logger) (*clickhouse.Store, func(), error) {
+	opts, err := ch.ParseDSN(cfg.ClickHouseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing CLICKHOUSE_URL: %w", err)
+	}
+	conn, err := ch.Open(opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("opening ClickHouse connection: %w", err)
+	}
+	closeFn := func() { _ = conn.Close() }
+	if cfg.MigrateOnBoot {
+		if err := clickhouse.Migrate(ctx, conn, clickhouse.Config{Cluster: cfg.CHCluster}); err != nil {
+			closeFn()
+			return nil, nil, fmt.Errorf("migrating ClickHouse schema: %w", err)
+		}
+	}
+	scale := clickhouse.NewStore(conn)
+	execTimeout, _ := time.ParseDuration(cfg.CHMaxExecutionTime)
+	scale.SetReadLimits(clickhouse.ReadLimits{
+		MaxExecutionTime: execTimeout,
+		MaxMemoryUsage:   uint64(cfg.CHMaxMemoryBytes),
+		MaxRowsToRead:    uint64(cfg.CHMaxRowsToRead),
+		MaxBytesToRead:   uint64(cfg.CHMaxBytesToRead),
+	})
+	if ttl, terr := time.ParseDuration(cfg.ErasureSuppressionTTL); terr == nil {
+		scale.SetErasureSuppressionTTL(ttl)
+	}
+	log.Info("ClickHouse-scale store ready", "migrate_on_boot", cfg.MigrateOnBoot, "cluster", cfg.CHCluster)
+	return scale, closeFn, nil
 }
 
 // parseRedactConfig turns the CSV preset list ("none" disables) and the JSON

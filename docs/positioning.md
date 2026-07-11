@@ -147,6 +147,32 @@ set (top-25 closed by votes), not a claim about all issues.
 
 ---
 
+## Competitor-sourced structural wins (Opik cross-over mine)
+
+Concrete examples where a bug a *second* incumbent (Opik/Comet) actually shipped is
+**structurally impossible** for us — the strongest kind of positioning claim because it
+is sourced from a competitor's own issue tracker, not our marketing:
+
+- **The span-published-but-trace-lost race is impossible for us.** Opik #2782: spans
+  persisted successfully but the *trace* was never published (an ADK/Vertex race),
+  so the trace vanished from the dashboard despite a generated trace id. In LLMObs a
+  trace is not a separately-published object — it is a **query-time materialized view
+  derived from its spans** (DSL §4.1: min start_time, max end_time, root-span
+  dimensions, any-error status, tag union). There is no separate trace write to race
+  against a span write, so this entire failure class cannot occur. *This is the
+  strongest single finding of the Opik mine — lead a reliability story with it.*
+- **Feature-gating-by-plan is the incumbents' reflex, not ours.** A third independent
+  data point (Opik #7144/#7123 gating "Cost Intelligence" on an org entitlement;
+  alongside Langfuse's `admin-api` gating and Opik's enterprise-gated SSO) that the
+  incumbents put value behind plan tiers. The LLMObs wedge: ungated core, gated only
+  by authz — auth/RBAC is core, never an upsell.
+- **Backpressure-as-503 is the right shape** — Opik #7091 independently arrived at
+  fast-fail HTTP 503 on pool saturation, matching our G2 backpressure contract
+  (`503` + `Retry-After: 1` → client retries into the idempotent merge). Convergent
+  design from an unrelated codebase is evidence the contract is correct.
+
+Provenance: `docs/research/opik-issues/round-01-findings.md`, `round-02-findings.md`.
+
 ## What this is not
 
 Not a claim that LLMObs is more mature than Langfuse today — it is younger and has

@@ -118,3 +118,41 @@ fixed-admin grant a true intersection); (2) OIDC login minting the standard sess
 (3) the SSO/domain data model; (4) SCIM under the one-shared-guard rule; (5) the
 lifecycle rules (creator provenance, revocation seam, refresh-at-ratio). All ungated
 by plan — the wedge.
+
+## 7. Opik (second-incumbent) harvest — Round 1
+
+Comet's Opik gates enterprise auth (SSO/SAML/OIDC/SCIM) behind Enterprise, so most
+of it is closed-source — but three patterns surfaced from public PRs/issues and each
+independently confirms a design bet already in these notes (a bug class two unrelated
+incumbents both hit is the strongest "be demonstrably immune" signal):
+
+- **Per-surface permission retrofit is painful (PR #7259, "Permissions follow-up:
+  Agent Playground, Online Evaluation, Alerts, Prompt Library").** Opik is bolting
+  permission gating onto features that shipped ungated, one surface at a time. This is
+  exactly the drift invariant 11 warns about — enforce the intersection at the ONE
+  Query-API seam so a new plugin surface inherits gating *by construction*, never by a
+  per-feature retrofit that some later surface forgets.
+- **Identity-propagation drift across call sites (PR #7368/#7253, "request identity
+  encoding on all react-service auth calls").** They had to fix identity encoding at
+  *every* auth call site — the per-caller anti-pattern. Second-incumbent evidence for
+  the double-token rule: compute identity/permission at one seam, never re-derive it
+  per caller.
+- **Cloud-vs-self-hosted identity ambiguity + enterprise gating (#6281, "evaluate
+  calls the Comet cloud instance instead of the self-hosted instance").** Comet gates
+  enterprise auth by plan *and* has cloud/self-hosted identity ambiguity. A second
+  data point (alongside Langfuse's `admin-api` gating) that the LLMObs wedge is
+  **ungated-by-plan, strictly-gated-by-authz** — auth is core, not an upsell.
+
+### Round 2 additions
+
+- **MCP OAuth dynamic client registration — RFC 7591 (Opik PR #7093).** As we expose
+  agent/MCP-callable plugin surfaces, dynamic client registration (RFC 7591) is the
+  standard onboarding path, and the H3 permission intersection applies to the
+  resulting agent tokens exactly as to sessions (ADR-0025 R5 — an agent key is not an
+  authz bypass). Harvest the RFC-7591 registration flow as the reference for plugin/
+  agent OAuth onboarding.
+- **Group-scoped workspace + per-user resource isolation (Opik #3327).** Demand for a
+  private workspace bound to an identity-provider group (e.g. Google groups) plus
+  per-user private projects/datasets. Second-incumbent evidence for the tenancy model
+  behind the `resource:verb` scope work: workspace/project isolation must be
+  group-mappable, not only per-individual-grant.

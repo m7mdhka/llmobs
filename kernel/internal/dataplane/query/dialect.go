@@ -59,11 +59,34 @@ type Dialect interface {
 	// numericAggExpr renders sum/avg/min/max/pNN over a numeric column as a clean
 	// float; count stays integer. col may itself be a guarded map-cast expression.
 	numericAggExpr(op, col string) (string, bool)
+	// countExpr renders count / count_distinct. For a string-class column the
+	// engines must agree on "unset": Postgres stores NULL (COUNT skips it), so
+	// ClickHouse — where unset is '' — must exclude '' to match. Non-string columns
+	// (Nullable numeric/timestamp) skip NULL in both, so a plain count suffices.
+	countExpr(col string, distinct, stringClass bool) string
 	// mapNumCast renders a guard-then-cast of a map value to numeric for use inside
-	// an aggregate (non-numbers excluded), with the key INLINED (agg path).
-	mapNumCast(col, keyLiteral string) string
-	// castFloat wraps an expression so the driver returns a float64.
-	castFloat(expr string) string
+	// an aggregate (non-numbers excluded). The RAW key is passed; each dialect
+	// applies its OWN string-literal escaping (Postgres doubles the quote;
+	// ClickHouse must also escape the backslash, which it processes in literals).
+	mapNumCast(col, key string) string
+	// quoteIdent renders a result-column alias as a quoted identifier with the
+	// dialect's OWN escaping. The identifier TEXT is the same across dialects (so
+	// column names — hence results — stay identical); only the quoting differs.
+	// Postgres doubles the double-quote; ClickHouse must also escape the backslash.
+	quoteIdent(s string) string
+}
+
+// escapePGLiteral escapes a string for a Postgres single-quoted literal
+// (standard_conforming_strings: only the quote needs doubling).
+func escapePGLiteral(s string) string { return strings.ReplaceAll(s, "'", "''") }
+
+// escapeCHLiteral escapes a string for a ClickHouse single-quoted literal, which
+// processes C-style backslash escapes: the backslash MUST be escaped first, then
+// the quote — otherwise a trailing backslash escapes the closing quote and breaks
+// out of the literal (the injection the Postgres-only escaping missed).
+func escapeCHLiteral(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return strings.ReplaceAll(s, "'", `\'`)
 }
 
 // ---------------------------------------------------------------------------
@@ -128,11 +151,19 @@ func (pgDialect) numericAggExpr(op, col string) (string, bool) {
 	}
 	return "", false
 }
-func (pgDialect) mapNumCast(col, keyLiteral string) string {
-	return "CASE WHEN jsonb_typeof(" + col + " -> '" + keyLiteral + "') = 'number' THEN (" +
-		col + " ->> '" + keyLiteral + "')::numeric END"
+func (pgDialect) mapNumCast(col, key string) string {
+	k := escapePGLiteral(key)
+	return "CASE WHEN jsonb_typeof(" + col + " -> '" + k + "') = 'number' THEN (" +
+		col + " ->> '" + k + "')::numeric END"
 }
-func (pgDialect) castFloat(expr string) string { return expr + "::float8" }
+func (pgDialect) quoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+func (pgDialect) countExpr(col string, distinct, _ bool) string {
+	// Postgres COUNT already skips NULL (its unset sentinel) for every class.
+	if distinct {
+		return "COUNT(DISTINCT " + col + ")"
+	}
+	return "COUNT(" + col + ")"
+}
 
 // ---------------------------------------------------------------------------
 // ClickHouse dialect. JSON columns hold JSON text (String), so map access uses
@@ -232,14 +263,52 @@ func (chDialect) numericAggExpr(op, col string) (string, bool) {
 		return "count(" + col + ")", true
 	case "p50", "p90", "p95", "p99":
 		frac := "0." + op[1:]
-		// quantileExact for a deterministic value that matches Postgres
-		// PERCENTILE_CONT (continuous, exact interpolation).
-		return "toFloat64(quantileExact(" + frac + ")(" + col + "))", true
+		return chPercentileCont(frac, col), true
 	}
 	return "", false
 }
-func (chDialect) mapNumCast(col, keyLiteral string) string {
-	return "CASE WHEN JSONType(" + col + ", '" + keyLiteral + "') IN ('Int64','UInt64','Double') THEN " +
-		"JSONExtractFloat(" + col + ", '" + keyLiteral + "') END"
+
+// chPercentileCont reproduces Postgres PERCENTILE_CONT EXACTLY: linear
+// interpolation at 0-indexed rank p·(n−1) over the sorted non-null values. No
+// built-in ClickHouse quantile matches this (quantileExact doesn't interpolate;
+// quantileInterpolatedWeighted uses a different rank formula — both verified to
+// diverge), so it is computed from the sorted groupArray. NULLs are skipped by
+// groupArray, matching PERCENTILE_CONT; an empty group yields NULL.
+func chPercentileCont(p, col string) string {
+	g := "arraySort(groupArray(" + col + "))"
+	n := "length(" + g + ")"
+	rank := "(" + p + " * (" + n + " - 1))"
+	lo := "toUInt64(floor(" + rank + "))"
+	loVal := "arrayElement(" + g + ", " + lo + " + 1)"
+	hiVal := "arrayElement(" + g + ", least(" + lo + " + 2, " + n + "))"
+	return "toFloat64(if(" + n + " = 0, NULL, " + loVal + " + (" + rank + " - " + lo + ") * (" + hiVal + " - " + loVal + ")))"
 }
-func (chDialect) castFloat(expr string) string { return "toFloat64(" + expr + ")" }
+func (chDialect) mapNumCast(col, key string) string {
+	k := escapeCHLiteral(key)
+	return "CASE WHEN JSONType(" + col + ", '" + k + "') IN ('Int64','UInt64','Double') THEN " +
+		"JSONExtractFloat(" + col + ", '" + k + "') END"
+}
+
+// quoteIdent uses ClickHouse backtick quoting with backslash+backtick escaping
+// (ClickHouse processes C-style escapes inside quoted identifiers, so doubling
+// alone is unsafe). The identifier text matches Postgres's, so column names — and
+// therefore results — stay identical across dialects.
+func (chDialect) quoteIdent(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "`", "\\`")
+	return "`" + s + "`"
+}
+func (chDialect) countExpr(col string, distinct, stringClass bool) string {
+	if stringClass {
+		// Exclude the '' unset sentinel so counts match Postgres, which stores NULL
+		// for unset and skips it. uniqExact is an exact distinct count.
+		if distinct {
+			return "uniqExactIf(" + col + ", " + col + " != '')"
+		}
+		return "countIf(" + col + " != '')"
+	}
+	if distinct {
+		return "count(DISTINCT " + col + ")"
+	}
+	return "count(" + col + ")"
+}

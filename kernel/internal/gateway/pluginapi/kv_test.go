@@ -24,7 +24,7 @@ type fakeKV struct {
 	m  map[string]json.RawMessage
 }
 
-func newFakeKV() *fakeKV { return &fakeKV{m: map[string]json.RawMessage{}} }
+func newFakeKV() *fakeKV        { return &fakeKV{m: map[string]json.RawMessage{}} }
 func fk(p, pr, k string) string { return p + "\x00" + pr + "\x00" + k }
 
 func (f *fakeKV) Get(_ context.Context, p, pr, k string) (json.RawMessage, bool, error) {

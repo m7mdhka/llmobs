@@ -195,7 +195,7 @@ func compileAggregations(doc map[string]any, qf queryFields, d Dialect) ([]strin
 		if alias == "" {
 			alias = defAlias
 		}
-		out = append(out, expr+" AS "+quoteIdent(alias))
+		out = append(out, expr+" AS "+d.quoteIdent(alias))
 	}
 	return out, nil
 }
@@ -217,16 +217,17 @@ func aggExpr(op, field string, a map[string]any, qf queryFields, d Dialect) (exp
 		if key == "" {
 			return "", "", errf("operator_not_allowed", 422, "aggregating %q requires a map key", field)
 		}
-		guarded := d.mapNumCast(f.col, escapeSQLLiteral(key))
+		guarded := d.mapNumCast(f.col, key)
 		defAlias = op + "_" + field + "_" + key
 		return numericAgg(op, guarded, defAlias, d)
 	}
 
+	isStr := f.class == classString || f.class == classEnum
 	switch op {
 	case "count_distinct":
-		return "COUNT(DISTINCT " + col + ")", "count_distinct_" + field, nil
+		return d.countExpr(col, true, isStr), "count_distinct_" + field, nil
 	case "count":
-		return "COUNT(" + col + ")", "count_" + field, nil
+		return d.countExpr(col, false, isStr), "count_" + field, nil
 	case "sum", "avg", "min", "max", "p50", "p90", "p95", "p99":
 		if f.class != classNumeric {
 			return "", "", errf("operator_not_allowed", 422, "%s requires a numeric field, got %q", op, field)
@@ -245,7 +246,3 @@ func numericAgg(op, col, defAlias string, d Dialect) (string, string, error) {
 	}
 	return expr, defAlias, nil
 }
-
-func escapeSQLLiteral(s string) string { return strings.ReplaceAll(s, "'", "''") }
-
-func quoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }

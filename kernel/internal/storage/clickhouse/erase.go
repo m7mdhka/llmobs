@@ -19,21 +19,27 @@ import (
 // tombstone (which would retain the doc). The suppression tombstones then prevent
 // a later re-delivery from resurrecting an erased span.
 //
-// Unlike the lite adapter this is not one transaction (ClickHouse has none); the
-// steps are ordered so a mid-failure re-run converges: ids are resolved first, the
-// DELETE + tombstones + audit are each idempotent on the resolved id set.
+// ClickHouse has no transactions, so the steps are ORDERED so the irreversible
+// physical DELETE is LAST: resolve ids → write suppression tombstones → write
+// audit → DELETE. If any pre-DELETE step fails the rows are still present and a
+// re-run re-resolves and retries; the DELETE only runs once the tombstones (G3)
+// and audit are durable, so a matched span can never be erased-without-suppression
+// (which would let a re-delivery resurrect it).
 func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string, from, to time.Time) (int, string, error) {
 	auditID, err := randomHexID("era")
 	if err != nil {
 		return 0, "", err
 	}
 
-	// Resolve the settled, non-deleted spans matching the filter. Erasure keys on
-	// (project_id, id) so ALL physical versions of a matched span are removed even
-	// if a stale version carried a different (mutable) user_id.
+	// Resolve the settled spans matching the filter — INCLUDING soft-deleted ones:
+	// a soft-delete tombstone retains the payload, and older physical versions hold
+	// the raw prompt/completion, so GDPR erasure must remove them regardless of
+	// is_deleted state. Erasure keys on (project_id, id) so ALL physical versions of
+	// a matched span are removed even if a stale version carried a different
+	// (mutable) user_id.
 	rows, err := s.conn.Query(ctx,
 		`SELECT id FROM (SELECT * FROM spans WHERE project_id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id)
-		 WHERE is_deleted = 0 AND user_id = ? AND start_time >= ? AND start_time < ?`,
+		 WHERE user_id = ? AND start_time >= ? AND start_time < ?`+s.limits.settings(),
 		projectID, userID, from.UTC(), to.UTC())
 	if err != nil {
 		return 0, "", fmt.Errorf("resolve erasure ids: %w", err)
@@ -54,13 +60,8 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	count := len(ids)
 
 	if count > 0 {
-		// Physically remove every version of the matched keys.
-		if err := s.conn.Exec(ctx,
-			`DELETE FROM spans WHERE project_id = ? AND id IN (?)`, projectID, ids); err != nil {
-			return 0, "", fmt.Errorf("delete erased spans: %w", err)
-		}
-
-		// One suppression tombstone per erased id (G3).
+		// 1) Suppression tombstones (G3) — written BEFORE the delete so redelivery
+		// can never resurrect an erased span even if the process dies mid-erase.
 		expires := time.Now().Add(s.suppressionTTL).UTC()
 		batch, err := s.conn.PrepareBatch(ctx,
 			`INSERT INTO erasure_suppression (project_id, id, audit_id, expires_at, event_ts)`)
@@ -78,6 +79,7 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 		}
 	}
 
+	// 2) Audit proof row.
 	filter, _ := json.Marshal(map[string]any{
 		"user_id": userID,
 		"from":    from.UTC().Format(time.RFC3339),
@@ -93,6 +95,14 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	}
 	if err := ab.Send(); err != nil {
 		return 0, "", fmt.Errorf("send audit: %w", err)
+	}
+
+	// 3) Irreversible physical removal LAST — every version of each matched key.
+	if count > 0 {
+		if err := s.conn.Exec(ctx,
+			`DELETE FROM spans WHERE project_id = ? AND id IN (?)`, projectID, ids); err != nil {
+			return 0, "", fmt.Errorf("delete erased spans: %w", err)
+		}
 	}
 	return count, auditID, nil
 }

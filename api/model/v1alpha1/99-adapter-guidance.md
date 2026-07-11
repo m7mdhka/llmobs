@@ -1,10 +1,13 @@
 # Adapter Guidance (`v1alpha1`)
 
-**Section type:** **Informative.** Nothing in this file is normative. It records
-non-binding implementation guidance for the storage adapters, derived from the
-Langfuse study. Adapters MAY diverge; these are revisitable without a spec
-change, because they describe physical choices that the logical model
-(`00`–`08`) forbids from being observable (`00-overview.md` §1.1).
+**Section type:** **Informative, except §0.** With the sole exception of the
+requirements explicitly marked **Normative** in §0, nothing in this file is
+normative: the rest records non-binding implementation guidance for the storage
+adapters, derived from the Langfuse study. Where a section is informative,
+adapters MAY diverge; those parts are revisitable without a spec change, because
+they describe physical choices that the logical model (`00`–`08`) forbids from
+being observable (`00-overview.md` §1.1). §0's requirements are the exception:
+they are load-bearing cross-adapter invariants and are conformance-gated.
 
 ## 0. Normative requirements (exception to this file's Informative status)
 

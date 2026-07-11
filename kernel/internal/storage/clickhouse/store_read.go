@@ -126,9 +126,13 @@ func (s *Store) GetScore(ctx context.Context, projectID, id string) (json.RawMes
 }
 
 func (s *Store) getDoc(ctx context.Context, table, projectID, id string) (json.RawMessage, error) {
+	settings, err := s.readGuard()
+	if err != nil {
+		return nil, err
+	}
 	// Point read of the settled row; is_deleted filtered after dedup.
 	sql := "SELECT doc FROM (SELECT * FROM " + table +
-		" WHERE project_id = ? AND id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id) WHERE is_deleted = 0"
+		" WHERE project_id = ? AND id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id) WHERE is_deleted = 0" + settings
 	rows, err := s.conn.Query(ctx, sql, projectID, id)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get: %w", err)
@@ -147,8 +151,15 @@ func (s *Store) getDoc(ctx context.Context, table, projectID, id string) (json.R
 // GetTraceSpans returns a trace's settled non-deleted spans in tree-buildable
 // order (start_time, id) — matching the lite adapter.
 func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([]json.RawMessage, error) {
-	sql := "SELECT doc FROM (SELECT * FROM spans WHERE project_id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id) " +
-		"WHERE is_deleted = 0 AND trace_id = ? ORDER BY start_time ASC, id ASC"
+	settings, err := s.readGuard()
+	if err != nil {
+		return nil, err
+	}
+	// trace_id is a frozen field, so pushing it into the dedup subquery is
+	// correctness-safe (every version of a span shares its trace_id) AND bounds the
+	// scan to one trace instead of the whole project.
+	sql := "SELECT doc FROM (SELECT * FROM spans WHERE project_id = ? AND trace_id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id) " +
+		"WHERE is_deleted = 0 ORDER BY start_time ASC, id ASC" + settings
 	rows, err := s.conn.Query(ctx, sql, projectID, traceID)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get trace spans: %w", err)
@@ -383,6 +394,16 @@ func normalizeCHAggValue(v any) any {
 		return t.UTC()
 	case time.Time:
 		return t.UTC()
+	case uint8:
+		// Boolean group dimensions (is_open, incomplete_trace) are computed as
+		// UInt8 in the trace projection; the lite adapter returns a real bool. Map
+		// back so a group-by on a boolean dimension serializes as true/false, not 1/0.
+		return t != 0
+	case *uint8:
+		if t == nil {
+			return nil
+		}
+		return *t != 0
 	default:
 		return t
 	}

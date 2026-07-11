@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -268,6 +269,17 @@ func TestCrossAdapterAggregation(t *testing.T) {
 		{"count_distinct user", "spans", aggDoc("spans", nil, []any{agg("count_distinct", "user_id", "")})},
 		{"min/max map", "spans", aggDoc("spans", []any{"kind"}, []any{agg("min", "usage_details", "input"), agg("max", "usage_details", "input")})},
 		{"scores avg by name", "scores", aggDoc("scores", []any{"name"}, []any{agg("avg", "value_numeric", "")})},
+		{"p50 value_numeric", "scores", aggDoc("scores", nil, []any{agg("p50", "value_numeric", "")})},
+		{"p90 value_numeric", "scores", aggDoc("scores", nil, []any{agg("p90", "value_numeric", "")})},
+		{"p95 map input", "spans", aggDoc("spans", nil, []any{agg("p95", "usage_details", "input")})},
+		// count/count_distinct over a partially-unset string dim (session_id set only
+		// on s1) — CH must exclude the '' sentinel to match PG's NULL-skipping COUNT.
+		{"count unset string", "spans", aggDoc("spans", nil, []any{agg("count", "session_id", "")})},
+		{"count_distinct unset string", "spans", aggDoc("spans", nil, []any{agg("count_distinct", "session_id", "")})},
+		{"count group by unset string", "spans", aggDoc("spans", []any{"model"}, []any{agg("count", "user_id", "")})},
+		// traces boolean group-by — CH computes UInt8; must serialize as true/false.
+		{"group by is_open", "traces", aggDoc("traces", []any{"is_open"}, []any{agg("count", "", "")})},
+		{"group by incomplete_trace", "traces", aggDoc("traces", []any{"incomplete_trace"}, []any{agg("count", "", "")})},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -373,10 +385,24 @@ func assertSameGroups(t *testing.T, pg, ch []map[string]any) {
 	}
 }
 
+// canonGroups renders each group row to a signature, rounding float values to 10
+// significant figures. Counts/min/max/percentile/group-keys are byte-identical
+// across engines; sum/avg are the one principled exception — Postgres accumulates
+// in arbitrary-precision numeric, ClickHouse in float64, so the last ULP can
+// differ on adversarial decimals. Rounding masks that float-associativity bound
+// while still catching any real divergence.
 func canonGroups(rows []map[string]any) []string {
 	out := make([]string, len(rows))
 	for i, m := range rows {
-		b, _ := json.Marshal(m)
+		rounded := make(map[string]any, len(m))
+		for k, v := range m {
+			if f, ok := v.(float64); ok {
+				rounded[k] = strconv.FormatFloat(f, 'g', 10, 64)
+			} else {
+				rounded[k] = v
+			}
+		}
+		b, _ := json.Marshal(rounded)
 		out[i] = string(b)
 	}
 	return out

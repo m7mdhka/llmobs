@@ -159,6 +159,66 @@ func TestIntegrationPathologicalQueryCapped(t *testing.T) {
 	}
 }
 
+func TestIntegrationEraseSpans(t *testing.T) {
+	conn := dialCH(t)
+	freshSchema(t, conn)
+	ctx := context.Background()
+	s := NewStore(conn)
+	start := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	// u1 has two spans; one is later soft-deleted (its payload must STILL be erased).
+	mk := func(id, user string, del bool) storage.Event {
+		f := map[string]any{"user_id": user, "kind": "generation", "start_time": start.Format(time.RFC3339Nano)}
+		if del {
+			f["is_deleted"] = true
+		}
+		return up(1, id, f)
+	}
+	for _, ev := range []storage.Event{mk("e1", "u1", false), mk("e2", "u1", true), mk("e3", "u2", false)} {
+		if err := s.PersistSpan(ctx, ev); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	count, auditID, err := s.EraseSpans(ctx, "p", "u1", "admin@x", start.Add(-time.Hour), start.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("erase: %v", err)
+	}
+	// Both u1 spans erased — including the soft-deleted e2 (payload removal).
+	if count != 2 {
+		t.Fatalf("erased count = %d, want 2 (incl. the soft-deleted span)", count)
+	}
+	if auditID == "" {
+		t.Fatal("empty audit id")
+	}
+
+	// e1/e2 physically gone; u2's e3 untouched.
+	var remaining uint64
+	row := conn.QueryRow(ctx, "SELECT count() FROM spans WHERE project_id='p' AND id IN ('e1','e2')")
+	if err := row.Scan(&remaining); err != nil {
+		t.Fatalf("count remaining: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("erased spans still present: %d rows", remaining)
+	}
+	// Suppression tombstones written for both erased ids (G3, before the delete).
+	var supp uint64
+	if err := conn.QueryRow(ctx, "SELECT count() FROM erasure_suppression WHERE project_id='p' AND id IN ('e1','e2')").Scan(&supp); err != nil {
+		t.Fatalf("count suppression: %v", err)
+	}
+	if supp != 2 {
+		t.Fatalf("suppression tombstones = %d, want 2", supp)
+	}
+	// Audit row recorded.
+	var audits uint64
+	if err := conn.QueryRow(ctx, "SELECT count() FROM erasure_audit WHERE id = ?", auditID).Scan(&audits); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if audits != 1 {
+		t.Fatalf("audit rows = %d, want 1", audits)
+	}
+}
+
 func TestIntegrationPreflightPasses(t *testing.T) {
 	conn := dialCH(t)
 	// The test user (DEFAULT_ACCESS_MANAGEMENT) holds the full grant set, so the

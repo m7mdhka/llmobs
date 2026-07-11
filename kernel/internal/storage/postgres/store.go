@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage/merge"
 )
 
 // Store is the lite-profile storage adapter.
@@ -82,7 +83,7 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // (LM-5 observable semantics): read the current row FOR UPDATE, fold the current
 // state together with the incoming event, and write the result. On first sight of
 // an id, the folded single-event state is inserted.
-func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
+func (s *Store) PersistSpan(ctx context.Context, ev storage.Event) error {
 	projectID, _ := ev.Payload["project_id"].(string)
 	id, _ := ev.Payload["id"].(string)
 	if projectID == "" || id == "" {
@@ -101,7 +102,7 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 		projectID, id).Scan(&existingDoc, &existingProv)
 
 	state := map[string]any{}
-	prov := Provenance{}
+	prov := merge.Provenance{}
 	switch err {
 	case nil:
 		if uerr := json.Unmarshal(existingDoc, &state); uerr != nil {
@@ -121,7 +122,7 @@ func (s *Store) PersistSpan(ctx context.Context, ev Event) error {
 	// Per-field provenance fold under the row lock (issue #17): incoming event
 	// folds against per-group stamps, so out-of-order updates converge to the
 	// same state as the ordered Fold.
-	merged, newProv := MergeEvent("span", state, prov, ev)
+	merged, newProv := merge.MergeEvent("span", state, prov, ev)
 
 	doc, err := json.Marshal(merged)
 	if err != nil {

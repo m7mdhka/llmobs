@@ -1,6 +1,9 @@
 package postgres
 
-import "github.com/m7mdhka/llmobs/kernel/internal/storage"
+import (
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage/merge"
+)
 
 // Conformer exposes the adapter's normative-merge behavior to the shared
 // conformance harness (tools/conformance). It has no DB dependency: the merge
@@ -14,7 +17,7 @@ func (Conformer) Name() string { return "postgres" }
 
 // Fold is the pure ordered fold (the normative reference).
 func (Conformer) Fold(entityType string, events []storage.Event) map[string]any {
-	return Fold(entityType, events)
+	return merge.Fold(entityType, events)
 }
 
 // MergeIncremental applies events one-by-one via the read-modify-write path
@@ -22,9 +25,9 @@ func (Conformer) Fold(entityType string, events []storage.Event) map[string]any 
 // folds under the row lock. It MUST equal Fold over the same set for any order.
 func (Conformer) MergeIncremental(entityType string, events []storage.Event) map[string]any {
 	state := map[string]any{}
-	prov := Provenance{}
+	prov := merge.Provenance{}
 	for _, ev := range events {
-		state, prov = MergeEvent(entityType, state, prov, ev)
+		state, prov = merge.MergeEvent(entityType, state, prov, ev)
 	}
 	return state
 }

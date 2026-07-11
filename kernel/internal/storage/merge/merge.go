@@ -9,7 +9,7 @@
 // provenance, so out-of-order updates fold correctly (spec V3) — not a single
 // row-level stamp. The stored provenance lets a read-modify-write reproduce the
 // full ordered Fold from the persisted state + one new event (issue #17 closed).
-package postgres
+package merge
 
 import (
 	"encoding/json"

@@ -89,7 +89,8 @@ cloud later; nothing in this repo is ever feature-gated.
   templates), pnpm workspaces + Turborepo, Tailwind + Radix (clone-and-own in
   packages/ui — never add shadcn via CLI, copy into the package).
 - Data: Postgres (metadata + lite traces), ClickHouse (scale traces),
-  S3-compatible blob, Redis Streams (lite bus) / NATS JetStream (scale).
+  S3-compatible blob, event bus: Postgres (lite) / Redis-Valkey Streams (scale,
+  ADR-0028) behind one `bus.Store` seam.
 - Everything runs through `make`: setup, dev, build, test, lint, e2e,
   generate. If a task has no make target, add one rather than documenting a
   raw command.

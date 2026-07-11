@@ -188,3 +188,55 @@ shipped. When the stage is built it MUST honor them:
   leaf generation whose usage is genuinely absent (not merely carried by a child),
   or the trace accrues phantom cost. (Evidence: Langfuse #14945 — a model set without
   usage flipped a span into estimated-usage mode.)
+- **7.4 EVERY usage detail key is priced at its OWN rate off the price entry; the
+  base rate applies only to the residual — pricing is data-driven, never a hardcoded
+  case list.** When derivation prices a span, each specially-priced detail bucket
+  (`cache_read`, `cache_write`, `reasoning`, `audio`, and any future key) MUST be
+  billed at that bucket's rate on the price entry (e.g. `cache_read_input_token_cost`,
+  `input_cost_per_audio_token`), and the base input rate applies **only to the
+  residual** — `input − Σ(specially-priced buckets)`. Whether a bucket is
+  specially priced is decided **solely by the presence of its rate on the price
+  entry** — there MUST NOT be a hardcoded set of "providers/buckets that get special
+  pricing." One code path prices all providers and all buckets uniformly; adding a
+  provider or a new detail key is adding price data, never code.
+  *Meta-lesson (both incumbents):* every incumbent cost bug in this class comes from
+  **enumerating special cases instead of driving from the price entry** — so a case
+  that wasn't enumerated (a provider, a bucket) silently falls through to the flat
+  rate. Drive uniformly from data. (Evidence: Opik #5618 bills LiteLLM cache tokens at
+  full input rate → 5–10× over-report; Opik #6976 registers a cache calculator for
+  anthropic/openai/bedrock only, so Google falls through to flat cost though Gemini
+  entries carry cache rates; Opik #7137 never read `input_cost_per_audio_token`, so
+  audio prompt tokens — up to 16× the text rate — billed at the text rate. This is the
+  mirror of §7.2: Langfuse *over-subtracts* cache from input, Opik *under-discounts*
+  it — F3 (§3.1) exists precisely because this surface is provably hard in both
+  directions, which is why ingest stays verbatim and only derivation applies rates.)
+- **7.5 Tiered / threshold pricing MUST be applied, and the tier schedule MUST be
+  captured in the pricing snapshot.** A price entry may carry above-threshold rates
+  (e.g. `*_above_200k_tokens`). Derivation MUST bill tokens above the threshold at the
+  tier rate, not the flat base rate. The `pricing_snapshot_ref` (§5) MUST record the
+  tier schedule version that was applied, or a later re-pricing backfill (§5, a
+  jobs-primitive replay) recomputes against a different schedule and silently
+  disagrees with the originally-derived cost. (Evidence: Opik #6982 never parses the
+  `*_above_200k_tokens` fields, so long-context Gemini 2.5 Pro calls are billed at
+  ~half the correct input rate.)
+- **7.6 Model-key normalization MUST be symmetric, and provider canonicalization is a
+  single table.** The transform applied to a model name when the price table is
+  **loaded** MUST be byte-identically applied when the table is **looked up** at
+  derivation time — a provider-prefixed name (`openai/gpt-4o`,
+  `openrouter/openai/gpt-3.5-turbo`, `anthropic/claude-3-5-sonnet-20241022`) must
+  resolve to the same key both ways or the lookup misses and the span silently records
+  zero cost. Provider identity (`vertex_ai` vs `gemini` vs `google_ai`; `azure` vs
+  `openai`) resolves through ONE canonicalization table shared by pricing and
+  credential resolution; the raw provider string is preserved verbatim
+  (`semconv.go` promotes `gen_ai.provider.name`/`gen_ai.system` unchanged, D6/§0). A
+  conformance fixture MUST prove normalization is symmetric in both directions.
+  (Evidence: Opik #5621 strips the prefix at load but not at lookup → all LiteLLM OTel
+  spans record `cost = 0`; Opik #6928 routes Vertex AI models to `provider='gemini'`,
+  breaking both pricing and credentials.)
+
+> **Cross-adapter note.** 7.4–7.6 are pinned from a second incumbent (Opik / Comet,
+> a Java+ClickHouse codebase architecturally unlike Langfuse). Where a rule cites both
+> incumbents (7.1 aggregate double-count: Langfuse #14808 **and** Opik #4695; 7.4
+> cache: Langfuse #14902 **and** Opik #5618), two independently-architected systems
+> hit the same failure — the strongest signal the immunity must be *conformance-tested*,
+> not merely designed. See `docs/research/issue-13-cost-derivation-design-notes.md`.

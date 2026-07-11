@@ -103,6 +103,20 @@ The failure classification is load-bearing for durability and split by cause:
   durable (never persisted, never lost); a TTL-based reap of ancient stuck records is
   a follow-up.
 
+**Sub-classify WITHIN a status code, not just across codes.** The permanent-vs-transient
+split can turn on the *reason inside* an otherwise-ambiguous status, not the status
+alone. The canonical case (from every outbound-LLM retry path — the future eval /
+online-scoring plugins, price-table fetches, archival Puts): an HTTP **429 is not
+uniformly transient** — `429 insufficient_quota` (the key is out of credits) is
+**permanent** and must fail-fast / dead-letter, whereas `429` rate-limiting is
+**transient** and retries with backoff. A classifier that maps *all* 429s to retryable
+turns an exhausted key into a self-sustaining error storm. (Evidence: Opik #7148 — a
+second, independently-architected incumbent shipped exactly the bug invariant-12 warns
+about, then fixed it by decorating the client to rethrow `insufficient_quota` as
+non-retriable. Two incumbents hitting this is proof the invariant is real.) Rule: any
+retry/requeue classifier MUST be able to key on the failure *reason*, not only its
+transport status; a `429`/`503`/`409` is classified by why, not just what.
+
 ## Guarantees after L3 (scale profile, walSpool)
 
 - **G1 drain** — undrained-at-deadline records are already durable; they replay on

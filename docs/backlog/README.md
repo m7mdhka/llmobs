@@ -197,6 +197,33 @@ All ungated by plan — the wedge (three incumbent plan-gating data points: Lang
 
 ---
 
+## Plugin-flexibility dispositions (Arc N / N4 — ruled)
+
+The plugin-viability audit's flexibility cluster, each given a ruled call (implement,
+document-as-designed, or re-home) so "blocked" reads as "designed" or "deferred with a
+home":
+
+- **Framework lock-in → DONE.** The frontend contract is now framework-neutral (React is
+  one binding); any Vue/Svelte/vanilla plugin ships via `mount(element, context)`
+  (ADR-0030, N1). No longer a wall.
+- **Cross-plugin composition → WORKING-AS-DESIGNED, documented.** The plugin-island model
+  is intentional; the double-token protocol makes cross-plugin tokens inexpressible by
+  construction (ADR-0023). Plugins compose over HTTP (a plugin exposes its own API; others
+  integrate as strangers via `secrets` + declared egress). Documented in
+  `docs/plugin-authors/composing-plugins.md`. A manifest-level plugin-to-plugin grant is a
+  contract-level ADR IF a real scenario appears — none does today.
+- **Blobs / large artifacts → NOT this arc; re-filed as its own design arc.** A first-class
+  `blobs` primitive is ADR-level (new storage seam + adapter across both profiles). The
+  interim (bring-your-own-bucket via `secrets` + declared egress, signed URLs from the
+  backend) is documented in `docs/plugin-authors/large-artifacts.md`. Re-filed as its own
+  arc (#120). The adapter design
+  rules are already banked (#101 S3/GCS/Azure abstraction, #92 filesystem-safe keys); the
+  arc starts from those.
+- **Per-user settings/state → deferred to the auth arc (#21 / B10).** Per-user scope needs
+  the server-resolved subject + per-user isolation the auth/RBAC arc builds; folding it
+  there keeps one identity model rather than a parallel per-user scope in the settings
+  store. Noted in `docs/plugin-authors/settings.md`.
+
 ## Gaps found during consolidation (need a human ruling — NOT resolved here)
 
 1. **Round-3 Opik dispositions are unruled.** Rounds 1–2 were ruled and banked; the

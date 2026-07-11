@@ -89,6 +89,16 @@ cannot overwrite shared config or a stored secret. (Admins today; the finer RBAC
 the #21 seam.) Your form can still render for everyone — a viewer's save surfaces the
 `403` via `saveError`; hide the Save button for read-only users if you prefer.
 
+> **Per-user settings/state (ruling, Arc N / N4): deferred to the auth arc.** Settings
+> today are **project-shared** — one value set per (plugin, project). Per-*user* settings
+> or per-user plugin state (a user's own preferences, saved views) need a per-user
+> identity scope, which is exactly what the auth/RBAC arc builds (server-resolved subject
+> and per-user isolation; the backlog's B-cluster / #21). Folding per-user state there —
+> rather than inventing a parallel per-user scope in the settings store now — keeps one
+> identity model. Until then, a plugin that needs per-user state can key it under the
+> user id it reads from the mount context (display-only, not a security boundary) in its
+> own `store`/`kv`, understanding it is not access-controlled per user yet.
+
 Like all frontend-token access, this is **not a boundary against a hostile same-origin
 frontend** (see [trust-model.md](trust-model.md)). Secrets are safe regardless: they
 are encrypted at rest and never returned to any client. Settings that must be

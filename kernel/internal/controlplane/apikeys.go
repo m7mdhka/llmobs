@@ -8,10 +8,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
 // ErrInvalidScope is returned when a requested key scope is not permitted.
 var ErrInvalidScope = errors.New("invalid or empty scope set")
+
+// ErrScopeExceedsMinter is returned when a requested key scope grants authority the minting
+// user does not personally hold (Arc O / O3 — no privilege amplification via key minting).
+var ErrScopeExceedsMinter = errors.New("requested key scope exceeds the minter's own authority")
 
 // APIKeyInfo is a key as listed to an admin — never includes the secret.
 type APIKeyInfo struct {
@@ -29,10 +35,25 @@ var allowedScopes = map[string]bool{
 // returns the plaintext secret ONCE (only its argon2id hash + selector are
 // stored). This is the fix for the "bootstrap key only" gap the audit found
 // across Stories 9, 10, 19.
-func CreateAPIKey(ctx context.Context, pool *pgxpool.Pool, projectID string, scopes []string) (secret, publicKey string, err error) {
+//
+// createdByUserID records the provenance of the minting session (Arc O / O3) — who created
+// this credential, for audit and revocation. It is stored with ON DELETE SET NULL, so
+// deleting that user never deletes their still-valid keys (breaking a tenant's ingestion),
+// only drops the provenance link. An empty string stores NULL (e.g. the bootstrap key).
+//
+// minterScopes is the minter's OWN canonical role scopes. Every requested key scope must be
+// granted by them (perm.KeyScopeGrantedBy) — a key can never carry authority its minter
+// lacks (a member cannot mint an ingest/delete key). This cap lives at THIS one seam so
+// every mint path inherits it (invariant #11 + the parallel-credential rule the frontend
+// token already follows). A nil minterScopes means "no cap" and is reserved for the
+// system-owned bootstrap key (no session); it is never nil on a user-driven mint.
+func CreateAPIKey(ctx context.Context, pool *pgxpool.Pool, projectID string, scopes []string, createdByUserID string, minterScopes []string) (secret, publicKey string, err error) {
 	for _, sc := range scopes {
 		if !allowedScopes[sc] {
 			return "", "", ErrInvalidScope
+		}
+		if minterScopes != nil && !perm.KeyScopeGrantedBy(minterScopes, sc) {
+			return "", "", ErrScopeExceedsMinter
 		}
 	}
 	if len(scopes) == 0 {
@@ -49,9 +70,13 @@ func CreateAPIKey(ctx context.Context, pool *pgxpool.Pool, projectID string, sco
 		return "", "", herr
 	}
 	pub := "pk-" + lookup[:16]
+	var creator any
+	if createdByUserID != "" {
+		creator = createdByUserID
+	}
 	if _, err = pool.Exec(ctx,
-		`INSERT INTO api_keys (public_key, project_id, lookup_hash, hashed_secret, scopes) VALUES ($1,$2,$3,$4,$5)`,
-		pub, projectID, lookup, hashed, scopes); err != nil {
+		`INSERT INTO api_keys (public_key, project_id, lookup_hash, hashed_secret, scopes, created_by_user_id) VALUES ($1,$2,$3,$4,$5,$6)`,
+		pub, projectID, lookup, hashed, scopes, creator); err != nil {
 		return "", "", err
 	}
 	return secret, pub, nil

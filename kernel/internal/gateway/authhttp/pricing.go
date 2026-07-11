@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
-	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 	"github.com/m7mdhka/llmobs/kernel/internal/pricing"
 )
 
@@ -33,12 +32,12 @@ type RepriceStarter interface {
 
 // RegisterPricing mounts the price-table management endpoints (ADR-0029). All are
 // session-authenticated and CSRF-protected on mutating methods (via RequireAuth).
-// READS are open to any authenticated session; WRITES additionally require
-// configuration authority (admin today, the #21 RBAC seam) — a viewer cannot change
-// what every tenant on the instance is billed. Global price entries carry NO project;
-// only the per-project discount is tenant-scoped, to the caller's own default project.
-// reprice (M4) MAY be nil (re-pricing disabled); when set it mounts the admin-gated
-// re-price trigger.
+// READS are open to any authenticated session. WRITES split by scope (Arc O / O3): editing
+// the GLOBAL price table (one table every tenant is billed against) requires instance-admin
+// (an owner of the default org); the per-project DISCOUNT requires configuration authority in
+// that project's own org (any role with write authority, resolved per-project — not "admin"
+// specifically, and never an ambient default-org role). reprice (M4) MAY be nil (re-pricing
+// disabled); when set it mounts the same split gate on its two scopes.
 func (h *Handler) RegisterPricing(mux *http.ServeMux, store PriceOps, reprice RepriceStarter) {
 	p := &pricingHandler{h: h, store: store, reprice: reprice}
 	mux.Handle("/v1alpha1/pricing", h.RequireAuth(http.HandlerFunc(p.collection)))
@@ -51,22 +50,15 @@ type pricingHandler struct {
 	reprice RepriceStarter
 }
 
-// canWrite reports whether the session may change pricing (admin/write authority).
+// Pricing authority (Arc O / O3) resolves the O2 residual by splitting the one question the
+// old single canWrite conflated into the two it actually is:
 //
-// O2 note: this gates on the session's DEFAULT-ORG role (sess.User.Role). Pricing entries
-// are a GLOBAL, instance-wide table (no project/org), so "may edit prices" is genuinely a
-// global-admin question, not a per-project one — the default-org role is a defensible
-// residual in the single-org profiles. When multi-org lands (O3+), who may edit global
-// prices (a user who is admin in one org, viewer in another) is a ruled decision for that
-// arc; the per-project discount write should then resolve against the discount's project
-// org (perm via RoleForProject), like settings does.
-func (p *pricingHandler) canWrite(r *http.Request) (string, bool) {
-	sess, ok := SessionFrom(r.Context())
-	if !ok || !perm.HasWriteAuthority(perm.RoleScopes(sess.User.Role)) {
-		return "", false
-	}
-	return "session:" + sess.User.Email, true
-}
+//   - GLOBAL price entries are ONE instance-wide table shared by every tenant. Editing them
+//     (upsert, or re-pricing history off a superseded version) is genuinely an INSTANCE-level
+//     action — gated on h.instanceAdmin (an owner of the default org), NOT an ambient per-org
+//     role. This is the residual, resolved by naming the authority explicitly.
+//   - The per-project DISCOUNT is tenant config — gated on h.writeAuthorityInProject, resolved
+//     against the discount's own project org (like plugin settings), never a default-org role.
 
 // collection: GET /v1alpha1/pricing (list current entries) | POST (upsert a new version).
 func (p *pricingHandler) collection(w http.ResponseWriter, r *http.Request) {
@@ -82,9 +74,9 @@ func (p *pricingHandler) collection(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 	case http.MethodPost:
-		actor, ok := p.canWrite(r)
+		actor, ok := p.h.instanceAdmin(r)
 		if !ok {
-			writeErr(w, http.StatusForbidden, "forbidden", "editing global prices requires an admin session")
+			writeErr(w, http.StatusForbidden, "forbidden", "editing global prices requires instance-admin (an owner of the default org)")
 			return
 		}
 		var in pricing.Entry
@@ -141,10 +133,6 @@ func (p *pricingHandler) repriceTrigger(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusNotImplemented, "not_implemented", "re-pricing is not enabled on this instance")
 		return
 	}
-	if _, ok := p.canWrite(r); !ok {
-		writeErr(w, http.StatusForbidden, "forbidden", "re-pricing requires an admin session")
-		return
-	}
 	var req struct {
 		Scope    string `json:"scope"` // "price" (default) | "discount"
 		Provider string `json:"provider"`
@@ -161,6 +149,12 @@ func (p *pricingHandler) repriceTrigger(w http.ResponseWriter, r *http.Request) 
 	var snapshotRefID, projectID string
 	switch req.Scope {
 	case "", "price":
+		// Re-pricing off a GLOBAL price version mutates cost across EVERY tenant's history —
+		// an instance-level action, gated on instance-admin (not an ambient per-org role).
+		if _, ok := p.h.instanceAdmin(r); !ok {
+			writeErr(w, http.StatusForbidden, "forbidden", "re-pricing global prices requires instance-admin (an owner of the default org)")
+			return
+		}
 		if req.Provider == "" || req.Model == "" || req.Version <= 0 {
 			writeErr(w, http.StatusBadRequest, "schema_invalid", "provider, model, and a positive version are required")
 			return
@@ -174,6 +168,12 @@ func (p *pricingHandler) repriceTrigger(w http.ResponseWriter, r *http.Request) 
 		pid, err := controlplane.DefaultProjectID(r.Context(), p.h.pool)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "internal", "no project")
+			return
+		}
+		// Re-pricing THIS project's spans after a discount change is per-project config —
+		// gated on write authority in that project's org.
+		if _, ok := p.h.writeAuthorityInProject(r, pid); !ok {
+			writeErr(w, http.StatusForbidden, "forbidden", "re-pricing this project requires configuration authority in its org")
 			return
 		}
 		projectID = pid
@@ -236,9 +236,9 @@ func (p *pricingHandler) discount(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, resp)
 	case http.MethodPut:
-		actor, ok := p.canWrite(r)
+		actor, ok := p.h.writeAuthorityInProject(r, projectID)
 		if !ok {
-			writeErr(w, http.StatusForbidden, "forbidden", "setting a discount requires an admin session")
+			writeErr(w, http.StatusForbidden, "forbidden", "setting a discount requires configuration authority in this project's org")
 			return
 		}
 		var req struct {

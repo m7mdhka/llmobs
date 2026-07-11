@@ -149,3 +149,77 @@ func set(xs []string) map[string]bool {
 	}
 	return m
 }
+
+// TestRoleAboveStrictlyBelow is the crown-jewel cap at the map level (Arc O / O3): a
+// principal may act on / assign only roles STRICTLY below their own. RoleAbove is the
+// mechanism; this pins its full truth table, including the fail-closed edges ("" and
+// unknown roles, which appear for non-members).
+func TestRoleAboveStrictlyBelow(t *testing.T) {
+	// Same role is NEVER "above" itself — no lateral clone, no self-escalation.
+	for _, role := range Roles() {
+		if RoleAbove(role, role) {
+			t.Fatalf("%s must not be strictly above itself", role)
+		}
+	}
+	// Strictly-below pairs hold; strictly-above pairs do not.
+	above := [][2]string{{RoleOwner, RoleAdmin}, {RoleOwner, RoleViewer}, {RoleAdmin, RoleMember}, {RoleMember, RoleViewer}}
+	for _, p := range above {
+		if !RoleAbove(p[0], p[1]) {
+			t.Fatalf("%s must be strictly above %s", p[0], p[1])
+		}
+		if RoleAbove(p[1], p[0]) {
+			t.Fatalf("%s must NOT be strictly above %s", p[1], p[0])
+		}
+	}
+	// Nobody outranks an owner — the structural last-owner protection.
+	for _, role := range Roles() {
+		if RoleAbove(role, RoleOwner) {
+			t.Fatalf("%s must not be able to act on an owner", role)
+		}
+	}
+	// Fail closed on the non-member/unknown edges (both sides): "" and undefined roles are
+	// neither above nor below anything, so the rule never lets them through.
+	for _, bad := range []string{"", "superuser", "root"} {
+		if RoleAbove(RoleOwner, bad) {
+			t.Fatalf("owner must not be 'above' an unknown role %q (fail closed)", bad)
+		}
+		if RoleAbove(bad, RoleViewer) {
+			t.Fatalf("unknown role %q must not be 'above' a viewer (fail closed)", bad)
+		}
+	}
+}
+
+// TestKeyScopeGrantedBy pins the api-key mint cap (Arc O / O3): a coarse key scope is
+// grantable only if the minter's role holds EVERY canonical perm it expands to — a key never
+// carries authority its minter lacks. This is the amplification fix both reviews caught.
+func TestKeyScopeGrantedBy(t *testing.T) {
+	owner := RoleScopes(RoleOwner)
+	member := RoleScopes(RoleMember)
+	viewer := RoleScopes(RoleViewer)
+	// Owner (All()) may mint every coarse scope.
+	for _, sc := range []string{"ingest", "query", "query:payloads", "scores:write", "delete"} {
+		if !KeyScopeGrantedBy(owner, sc) {
+			t.Fatalf("owner must be able to mint %q", sc)
+		}
+	}
+	// Member holds read+scores:write, NOT traces:write/traces:delete.
+	grant := map[string]bool{"query": true, "query:payloads": true, "scores:write": true, "ingest": false, "delete": false}
+	for sc, want := range grant {
+		if KeyScopeGrantedBy(member, sc) != want {
+			t.Fatalf("member mint %q = %v, want %v", sc, !want, want)
+		}
+	}
+	// Viewer may mint only the metadata read key.
+	if !KeyScopeGrantedBy(viewer, "query") {
+		t.Fatal("viewer must be able to mint a read-only query key")
+	}
+	for _, sc := range []string{"query:payloads", "scores:write", "ingest", "delete"} {
+		if KeyScopeGrantedBy(viewer, sc) {
+			t.Fatalf("viewer must NOT be able to mint %q", sc)
+		}
+	}
+	// Unknown / empty coarse scopes are never grantable (fail closed).
+	if KeyScopeGrantedBy(owner, "wat") || KeyScopeGrantedBy(owner, "") {
+		t.Fatal("unknown coarse scope must not be grantable")
+	}
+}

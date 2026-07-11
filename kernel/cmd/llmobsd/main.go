@@ -291,6 +291,10 @@ func run() error {
 	platform.NewHealth(pool, persistHealth).Register(apiMux)
 	auth.Register(apiMux)
 	auth.RegisterKeys(apiMux)
+	// Provisioning (Arc O / O3): create-org + invite/set-role/remove-member. Every member
+	// sibling enters ONE shared gate resolved against the TARGET org; roles are capped
+	// strictly below the actor's. create-org gates on instance-admin (default-org owner).
+	auth.RegisterProvisioning(apiMux)
 	// Price table management (ADR-0029): session-authed; reads open to any session,
 	// writes gated to admin (config authority). Global entries carry no project; the
 	// per-project discount is scoped to the caller's own project.

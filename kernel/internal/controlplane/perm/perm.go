@@ -90,6 +90,27 @@ var coarseExpand = map[string][]string{
 	"delete":         {TracesDelete},
 }
 
+// KeyScopeGrantedBy reports whether a principal whose canonical scopes are `roleScopes` may
+// MINT a machine-key coarse scope — i.e. the principal personally holds EVERY canonical
+// permission that coarse scope expands to. A machine key must never carry authority its
+// minter lacks: a member (no traces:write / traces:delete) cannot mint an `ingest` or
+// `delete` key, exactly as the frontend token is DataPermsOnly-capped to the session's role.
+// This is the O3 fix for the key-mint amplification both reviews caught — enforced at the one
+// CreateAPIKey seam so every mint path inherits it (invariant #11). Unknown coarse scopes are
+// not grantable.
+func KeyScopeGrantedBy(roleScopes []string, keyScope string) bool {
+	backing, ok := coarseExpand[keyScope]
+	if !ok || len(backing) == 0 {
+		return false
+	}
+	for _, p := range backing {
+		if !Has(roleScopes, p) {
+			return false
+		}
+	}
+	return true
+}
+
 // ExpandCoarse translates a set of coarse api-key/session scopes into the union of
 // their canonical permissions. Unknown scopes contribute nothing.
 func ExpandCoarse(coarse []string) []string {
@@ -177,6 +198,19 @@ func RoleAtLeast(a, b string) bool {
 	ra, oka := roleRank[a]
 	rb, okb := roleRank[b]
 	return oka && okb && ra >= rb
+}
+
+// RoleAbove reports whether role a is STRICTLY more privileged than role b. This is the
+// crown-jewel provisioning rule (Arc O / O3): a principal may assign a role only STRICTLY
+// BELOW their own, and may modify/remove only members STRICTLY BELOW their own — never at
+// or above it. That is what turns a provisioning handler from an account-takeover vector
+// into a safe one: an admin cannot mint another admin (a lateral clone) or an owner, and
+// cannot touch a peer or a superior. Both sides fail closed — an unknown role (including
+// "" for a non-member) is neither above nor below anything, so it never satisfies the rule.
+func RoleAbove(a, b string) bool {
+	ra, oka := roleRank[a]
+	rb, okb := roleRank[b]
+	return oka && okb && ra > rb
 }
 
 // HasWriteAuthority reports whether a permission set carries ANY write scope —

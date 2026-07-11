@@ -2,10 +2,12 @@ package authhttp
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
+	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
 // RegisterKeys mounts the machine API-key management endpoints. They are
@@ -36,6 +38,14 @@ func (h *Handler) apiKeysCollection(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
 	case http.MethodPost:
+		// Minting a machine credential is a configuration WRITE — gate it on write authority
+		// in THIS project's org (O3), so a read-only viewer cannot mint a key at all.
+		// Resolved against the key's project, never an ambient default-org role.
+		sess, _ := SessionFrom(r.Context())
+		if _, ok := h.writeAuthorityInProject(r, projectID); !ok {
+			writeErr(w, http.StatusForbidden, "forbidden", "minting an API key requires configuration authority in this project")
+			return
+		}
 		var req struct {
 			Scopes []string `json:"scopes"`
 		}
@@ -43,7 +53,20 @@ func (h *Handler) apiKeysCollection(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "schema_invalid", "invalid JSON")
 			return
 		}
-		secret, publicKey, err := controlplane.CreateAPIKey(r.Context(), h.pool, projectID, req.Scopes)
+		// Cap the minted scopes to the MINTER's own authority (both reviews' HIGH): a member
+		// who holds no traces:write/traces:delete cannot mint an ingest/delete key and thereby
+		// escalate past their own role. Resolved per-project (O2) and enforced at the
+		// CreateAPIKey seam; the frontend token already caps the same way (DataPermsOnly).
+		minterRole, rerr := controlplane.RoleForProject(r.Context(), h.pool, sess.User.ID, projectID)
+		if rerr != nil {
+			writeErr(w, http.StatusInternalServerError, "internal", "resolve minter authority failed")
+			return
+		}
+		secret, publicKey, err := controlplane.CreateAPIKey(r.Context(), h.pool, projectID, req.Scopes, sess.User.ID, perm.RoleScopes(minterRole))
+		if errors.Is(err, controlplane.ErrScopeExceedsMinter) {
+			writeErr(w, http.StatusForbidden, "forbidden", "a requested scope exceeds your own authority; you may only mint scopes you hold")
+			return
+		}
 		if err == controlplane.ErrInvalidScope {
 			writeErr(w, http.StatusBadRequest, "invalid_scope", "scopes must be a non-empty subset of ingest|query|scores:write|delete")
 			return
@@ -72,6 +95,11 @@ func (h *Handler) apiKeyItem(w http.ResponseWriter, r *http.Request) {
 	projectID, err := controlplane.DefaultProjectID(r.Context(), h.pool)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "no project")
+		return
+	}
+	// Revoking a credential is a configuration write — same gate as minting one.
+	if _, ok := h.writeAuthorityInProject(r, projectID); !ok {
+		writeErr(w, http.StatusForbidden, "forbidden", "revoking an API key requires configuration authority in this project")
 		return
 	}
 	if err := controlplane.RevokeAPIKey(r.Context(), h.pool, projectID, publicKey); err != nil {

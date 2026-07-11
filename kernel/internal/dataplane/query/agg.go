@@ -29,8 +29,13 @@ var validAggOps = map[string]bool{
 
 var bucketIntervals = map[string]string{"1m": "1 minute", "5m": "5 minutes", "1h": "1 hour", "1d": "1 day"}
 
-// CompileAggregation compiles an aggregation query for one target.
+// CompileAggregation compiles an aggregation query for one target (Postgres dialect).
 func CompileAggregation(doc map[string]any, projectID string, maxWindow time.Duration, target string) (*CompiledAgg, error) {
+	return CompileAggregationForDialect(doc, projectID, maxWindow, target, PostgresDialect)
+}
+
+// CompileAggregationForDialect compiles an aggregation query for the given dialect.
+func CompileAggregationForDialect(doc map[string]any, projectID string, maxWindow time.Duration, target string, d Dialect) (*CompiledAgg, error) {
 	qf, err := fieldsForTarget(target)
 	if err != nil {
 		return nil, err
@@ -47,7 +52,7 @@ func CompileAggregation(doc map[string]any, projectID string, maxWindow time.Dur
 		return nil, errf("schema_invalid", 400, "cursor is not allowed on an aggregation query")
 	}
 
-	b := &builder{}
+	b := &builder{d: d}
 	preds := []string{"project_id = " + b.ph(projectID)}
 	anchor := qf.timeAnchor
 
@@ -87,11 +92,11 @@ func CompileAggregation(doc map[string]any, projectID string, maxWindow time.Dur
 		return nil, errf("condition_limit_exceeded", 422, "more than %d conditions", maxConditions)
 	}
 
-	selects, groupAliases, err := compileGroupBy(doc, qf, anchor)
+	selects, groupAliases, err := compileGroupBy(doc, qf, anchor, d)
 	if err != nil {
 		return nil, err
 	}
-	aggSelects, err := compileAggregations(doc, qf)
+	aggSelects, err := compileAggregations(doc, qf, d)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +122,7 @@ func fieldsForTarget(target string) (queryFields, error) {
 	return queryFields{}, errf("schema_invalid", 400, "unknown target %q", target)
 }
 
-func compileGroupBy(doc map[string]any, qf queryFields, anchor string) (selects, aliases []string, err error) {
+func compileGroupBy(doc map[string]any, qf queryFields, anchor string, d Dialect) (selects, aliases []string, err error) {
 	raw, ok := doc["groupBy"].([]any)
 	if !ok || len(raw) == 0 {
 		return nil, nil, nil
@@ -137,7 +142,7 @@ func compileGroupBy(doc map[string]any, qf queryFields, anchor string) (selects,
 			if !qf.groupable[member] {
 				return nil, nil, errf("not_groupable", 422, "field %q is not groupable", member)
 			}
-			selects = append(selects, f.col+" AS "+alias)
+			selects = append(selects, resolveCol(d, f)+" AS "+alias)
 			aliases = append(aliases, alias)
 		case map[string]any:
 			field, _ := member["field"].(string)
@@ -152,8 +157,8 @@ func compileGroupBy(doc map[string]any, qf queryFields, anchor string) (selects,
 			if timeBuckets++; timeBuckets > 1 {
 				return nil, nil, errf("schema_invalid", 400, "at most one time-bucket groupBy member")
 			}
-			// date_bin buckets on a fixed epoch origin (Postgres 14+).
-			selects = append(selects, "date_bin('"+iv+"', "+anchor+", TIMESTAMPTZ '1970-01-01') AS "+alias)
+			// Bucket on a fixed epoch origin (dialect-rendered).
+			selects = append(selects, d.timeBucket(iv, anchor)+" AS "+alias)
 			aliases = append(aliases, alias)
 		default:
 			return nil, nil, errf("schema_invalid", 400, "groupBy member must be a field name or a time bucket")
@@ -162,7 +167,7 @@ func compileGroupBy(doc map[string]any, qf queryFields, anchor string) (selects,
 	return selects, aliases, nil
 }
 
-func compileAggregations(doc map[string]any, qf queryFields) ([]string, error) {
+func compileAggregations(doc map[string]any, qf queryFields, d Dialect) ([]string, error) {
 	raw, ok := doc["aggregations"].([]any)
 	if !ok || len(raw) == 0 {
 		return nil, errf("schema_invalid", 400, "aggregations must be a non-empty array")
@@ -183,19 +188,19 @@ func compileAggregations(doc map[string]any, qf queryFields) ([]string, error) {
 		field, _ := a["field"].(string)
 		alias, _ := a["alias"].(string)
 
-		expr, defAlias, err := aggExpr(op, field, a, qf)
+		expr, defAlias, err := aggExpr(op, field, a, qf, d)
 		if err != nil {
 			return nil, err
 		}
 		if alias == "" {
 			alias = defAlias
 		}
-		out = append(out, expr+" AS "+quoteIdent(alias))
+		out = append(out, expr+" AS "+d.quoteIdent(alias))
 	}
 	return out, nil
 }
 
-func aggExpr(op, field string, a map[string]any, qf queryFields) (expr, defAlias string, err error) {
+func aggExpr(op, field string, a map[string]any, qf queryFields, d Dialect) (expr, defAlias string, err error) {
 	if op == "count" && field == "" {
 		return "COUNT(*)", "count", nil
 	}
@@ -204,6 +209,7 @@ func aggExpr(op, field string, a map[string]any, qf queryFields) (expr, defAlias
 		return "", "", errf("unknown_field", 422, "unknown aggregation field %q", field)
 	}
 	defAlias = op + "_" + field
+	col := resolveCol(d, f)
 
 	// A numeric map key (usage_details/cost_details with a key) is a numeric value.
 	if f.class == classAttrMap || f.class == classNumericMap {
@@ -211,55 +217,32 @@ func aggExpr(op, field string, a map[string]any, qf queryFields) (expr, defAlias
 		if key == "" {
 			return "", "", errf("operator_not_allowed", 422, "aggregating %q requires a map key", field)
 		}
-		col := numCastGuarded(f.col, key)
+		guarded := d.mapNumCast(f.col, key)
 		defAlias = op + "_" + field + "_" + key
-		return numericAgg(op, col, defAlias)
+		return numericAgg(op, guarded, defAlias, d)
 	}
 
+	isStr := f.class == classString || f.class == classEnum
 	switch op {
 	case "count_distinct":
-		return "COUNT(DISTINCT " + f.col + ")", "count_distinct_" + field, nil
+		return d.countExpr(col, true, isStr), "count_distinct_" + field, nil
 	case "count":
-		return "COUNT(" + f.col + ")", "count_" + field, nil
+		return d.countExpr(col, false, isStr), "count_" + field, nil
 	case "sum", "avg", "min", "max", "p50", "p90", "p95", "p99":
 		if f.class != classNumeric {
 			return "", "", errf("operator_not_allowed", 422, "%s requires a numeric field, got %q", op, field)
 		}
-		return numericAgg(op, f.col, defAlias)
+		return numericAgg(op, col, defAlias, d)
 	}
 	return "", "", errf("operator_not_allowed", 422, "op %q not allowed", op)
 }
 
-// numericAgg emits the SQL. Numeric results are cast to double precision so the
-// driver returns a float64 (pgtype.Numeric would not JSON-marshal cleanly); COUNT
-// stays an integer.
-func numericAgg(op, col, defAlias string) (string, string, error) {
-	switch op {
-	case "sum":
-		return "SUM(" + col + ")::float8", defAlias, nil
-	case "avg":
-		return "AVG(" + col + ")::float8", defAlias, nil
-	case "min":
-		return "MIN(" + col + ")::float8", defAlias, nil
-	case "max":
-		return "MAX(" + col + ")::float8", defAlias, nil
-	case "count":
-		return "COUNT(" + col + ")", defAlias, nil
-	case "p50", "p90", "p95", "p99":
-		frac := "0." + op[1:] // p50 -> 0.50
-		return "(PERCENTILE_CONT(" + frac + ") WITHIN GROUP (ORDER BY " + col + "))::float8", defAlias, nil
+// numericAgg emits the dialect's numeric aggregate. Numeric results are rendered
+// as a clean float so the driver returns float64 (COUNT stays integer).
+func numericAgg(op, col, defAlias string, d Dialect) (string, string, error) {
+	expr, ok := d.numericAggExpr(op, col)
+	if !ok {
+		return "", "", errf("operator_not_allowed", 422, "op %q not allowed on numeric", op)
 	}
-	return "", "", errf("operator_not_allowed", 422, "op %q not allowed on numeric", op)
+	return expr, defAlias, nil
 }
-
-// numCastGuarded casts a jsonb map value to numeric only when it is a JSON
-// number, so bad data is excluded from the aggregate (never errors), consistent
-// with the row path (DSL §9.1).
-func numCastGuarded(col, key string) string {
-	return "CASE WHEN jsonb_typeof(" + col + " -> '" + escapeSQLLiteral(key) + "') = 'number' THEN (" +
-		col + " ->> '" + escapeSQLLiteral(key) + "')::numeric END"
-}
-
-func escapeSQLLiteral(s string) string { return strings.ReplaceAll(s, "'", "''") }
-
-func quoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }

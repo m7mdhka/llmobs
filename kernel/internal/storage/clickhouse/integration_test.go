@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +108,114 @@ func TestIntegrationMigrateAndMerge(t *testing.T) {
 	attrs, _ := state["attributes"].(map[string]any)
 	if attrs["x"] != 1.0 || attrs["y"] != 2.0 {
 		t.Errorf("attributes = %v, want both x=1 and y=2 (deep merge)", attrs)
+	}
+}
+
+func TestIntegrationPathologicalQueryCapped(t *testing.T) {
+	conn := dialCH(t)
+	freshSchema(t, conn)
+	ctx := context.Background()
+	s := NewStore(conn)
+
+	// Seed a handful of spans.
+	start := time.Now().UTC().Format(time.RFC3339Nano)
+	for i := 0; i < 20; i++ {
+		id := "sp" + string(rune('a'+i))
+		if err := s.PersistSpan(ctx, up(1, id, map[string]any{"kind": "generation", "start_time": start})); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	// A pathological cap: at most 1 row may be scanned. The query MUST be rejected
+	// by ClickHouse (capped), not run to completion — and the connection must stay
+	// usable afterward (a cap protects the cluster; it does not take it down).
+	s.SetReadLimits(ReadLimits{
+		MaxExecutionTime: 30 * time.Second,
+		MaxMemoryUsage:   1 << 30,
+		MaxRowsToRead:    1,
+		MaxBytesToRead:   1 << 30,
+	})
+	_, err := s.QuerySpans(ctx, "project_id = ?", []any{"p"}, "", 1000)
+	if err == nil {
+		t.Fatal("expected the row-cap to reject the pathological scan, got nil error")
+	}
+	if !strings.Contains(err.Error(), "rows") && !strings.Contains(err.Error(), "limit") && !strings.Contains(strings.ToLower(err.Error()), "exceed") {
+		t.Fatalf("expected a rows-limit error, got: %v", err)
+	}
+
+	// The cluster survived: a sane-limit query on the same connection works.
+	s.SetReadLimits(ReadLimits{
+		MaxExecutionTime: 30 * time.Second,
+		MaxMemoryUsage:   1 << 30,
+		MaxRowsToRead:    10_000_000,
+		MaxBytesToRead:   1 << 30,
+	})
+	rows, err := s.QuerySpans(ctx, "project_id = ?", []any{"p"}, "", 1000)
+	if err != nil {
+		t.Fatalf("post-cap query failed (connection poisoned?): %v", err)
+	}
+	if len(rows) != 20 {
+		t.Fatalf("post-cap query returned %d rows, want 20", len(rows))
+	}
+}
+
+func TestIntegrationEraseSpans(t *testing.T) {
+	conn := dialCH(t)
+	freshSchema(t, conn)
+	ctx := context.Background()
+	s := NewStore(conn)
+	start := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	// u1 has two spans; one is later soft-deleted (its payload must STILL be erased).
+	mk := func(id, user string, del bool) storage.Event {
+		f := map[string]any{"user_id": user, "kind": "generation", "start_time": start.Format(time.RFC3339Nano)}
+		if del {
+			f["is_deleted"] = true
+		}
+		return up(1, id, f)
+	}
+	for _, ev := range []storage.Event{mk("e1", "u1", false), mk("e2", "u1", true), mk("e3", "u2", false)} {
+		if err := s.PersistSpan(ctx, ev); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	count, auditID, err := s.EraseSpans(ctx, "p", "u1", "admin@x", start.Add(-time.Hour), start.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("erase: %v", err)
+	}
+	// Both u1 spans erased — including the soft-deleted e2 (payload removal).
+	if count != 2 {
+		t.Fatalf("erased count = %d, want 2 (incl. the soft-deleted span)", count)
+	}
+	if auditID == "" {
+		t.Fatal("empty audit id")
+	}
+
+	// e1/e2 physically gone; u2's e3 untouched.
+	var remaining uint64
+	row := conn.QueryRow(ctx, "SELECT count() FROM spans WHERE project_id='p' AND id IN ('e1','e2')")
+	if err := row.Scan(&remaining); err != nil {
+		t.Fatalf("count remaining: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("erased spans still present: %d rows", remaining)
+	}
+	// Suppression tombstones written for both erased ids (G3, before the delete).
+	var supp uint64
+	if err := conn.QueryRow(ctx, "SELECT count() FROM erasure_suppression WHERE project_id='p' AND id IN ('e1','e2')").Scan(&supp); err != nil {
+		t.Fatalf("count suppression: %v", err)
+	}
+	if supp != 2 {
+		t.Fatalf("suppression tombstones = %d, want 2", supp)
+	}
+	// Audit row recorded.
+	var audits uint64
+	if err := conn.QueryRow(ctx, "SELECT count() FROM erasure_audit WHERE id = ?", auditID).Scan(&audits); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if audits != 1 {
+		t.Fatalf("audit rows = %d, want 1", audits)
 	}
 }
 

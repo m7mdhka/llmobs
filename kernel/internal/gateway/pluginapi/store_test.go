@@ -27,7 +27,7 @@ type fakeStore struct {
 	m  map[string]json.RawMessage
 }
 
-func newFakeStore() *fakeStore { return &fakeStore{m: map[string]json.RawMessage{}} }
+func newFakeStore() *fakeStore         { return &fakeStore{m: map[string]json.RawMessage{}} }
 func stk(p, pr, col, id string) string { return strings.Join([]string{p, pr, col, id}, "\x00") }
 
 func (f *fakeStore) Put(_ context.Context, p, pr, col, id string, rec json.RawMessage) error {

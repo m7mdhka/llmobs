@@ -95,8 +95,8 @@ type pluginRuntime struct {
 	token string
 	exp   int64 // service-token expiry (unix)
 
-	faults          int   // consecutive faults -> backoff -> disable
-	restartAttempts int   // cumulative (ops signal)
+	faults          int // consecutive faults -> backoff -> disable
+	restartAttempts int // cumulative (ops signal)
 	nextAttempt     time.Time
 	lastWatermark   int64
 	tokenRefreshErr int

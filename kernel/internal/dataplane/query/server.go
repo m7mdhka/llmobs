@@ -30,10 +30,19 @@ type Server struct {
 	maxWindow time.Duration
 	metrics   *metrics.Registry
 	signer    *plugintoken.Signer // verifies plugin service tokens + user assertions (H3)
+	dialect   Dialect             // SQL dialect the compiler emits for this store
 }
 
 func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration, reg *metrics.Registry, signer *plugintoken.Signer) *Server {
-	return &Server{store: store, pool: pool, log: log, maxWindow: maxWindow, metrics: reg, signer: signer}
+	return &Server{store: store, pool: pool, log: log, maxWindow: maxWindow, metrics: reg, signer: signer, dialect: PostgresDialect}
+}
+
+// SetDialect selects the SQL dialect the compiler emits, matching the backing
+// store (Postgres for lite, ClickHouse for scale). Defaults to Postgres.
+func (s *Server) SetDialect(d Dialect) {
+	if d != nil {
+		s.dialect = d
+	}
 }
 
 // Handler returns the routed Query API handler (generated routing).
@@ -203,11 +212,11 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	var cerr error
 	switch target {
 	case "spans":
-		c, cerr = CompileSpans(doc, id.ProjectID, s.maxWindow)
+		c, cerr = CompileSpansForDialect(doc, id.ProjectID, s.maxWindow, s.dialect)
 	case "traces":
-		c, cerr = CompileTraces(doc, id.ProjectID, s.maxWindow)
+		c, cerr = CompileTracesForDialect(doc, id.ProjectID, s.maxWindow, s.dialect)
 	case "scores":
-		c, cerr = CompileScores(doc, id.ProjectID, s.maxWindow)
+		c, cerr = CompileScoresForDialect(doc, id.ProjectID, s.maxWindow, s.dialect)
 	default:
 		writeErr(w, errf("schema_invalid", 400, "target must be one of spans|traces|scores"))
 		return
@@ -280,7 +289,7 @@ func (s *Server) runAggregation(w http.ResponseWriter, r *http.Request, doc map[
 		writeErr(w, errf("schema_invalid", 400, "target must be one of spans|traces|scores"))
 		return
 	}
-	ca, cerr := CompileAggregation(doc, id.ProjectID, s.maxWindow, target)
+	ca, cerr := CompileAggregationForDialect(doc, id.ProjectID, s.maxWindow, target, s.dialect)
 	if cerr != nil {
 		writeErr(w, cerr.(*CompileError))
 		return

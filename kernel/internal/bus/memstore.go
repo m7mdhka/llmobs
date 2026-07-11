@@ -13,8 +13,8 @@ import (
 type MemStore struct {
 	mu      sync.Mutex
 	seq     int64
-	events  []Delivered           // append-only log
-	offsets map[string]int64      // key: plugin\x00project\x00topic
+	events  []Delivered      // append-only log
+	offsets map[string]int64 // key: plugin\x00project\x00topic
 	dlq     []dlqEntry
 }
 

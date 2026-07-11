@@ -89,10 +89,10 @@ func TestCollectionValidate(t *testing.T) {
 		t.Fatalf("valid collection rejected: %v", err)
 	}
 	bad := []CollectionSpec{
-		{Name: "Bad-Name", Fields: nil},                                              // invalid name
-		{Name: "c", Fields: []FieldSpec{{Name: "1x", Type: FieldString}}},            // invalid field
-		{Name: "c", Fields: []FieldSpec{{Name: "f", Type: "weird"}}},                 // bad type
-		{Name: "c", Fields: []FieldSpec{{Name: "f", Type: FieldJSON, Indexed: true}}}, // json indexed
+		{Name: "Bad-Name", Fields: nil},                                                                  // invalid name
+		{Name: "c", Fields: []FieldSpec{{Name: "1x", Type: FieldString}}},                                // invalid field
+		{Name: "c", Fields: []FieldSpec{{Name: "f", Type: "weird"}}},                                     // bad type
+		{Name: "c", Fields: []FieldSpec{{Name: "f", Type: FieldJSON, Indexed: true}}},                    // json indexed
 		{Name: "c", Fields: []FieldSpec{{Name: "f", Type: FieldString}, {Name: "f", Type: FieldString}}}, // dup
 	}
 	for i, c := range bad {

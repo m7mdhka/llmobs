@@ -53,6 +53,16 @@ cloud later; nothing in this repo is ever feature-gated.
     Query API `auth()` intersection, the plugin-token verify — never re-checked at
     each caller. A new caller must inherit the invariant by construction, not by
     remembering to re-check it; per-entry-point guards drift and one new path forgets.
+12. **Every retry/requeue path needs an explicit permanent-vs-transient failure
+    taxonomy.** "Retry forever on transient failure" WITHOUT classifying permanent
+    failures is a resource-exhaustion or data-loss vector: a permanently-failing
+    record either loops forever pinning resources, or gets dropped to make room.
+    Classify at the seam — a permanent failure (malformed input, invalid credentials,
+    a deterministic rejection) dead-letters; a transient failure (backend down, a
+    Redis blip) retries and is NEVER dropped. This is the general form of the bug
+    class the adversarial review keeps catching: **the failure path, not the happy
+    path, is where correctness mechanisms hide their worst bugs** (L3: auth-DB-down
+    requeues, bad-credentials drops; the WAL spool `handle()` split).
 
 ## Repo map (where things go)
 

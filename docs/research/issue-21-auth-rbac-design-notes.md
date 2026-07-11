@@ -88,8 +88,9 @@ field):
   cascades to the created key). Nullish in any cache/token schema for forward-compat.
 - **Revocation freshness** (#14359) — a revoked key/token MUST stop being honored
   **before** its TTL. This is pinned as a design-rule with a tracked gap in
-  **ADR-0025 R3** (it is a *real* gap on our live kernel-signed plugin tokens, which
-  are verified by signature + `exp` with no revocation seam). Centralize cache-key
+  **ADR-0025 R3** and filed as **issue #63** (it is a *real* gap on our live
+  kernel-signed plugin tokens, which are verified by signature + `exp` with no
+  revocation seam; #63 gates pilot→production). Centralize cache-key
   derivation in one helper (redaction + invalidation + scan all agree), cache
   *misses* too and purge them, and provide an operator flush-all break-glass.
 - **Refresh-at-ratio** (#14325) — refresh a short-lived credential at a *ratio* of its

@@ -14,6 +14,14 @@ Covers:
   `templates/plugin-frontend-only` (React) or `templates/plugin-frontend-vanilla`
   (no framework). The `context` carries the token-confined data client, the active
   project, the theme, the routing base path, and locale/direction.
+- **Localization + RTL (N3).** The mount `context` carries `locale` (BCP-47) and
+  `direction` (`ltr`/`rtl`) — the shell resolves them and stamps `lang`/`dir` on the
+  document root. `@llmobs/ui` uses logical CSS properties, so its components flip for RTL
+  automatically; a custom view flips by honoring `context.direction`. Externalize your
+  strings through the seam: `createTranslator(catalog, context.locale)` returns a
+  `t(key, fallback)` (exact-locale → primary-subtag → your source string), so a deployment
+  localizes by adding a catalog — no code change. This ships the *mechanism* to localize,
+  not translations.
 - The `llmobs-plugin.yaml` manifest.
 - [The inner loop — `make dev` (create → dev → edit → reload)](dev-loop.md) (J3).
 - [Settings — a schema-form tab with no backend](settings.md) (J2).

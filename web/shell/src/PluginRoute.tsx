@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { LoadingState, PluginUnavailable } from "@llmobs/ui";
 import { DataClient, type PluginMountContext, type PluginUnmount } from "@llmobs/plugin-sdk";
-import { currentTheme } from "./theme.js";
+import { currentTheme, currentLocale, currentDirection } from "./theme.js";
 import { loadPluginMount } from "./remoteLoader.js";
 import { makeFrontendTokenProvider, type RegistryPlugin, type Session } from "./api.js";
 
@@ -40,9 +40,11 @@ export function PluginRoute({
       user: { id: session.user.id, email: session.user.email, role: session.user.role },
       client: new DataClient({ baseUrl: "", frontendToken }),
       theme: { mode: theme },
-      // Locale/direction are threaded now (N1); N3 wires real detection + RTL.
-      locale: "en",
-      direction: "ltr",
+      // Locale + direction (N3): the shell resolved these on boot and stamped `lang`/`dir`
+      // on the document; the plugin gets the same values so it lays out (and picks strings)
+      // for the active locale in whatever framework it uses.
+      locale: currentLocale(),
+      direction: currentDirection(),
     };
   }, [plugin.id, basePath, session.csrfToken, session.user.id, session.user.email, session.user.role]);
 

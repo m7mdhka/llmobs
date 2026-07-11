@@ -1,4 +1,11 @@
-import type { PluginMount } from "@llmobs/plugin-sdk";
+import { createTranslator, type PluginMount } from "@llmobs/plugin-sdk";
+
+// The i18n seam (N3): source strings live here as fallbacks; a deployment localizes by
+// adding a catalog for the target locale — no code change at the call sites. RTL locales
+// also flip layout automatically because we set `dir` from context.direction below.
+const messages = {
+  ar: { title: "عمليات التتبع الأخيرة (فانيلا، بدون إطار عمل)", loading: "جار التحميل…" },
+};
 
 // A FRAMEWORK-FREE plugin surface — no React, no framework at all, just the neutral
 // mount contract (ADR-0030) + DOM. This is the falsification of "any framework": if the
@@ -6,17 +13,19 @@ import type { PluginMount } from "@llmobs/plugin-sdk";
 // shell calls `mount(element, context)`; we render with `document` APIs, query through
 // the token-confined `context.client`, and return an idempotent `unmount`.
 export const mount: PluginMount = (element, context) => {
+  const t = createTranslator(messages, context.locale);
   const root = document.createElement("section");
   root.className = "vanilla-plugin";
-  // Locale-ready: the context threads text direction (N3 wires real values).
+  // Locale-aware: flip layout for RTL locales via the shell-supplied direction, and pick
+  // localized strings through the seam (falling back to the source text).
   root.setAttribute("dir", context.direction);
 
   const heading = document.createElement("h1");
-  heading.textContent = "Recent traces (vanilla, no framework)";
+  heading.textContent = t("title", "Recent traces (vanilla, no framework)");
 
   const status = document.createElement("p");
   status.className = "status";
-  status.textContent = "Loading…";
+  status.textContent = t("loading", "Loading…");
 
   const list = document.createElement("ul");
   list.className = "trace-list";

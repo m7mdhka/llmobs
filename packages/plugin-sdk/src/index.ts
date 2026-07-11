@@ -56,7 +56,12 @@ export type {
   LLMObsQueryDSLDocumentV1Alpha1 as QueryDocument,
 } from "@llmobs/query-client";
 
-// Theme tokens — CSS custom properties + helpers, framework-neutral (any binding uses
-// them). The React design-system COMPONENTS (@llmobs/ui) are re-exported from
-// `@llmobs/plugin-sdk/react`, not here.
+// String-externalization seam (N3) — the mechanism to localize plugin strings.
+export { createTranslator } from "./i18n.js";
+export type { MessageCatalog, Translator } from "./i18n.js";
+
+// Theme tokens + locale/direction helpers — CSS custom properties + document-root
+// application, framework-neutral (any binding uses them). Includes directionForLocale /
+// getLocale / applyLocale (N3). The React design-system COMPONENTS (@llmobs/ui) are
+// re-exported from `@llmobs/plugin-sdk/react`, not here.
 export * from "@llmobs/tokens";

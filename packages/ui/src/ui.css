@@ -135,7 +135,7 @@
   font-size: var(--llmobs-text-sm);
 }
 .llm-table th {
-  text-align: left;
+  text-align: start;
   font-weight: var(--llmobs-weight-medium);
   color: var(--llmobs-text-subtle);
   font-size: var(--llmobs-text-xs);
@@ -177,7 +177,7 @@
 }
 .llm-num {
   font-variant-numeric: tabular-nums lining-nums;
-  text-align: right;
+  text-align: end;
 }
 
 /* ---- Badge ---- */
@@ -292,7 +292,7 @@
 }
 .llm-navrail {
   width: 208px;
-  border-right: 1px solid var(--llmobs-border);
+  border-inline-end: 1px solid var(--llmobs-border);
   background: var(--llmobs-surface);
   padding: var(--llmobs-space-3);
   overflow-y: auto;

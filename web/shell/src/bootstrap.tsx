@@ -4,10 +4,11 @@ import "@llmobs/tokens/tokens.css";
 import "@llmobs/ui/ui.css";
 import "./shell.css";
 import { App } from "./App.js";
-import { initTheme } from "./theme.js";
+import { initTheme, initLocale } from "./theme.js";
 import { brand } from "@llmobs/brand";
 
 initTheme();
+initLocale();
 document.title = brand.name;
 
 const el = document.getElementById("root");

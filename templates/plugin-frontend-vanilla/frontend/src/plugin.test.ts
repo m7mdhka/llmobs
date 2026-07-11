@@ -7,7 +7,7 @@ import { mount } from "./plugin.js";
 // contract is not React-shaped — and proves the G1 frontend-token boundary holds
 // identically for a non-React caller.
 
-function ctx(client: LLMObsClient): PluginMountContext {
+function ctx(client: LLMObsClient, over: Partial<PluginMountContext> = {}): PluginMountContext {
   return {
     baseUrl: "",
     basePath: "/vanilla",
@@ -15,6 +15,7 @@ function ctx(client: LLMObsClient): PluginMountContext {
     theme: { mode: "light" },
     locale: "en",
     direction: "ltr",
+    ...over,
   };
 }
 
@@ -50,6 +51,24 @@ describe("vanilla plugin mount — framework-neutral proof", () => {
     // Teardown removes every node the plugin added.
     (unmount as () => void)();
     expect(el.children.length).toBe(0);
+  });
+
+  it("reads locale + direction (N3): renders RTL and localized strings for an Arabic locale", async () => {
+    const fake = {
+      query: async () => ({ version: "v1alpha1" as const, data: [], stats: { elapsed_ms: 1 }, warnings: [] }),
+      traceTree: () => {}, writeScore: () => {}, getSettings: () => {}, setSettings: () => {},
+    } as unknown as LLMObsClient;
+    const el = document.createElement("div");
+    const unmount = mount(el, ctx(fake, { locale: "ar-EG", direction: "rtl" }));
+    await flush();
+
+    const section = el.querySelector(".vanilla-plugin") as HTMLElement;
+    // Layout flips: the plugin stamps the shell-supplied direction on its root.
+    expect(section.getAttribute("dir")).toBe("rtl");
+    // The i18n seam resolves the Arabic string (via the primary "ar" catalog) — not the
+    // English source fallback.
+    expect(el.querySelector("h1")?.textContent).toContain("عمليات التتبع");
+    (unmount as () => void)();
   });
 
   it("PROVE-THE-NEGATIVE: G1 confines a non-React caller identically — a fail-closed client throws before the network, no data reaches the surface", async () => {

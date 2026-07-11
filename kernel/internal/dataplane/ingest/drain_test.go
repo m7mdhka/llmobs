@@ -55,7 +55,7 @@ func (c *countingRunner) count() int {
 
 func enqueueN(r *Receiver, n int) {
 	for i := 0; i < n; i++ {
-		r.queue <- job{bearer: "k", contentType: "application/json", body: []byte("{}"), receivedAt: time.Now()}
+		_ = r.spool.Append(job{bearer: "k", contentType: "application/json", body: []byte("{}"), receivedAt: time.Now()})
 	}
 }
 

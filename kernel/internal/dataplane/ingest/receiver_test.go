@@ -32,7 +32,7 @@ func TestHotPathDoesNotTouchStorage(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("hot path did not ack 200: got %d", w.Code)
 	}
-	if got := len(r.queue); got != 1 {
+	if got := r.QueueLen(); got != 1 {
 		t.Fatalf("expected exactly one enqueued job (no sync processing), got %d", got)
 	}
 }

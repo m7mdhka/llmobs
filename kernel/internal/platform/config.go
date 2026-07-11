@@ -37,6 +37,10 @@ type Config struct {
 	RedactPresets      string `json:"redact_presets"`       // CSV of preset detectors; "none" disables; default the standard set
 	RedactCustomJSON   string `json:"redact_custom"`        // JSON array of {name,pattern,token} custom rules
 	IngestQueueSize    int    `json:"ingest_queue_size"`    // in-process ingest queue capacity (async-ack buffer)
+	// IngestSpoolDir, when set, selects the durable WAL ingest spool (ADR-0027,
+	// scale profile): the ack becomes durable when bytes hit this local WAL, and
+	// undrained records replay on boot. Empty => the in-memory spool (lite).
+	IngestSpoolDir string `json:"ingest_spool_dir"`
 	// ShutdownDrainTimeout bounds how long shutdown waits for the ingest queue to
 	// persist before giving up (G1). It MUST be shorter than the orchestrator's
 	// terminationGracePeriodSeconds (default 30s in K8s) so the drain completes
@@ -118,6 +122,7 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("REDACT_CUSTOM"), &c.RedactCustomJSON)
 	envStr(brand.Env("SHUTDOWN_DRAIN_TIMEOUT"), &c.ShutdownDrainTimeout)
 	envInt(brand.Env("INGEST_QUEUE_SIZE"), &c.IngestQueueSize)
+	envStr(brand.Env("INGEST_SPOOL_DIR"), &c.IngestSpoolDir)
 	envInt(brand.Env("PERSIST_UNHEALTHY_THRESHOLD"), &c.PersistUnhealthyThreshold)
 	envStr(brand.Env("ERASURE_SUPPRESSION_TTL"), &c.ErasureSuppressionTTL)
 	envStr(brand.Env("PLUGIN_RECONCILE_INTERVAL"), &c.PluginReconcileInterval)

@@ -58,6 +58,10 @@ services:
       LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:-sk-e2e-demo-key}"
       LLMOBS_BOOTSTRAP_ADMIN_EMAIL: "${LLMOBS_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
       LLMOBS_BOOTSTRAP_ADMIN_PASSWORD: "${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:-admin-dev-password}"
+      # Durable WAL ingest spool (ADR-0027): the ack becomes durable when bytes hit
+      # this local WAL, and undrained records replay on boot. Backed by a volume so
+      # the WAL survives container restarts.
+      LLMOBS_INGEST_SPOOL_DIR: "/var/lib/llmobs/wal"
       LLMOBS_LOG_FORMAT: "text"
       LLMOBS_OTLP_HTTP_ADDR: ":4318"
       LLMOBS_OTLP_GRPC_ADDR: ":4317"
@@ -68,6 +72,8 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
+    volumes:
+      - kernel-wal:/var/lib/llmobs/wal
     ports:
       - "${LLMOBS_OTLP_PORT:-4318}:4318"
       - "${LLMOBS_OTLP_GRPC_PORT:-4317}:4317"
@@ -76,3 +82,4 @@ services:
 
 volumes:
   clickhouse-data:
+  kernel-wal:

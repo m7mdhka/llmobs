@@ -11,6 +11,18 @@
 // Run the DB-backed integration suites serially (`go test -p 1 ./...`): this
 // package and internal/storage/clickhouse both reset (DROP) the shared ClickHouse
 // tables, so parallel package execution against one instance would clobber them.
+//
+// Design note — this harness is a SECURITY mechanism, not only an elegance one.
+// A safety property proven on ONE adapter is not proven until proven on EVERY
+// adapter: L2's HIGH SQL injection was invisible on Postgres (a dialect difference
+// ClickHouse does not forgive), so any suite that ran against Postgres alone — or a
+// mocked ClickHouse — would have shipped it to every scale deployment. Because the
+// two engines diverge in ways no single-engine test can see (NULL vs ” sentinel,
+// percentile interpolation, boolean encoding, literal escaping), every parity or
+// safety case a reviewer finds becomes a PERMANENT fixture here (percentile,
+// boolean group-by, unset-string counts below; the injection case in the query
+// package's dialect_injection_test.go). The proof only strengthens — it never
+// regresses.
 package crossadapter
 
 import (

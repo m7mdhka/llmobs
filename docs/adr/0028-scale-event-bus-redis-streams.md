@@ -27,17 +27,27 @@ Postgres-lite / ClickHouse-scale storage split.
 DeadLetter). Replay/at-least-once/backlog-cap/DLQ stay in `bus.Bus` and are NOT
 reimplemented. The **same conformance suite** proves it (D5).
 
-### D2 — int64 monotonic offsets over Streams via an INCR-driven entry id
+### D2 — Globally-unique int64 ids over Streams; injective keys
 
-The Store contract is `int64` monotonic offsets per `(topic, project)` — the
-idempotency key and the `After(afterID)` sort key. Redis Stream ids are `ms-seq`
-strings, so the backend drives its own int64 via an `INCR` counter and writes each
-entry with the **explicit id `<n>-0`**. The counter is both `LatestID` and the
-entry's sort key, so `After` is a plain `XRANGE (afterID-0 +`. `Append` is a Lua
-script (`INCR` + `XADD` atomic) so ids are strictly monotonic and the stream order
-can never diverge from the counter under concurrent producers. `SetOffset` is a Lua
-script that advances only on a greater id (the GREATEST monotonic guarantee the
-Postgres store enforces in SQL).
+The `int64` id is the at-least-once **idempotency key** (the SDK dedupes on it), so
+it MUST be **globally unique** across all topics — matching Postgres's table-wide
+`BIGSERIAL`. (A per-topic counter would restart the id at 1 per topic, so a
+subscriber to two topics that dedupes on id alone would silently drop events on
+scale but not lite — a two-profile divergence.) `Append` is a Lua script that
+`INCR`s a **single global seq key** and `XADD`s the entry with the explicit id
+`<n>-0`; ids are globally unique and strictly ascending within each per-(topic,
+project) stream, so `After` is a plain `XRANGE (afterID-0 +` and `LatestID` is the
+stream's last entry (`XREVRANGE`). `SetOffset` is a Lua script that advances only on
+a greater id (the GREATEST monotonic guarantee the Postgres store enforces in SQL).
+
+**Key injectivity (tenant isolation):** every key component — `project`, `topic`,
+`pluginID`, and `topic` is attacker-controlled (a plugin's poll body) — is
+percent-encoded so the `:` separator and Redis glob/hash-tag metacharacters can
+never appear in a component. A raw `project|topic` concatenation would NOT be
+injective (`acme`+`secret|audit` and `acme|secret`+`audit` collide), a cross-tenant
+read/write break; encoding makes the mapping injective regardless of content. Both
+the global-id uniqueness and the adversarial-identifier injectivity are conformance
+cases run against every backend (D5).
 
 ### D3 — Sentinel HA failover, self-healing without a restart (R-EV1)
 
@@ -67,8 +77,11 @@ with the pre-failover event replicated and present).
 The bus conformance moves to `internal/bus/bustest.RunConformance(t, factory)` and
 runs against BOTH the in-memory backend and the real Redis/Valkey backend from the
 identical assertions — the event-bus analogue of the cross-adapter storage
-conformance. H6 backlog-replay, at-least-once, backlog-cap→DLQ, and tenant/topic
-isolation all pass green over Valkey Streams.
+conformance. H6 backlog-replay, at-least-once, backlog-cap→DLQ, tenant/topic
+isolation, **global-id uniqueness across topics**, and **adversarial key
+injectivity** all pass green over Valkey Streams. (The last two were added after the
+adversarial review found the suite was blind to the per-topic-id and key-collision
+divergences — every case a reviewer finds becomes a permanent fixture.)
 
 ### D6 — Selection + dependency
 
@@ -86,6 +99,16 @@ bump rides in (as with clickhouse-go in L1).
   are behaviorally interchangeable behind the Store seam.
 - CLAUDE.md's stale "Redis Streams (lite bus)" line is corrected: **Postgres is the
   lite bus, Redis/Valkey Streams is the scale bus** (NATS JetStream is not used).
+
+## Scope: single-node / Sentinel, not Redis Cluster
+
+The backend targets a single primary with Sentinel HA (`Dial` builds only
+`NewClient`/`NewFailoverClient`, never `NewClusterClient`). The global seq counter
+(for globally-unique ids) and the append/DLQ multi-key operations span different
+hash slots, which would `CROSSSLOT`-fail under Redis Cluster. Cluster support (with
+hash-slot-aware key co-location or a Cluster-safe id scheme) is a deliberate
+follow-up, NOT a silent gap — a future "add cluster" change must revisit the id
+counter and the two-key Lua/pipeline ops.
 
 ## Deferred / follow-up
 

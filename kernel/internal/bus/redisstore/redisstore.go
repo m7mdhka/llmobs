@@ -4,10 +4,21 @@
 // in the shared bus.Bus and is NOT reimplemented here. The same bus conformance
 // suite (H6) runs green against this backend, proving the contract is the interface.
 //
-// Offset model: the bus.Store contract is int64 monotonic offsets per (topic,
-// project). Redis Stream entry IDs are `ms-seq` strings, so we drive our own int64
-// via an INCR counter and write each entry with the explicit id `<n>-0` — the
-// counter IS both LatestID and the entry's sort key, so `After` is a plain XRANGE.
+// Offset model: the bus.Store contract is int64 offsets that are the idempotency
+// key, so they must be GLOBALLY unique (matching Postgres's table-wide BIGSERIAL).
+// Stream entry IDs are `ms-seq` strings, so Append drives a single global INCR
+// counter and writes each entry with the explicit id `<n>-0`; ids are globally
+// unique and strictly ascending within each per-(topic,project) stream, so `After`
+// is a plain XRANGE and `LatestID` is the stream's last entry (XREVRANGE).
+//
+// Key injectivity: every key component (project, topic, pluginID — topic is
+// attacker-controlled) is percent-encoded (enc) so the `:` separator and Redis
+// metacharacters can never appear in a component, making the component→key mapping
+// injective (no cross-tenant key collision).
+//
+// Deployment: single-node or Sentinel (HA). Redis Cluster is NOT a target — the
+// Append script and the DeadLetter pipeline each touch two keys that would land in
+// different hash slots (CROSSSLOT); cluster support is a documented follow-up.
 package redisstore
 
 import (
@@ -30,32 +41,59 @@ type Store struct {
 
 var _ bus.Store = (*Store)(nil)
 
-// New builds a Store over an established client. ns namespaces all keys.
+// New builds a Store over an established client. ns namespaces all keys (the
+// caller supplies it, brand-derived — no product name is hardcoded here).
 func New(rdb *redis.Client, ns string) *Store {
-	if ns == "" {
-		ns = "llmobs"
-	}
 	return &Store{rdb: rdb, ns: ns}
 }
 
-func (s *Store) seqKey(topic, project string) string {
-	return fmt.Sprintf("%s:seq:{%s|%s}", s.ns, project, topic)
-}
+// seqKey is a SINGLE GLOBAL counter, so ids are globally unique across all
+// (topic, project) — matching the Postgres store's table-wide BIGSERIAL. Per-topic
+// counters would restart at 1 per topic, colliding the `Delivered.ID` idempotency
+// key across topics (a plugin subscribed to two topics that dedupes on id alone
+// would silently drop events on scale but not lite). The id is the idempotency key;
+// it MUST be globally unique.
+func (s *Store) seqKey() string { return s.ns + ":seq" }
 func (s *Store) logKey(topic, project string) string {
-	return fmt.Sprintf("%s:log:{%s|%s}", s.ns, project, topic)
+	return s.ns + ":log:" + enc(project) + ":" + enc(topic)
 }
 func (s *Store) offKey(pluginID, project, topic string) string {
-	return fmt.Sprintf("%s:off:%s|%s|%s", s.ns, pluginID, project, topic)
+	return s.ns + ":off:" + enc(pluginID) + ":" + enc(project) + ":" + enc(topic)
 }
 func (s *Store) dlqKey(pluginID, project, topic string) string {
-	return fmt.Sprintf("%s:dlq:%s|%s|%s", s.ns, pluginID, project, topic)
+	return s.ns + ":dlq:" + enc(pluginID) + ":" + enc(project) + ":" + enc(topic)
 }
 func (s *Store) dlqCountKey() string { return s.ns + ":dlqcount" }
 
-// appendScript atomically assigns the next int64 id (INCR) and XADDs the entry with
-// the explicit id `<n>-0`, so ids are strictly monotonic and the stream order can
-// never diverge from the counter under concurrent Appends. KEYS: seq, log.
-// ARGV: subject.
+// enc percent-encodes every byte of a key component that is not in the safe set
+// [A-Za-z0-9._-], so the `:` key separator (and Redis glob/hash-tag metacharacters)
+// can NEVER appear in a component. This makes the (project, topic, pluginID) → key
+// mapping INJECTIVE: a component containing `:`/`|`/`{`/`}` cannot be confused with
+// the delimiter to collide two tenants' keys. `topic` is attacker-controlled (a
+// plugin's poll body) and project ids are free-form, so a raw-concatenation scheme
+// would be a cross-tenant break; encoding removes the ambiguity regardless of content.
+func enc(component string) string {
+	var b strings.Builder
+	for i := 0; i < len(component); i++ {
+		c := component[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '.' || c == '_' || c == '-' {
+			b.WriteByte(c)
+		} else {
+			const hex = "0123456789ABCDEF"
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&0x0f])
+		}
+	}
+	return b.String()
+}
+
+// appendScript atomically assigns the next GLOBAL int64 id (INCR on the single seq
+// key) and XADDs the entry to the per-(topic,project) log with the explicit id
+// `<n>-0`, so ids are globally unique AND strictly ascending within each stream,
+// and stream order can never diverge from the counter under concurrent Appends.
+// KEYS: global-seq, log. ARGV: subject.
 var appendScript = redis.NewScript(`
 local id = redis.call('INCR', KEYS[1])
 redis.call('XADD', KEYS[2], id .. '-0', 'subject', ARGV[1])
@@ -64,7 +102,7 @@ return id
 
 func (s *Store) Append(ctx context.Context, topic, projectID, subjectID string) (int64, error) {
 	id, err := appendScript.Run(ctx, s.rdb,
-		[]string{s.seqKey(topic, projectID), s.logKey(topic, projectID)}, subjectID).Int64()
+		[]string{s.seqKey(), s.logKey(topic, projectID)}, subjectID).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("redis append: %w", err)
 	}
@@ -72,15 +110,16 @@ func (s *Store) Append(ctx context.Context, topic, projectID, subjectID string) 
 }
 
 func (s *Store) LatestID(ctx context.Context, topic, projectID string) (int64, error) {
-	// The seq counter is the highest id appended (0 if never).
-	v, err := s.rdb.Get(ctx, s.seqKey(topic, projectID)).Int64()
-	if errors.Is(err, redis.Nil) {
-		return 0, nil
-	}
+	// Per-(topic,project) latest = the highest id in THIS topic's stream (the global
+	// counter is not per-topic). XREVRANGE + - COUNT 1 is the last entry, or 0.
+	msgs, err := s.rdb.XRevRangeN(ctx, s.logKey(topic, projectID), "+", "-", 1).Result()
 	if err != nil {
 		return 0, fmt.Errorf("redis latest id: %w", err)
 	}
-	return v, nil
+	if len(msgs) == 0 {
+		return 0, nil
+	}
+	return parseEntryID(msgs[0].ID)
 }
 
 func (s *Store) After(ctx context.Context, topic, projectID string, afterID int64, limit int) ([]bus.Delivered, error) {
@@ -172,7 +211,9 @@ func (s *Store) DLQLen(ctx context.Context) (int, error) {
 	return v, nil
 }
 
-// parseEntryID extracts the int64 id from a Stream entry id `<n>-<seq>`.
+// parseEntryID extracts the int64 id from a Stream entry id `<n>-<seq>`. This
+// backend writes every entry id as `<n>-0`, so a parse failure is a backend
+// invariant violation, not attacker-reachable input (invariant #12).
 func parseEntryID(streamID string) (int64, error) {
 	ms := streamID
 	if i := strings.IndexByte(streamID, '-'); i >= 0 {

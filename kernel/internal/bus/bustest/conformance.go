@@ -32,6 +32,59 @@ func RunConformance(t *testing.T, f Factory) {
 	t.Run("BacklogCapDeadLetters", func(t *testing.T) { backlogCapDeadLetters(t, f) })
 	t.Run("TenantAndTopicIsolation", func(t *testing.T) { tenantAndTopicIsolation(t, f) })
 	t.Run("MultiTopicPollAndMax", func(t *testing.T) { multiTopicPollAndMax(t, f) })
+	t.Run("GlobalIDUniqueness", func(t *testing.T) { globalIDUniqueness(t, f) })
+	t.Run("KeyInjectivity", func(t *testing.T) { keyInjectivity(t, f) })
+}
+
+// globalIDUniqueness: Delivered.ID is the at-least-once idempotency key the SDK
+// dedupes on, so it MUST be globally unique across topics — a subscriber to two
+// topics that dedupes on id alone must not silently drop events. (Caught the L4
+// per-topic-counter divergence: Postgres BIGSERIAL is global; the first Redis
+// backend restarted the id at 1 per topic, colliding ids across topics.)
+func globalIDUniqueness(t *testing.T, f Factory) {
+	b, _ := f(t, 1000)
+	ctx := context.Background()
+	pub(t, b, "t1", "a")
+	pub(t, b, "t2", "b")
+	pub(t, b, "t1", "c")
+	got, err := b.Poll(ctx, "acme/w", proj, []string{"t1", "t2"}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 across two topics, got %d", len(got))
+	}
+	seen := map[int64]bool{}
+	for _, d := range got {
+		if seen[d.ID] {
+			t.Fatalf("duplicate Delivered.ID %d across topics — the idempotency key must be globally unique", d.ID)
+		}
+		seen[d.ID] = true
+	}
+}
+
+// keyInjectivity: (project, topic) → storage must be injective under ADVERSARIAL
+// identifiers. `topic` is attacker-controlled (a plugin's poll body) and project
+// ids are free-form, so a raw `project|topic` concatenation would collide two
+// tenants (`acme` + `secret|audit` vs `acme|secret` + `audit`) — a cross-tenant
+// read/write break. Each backend must keep them isolated.
+func keyInjectivity(t *testing.T, f Factory) {
+	b, _ := f(t, 1000)
+	ctx := context.Background()
+	if err := b.Publish(ctx, "secret|audit", "acme", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Publish(ctx, "audit", "acme|secret", "y"); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := b.Poll(ctx, "acme/w", "acme", []string{"secret|audit"}, 100)
+	if len(a) != 1 || a[0].SubjectID != "x" {
+		t.Fatalf("key collision: project=acme topic=secret|audit leaked/lost: %+v", a)
+	}
+	c, _ := b.Poll(ctx, "acme/w", "acme|secret", []string{"audit"}, 100)
+	if len(c) != 1 || c[0].SubjectID != "y" {
+		t.Fatalf("key collision: project=acme|secret topic=audit leaked/lost: %+v", c)
+	}
 }
 
 // replayFromOffset is the H6 backlog-replay proof: a subscriber that was DOWN while

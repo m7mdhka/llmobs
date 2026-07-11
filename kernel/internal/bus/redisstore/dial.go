@@ -53,7 +53,10 @@ func Dial(ctx context.Context, cfg Config) (*redis.Client, error) {
 	case cfg.URL != "":
 		opt, err := redis.ParseURL(cfg.URL)
 		if err != nil {
-			return nil, fmt.Errorf("parse redis url: %w", err)
+			// Do NOT wrap the parse error: url.Parse's error echoes the full DSN,
+			// which carries the password inline (redis://:pass@host). Return a
+			// credential-free message instead.
+			return nil, fmt.Errorf("invalid EVENT_REDIS_URL (redacted): malformed redis DSN")
 		}
 		opt.MaxRetries = 5
 		opt.MinRetryBackoff = 8 * time.Millisecond

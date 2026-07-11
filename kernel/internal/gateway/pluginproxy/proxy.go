@@ -70,8 +70,12 @@ func (p *Proxy) Handler(prefix string) http.Handler {
 			unavailable(w, http.StatusForbidden, "no_project", id)
 			return
 		}
+		// DataPermsOnly: a plugin identity assertion MUST NOT carry a management scope
+		// (members:manage/org:manage/actions:execute) even before the downstream
+		// intersection — the assertion is handed to plugin code. owner/admin roles hold
+		// management scopes; strip them here so no plugin credential can ever carry one.
 		assertion, _, err := p.signer.MintIdentityAssertion(id, sess.User.Email, projectID,
-			"session:"+sess.User.Email, perm.RoleScopes(sess.User.Role), time.Now(), p.ttl)
+			"session:"+sess.User.Email, perm.DataPermsOnly(perm.RoleScopes(sess.User.Role)), time.Now(), p.ttl)
 		if err != nil {
 			unavailable(w, http.StatusInternalServerError, "assertion_mint_failed", id)
 			return

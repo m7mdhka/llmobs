@@ -16,8 +16,11 @@ package perm
 
 import "strings"
 
-// Canonical permissions (nouns about data). Additive: new permissions extend this
-// set; existing ones are never repurposed.
+// Canonical DATA permissions (resource:verb nouns about data). These are the SHARED
+// CURRENCY: a human role's data scopes and a plugin's manifest grant are the same
+// vocabulary, so the double-token intersection (role-scopes ∩ plugin-grant ∩ project)
+// operates on one set. Additive: new permissions extend this set; existing ones are
+// never repurposed.
 const (
 	TracesReadMetadata = "traces:read.metadata"
 	TracesReadPayloads = "traces:read.payloads"
@@ -28,12 +31,52 @@ const (
 	ScoresWrite        = "scores:write"
 )
 
+// MANAGEMENT permissions (Arc O / O1) gate control-plane administration — provisioning
+// members, org-level actions. They are RBAC-ONLY: a plugin token never carries one, so
+// they never enter the data intersection (a plugin can't administer the org). They gate
+// provisioning handlers directly (O3). Kept in the same scope set as data perms because a
+// role is one scope list; the two axes never collide because no data op requires a
+// management perm and — ENFORCED, not merely asserted — no plugin grant contains one
+// (IsManagementPerm rejects it at plugin-grant admission, and DataPermsOnly strips it from
+// any role scopes handed toward a plugin).
+const (
+	MembersManage  = "members:manage"  // invite / set-role / remove members (O3)
+	OrgManage      = "org:manage"      // owner-only org-level actions (delete org, transfer)
+	ActionsExecute = "actions:execute" // run action-type ops (jobs/evals) — reserved, gates future ops (#14540)
+)
+
+var managementScopes = map[string]bool{MembersManage: true, OrgManage: true, ActionsExecute: true}
+
+// IsManagementPerm reports whether a scope is a management (RBAC-only) permission. A
+// plugin grant MUST NOT contain one — the plugin-grant admission seam rejects it, so the
+// "a plugin never holds a management scope" invariant is enforced by construction (O1
+// added these scopes to owner/admin, so the guard must exist wherever a manifest grant is
+// loaded or role scopes are handed toward a plugin).
+func IsManagementPerm(s string) bool { return managementScopes[s] }
+
+// DataPermsOnly returns the scopes with all management (and capability-marker) scopes
+// removed — the set safe to hand toward a plugin credential. Belt-and-suspenders alongside
+// admission-time rejection: even if a role carries management scopes (owner/admin do), an
+// identity assertion or intersection handed to a plugin can never carry one.
+func DataPermsOnly(scopes []string) []string {
+	out := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		if IsManagementPerm(s) || IsCap(s) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 var all = []string{
 	TracesReadMetadata, TracesReadPayloads, TracesWrite, TracesDelete,
 	ScoresRead, ScoresReadPayloads, ScoresWrite,
 }
 
-// All returns the full canonical permission set (admin/full grant).
+// All returns the full canonical DATA permission set (the ceiling a data intersection can
+// grant). It does NOT include management perms — those are role-granted, never
+// intersected. `owner`/`admin` roles hold All() data plus their management perms.
 func All() []string { return append([]string(nil), all...) }
 
 // coarseExpand translates each coarse api-key/session verb UP into the canonical
@@ -76,14 +119,64 @@ var opRequires = map[string]string{
 // RequiredPermForOp returns the canonical permission an operation requires.
 func RequiredPermForOp(op string) string { return opRequires[op] }
 
-// RoleScopes returns a user role's canonical permissions. admin => the full set
-// (the seam where issue #21 RBAC defines finer roles); anything else is a
-// read-metadata viewer until RBAC lands. Derived, never a hardcoded verb list.
+// Roles (Arc O / O1). A user's authority in an org is one of these; the resolved role
+// (from org_memberships, server-derived) maps to a canonical scope set via RoleScopes.
+// The ladder is strict: viewer ⊂ member ⊂ admin ⊂ owner (each holds a superset).
+const (
+	RoleOwner  = "owner"  // full control incl. org-level (delete/transfer) — the org's first admin
+	RoleAdmin  = "admin"  // all data + manage members; not org-level
+	RoleMember = "member" // read all + write scores + run actions; no administration
+	RoleViewer = "viewer" // read metadata + read scores; no payloads, no write, no administration
+)
+
+// roleScopes is the static Role → Scope[] map (the banked #21 design). It is the ONE
+// place a role becomes permissions; there are no bare `role == "admin"` checks anywhere
+// else. A role absent from this map resolves to NO scopes — FAIL CLOSED: an unknown or
+// empty role (e.g. a user with no membership in the requested org) can do nothing, never
+// silently a viewer.
+var roleScopes = map[string][]string{
+	RoleOwner: append(All(), MembersManage, OrgManage, ActionsExecute),
+	RoleAdmin: append(All(), MembersManage, ActionsExecute),
+	RoleMember: {
+		TracesReadMetadata, TracesReadPayloads,
+		ScoresRead, ScoresReadPayloads, ScoresWrite,
+		ActionsExecute,
+	},
+	RoleViewer: {TracesReadMetadata, ScoresRead},
+}
+
+// RoleScopes returns a role's canonical permissions from the static map, or an empty set
+// for an unknown/empty role (fail closed). Derived, never a hardcoded verb list; the
+// same currency a plugin grant is expressed in, so the intersection is well-defined.
 func RoleScopes(role string) []string {
-	if role == "admin" {
-		return All()
+	s, ok := roleScopes[role]
+	if !ok {
+		return nil
 	}
-	return []string{TracesReadMetadata, ScoresRead}
+	return append([]string(nil), s...)
+}
+
+// ValidRole reports whether role is one of the defined roles. Provisioning (O3) rejects
+// any role not in this set; it is the allow-list for an assignable role.
+func ValidRole(role string) bool {
+	_, ok := roleScopes[role]
+	return ok
+}
+
+// Roles returns the defined roles, highest-privilege first (owner→viewer). Stable order
+// for UIs and the assignable-role list.
+func Roles() []string { return []string{RoleOwner, RoleAdmin, RoleMember, RoleViewer} }
+
+// roleRank orders roles by privilege for the "cannot assign a role above your own"
+// provisioning rule (O3). Higher = more privileged. An unknown role ranks -1 (below all).
+var roleRank = map[string]int{RoleViewer: 0, RoleMember: 1, RoleAdmin: 2, RoleOwner: 3}
+
+// RoleAtLeast reports whether role a is at least as privileged as role b (a ⊇ b in the
+// ladder). Used so a principal can only assign a role ≤ their own (no escalation).
+func RoleAtLeast(a, b string) bool {
+	ra, oka := roleRank[a]
+	rb, okb := roleRank[b]
+	return oka && okb && ra >= rb
 }
 
 // HasWriteAuthority reports whether a permission set carries ANY write scope —

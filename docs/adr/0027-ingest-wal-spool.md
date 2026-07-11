@@ -99,6 +99,26 @@ the event bus's DLQ. Transient persist failures (DB down) are governed by G2
 - **Ack-after-durable** — the SIGKILL window (loss #1) and the persist-error window
   (loss #2) are both closed: an acked record is on disk and replays until persisted.
 
+## Security — the WAL is a pre-redaction at-rest surface
+
+The spool sits BEFORE the pipeline's redaction stage (redaction runs on the worker,
+after Append), so the WAL stores **raw OTLP bodies (unredacted prompts/completions
+= PII) and the request bearer token**. This is inherent to replay — the record must
+reproduce the exact request. Consequences and mitigations:
+
+- WAL files are written **owner-only** (dir `0700`, segments/checkpoint `0600`).
+- The WAL directory MUST be treated with the **same protection as the database**
+  (disk encryption at rest, restricted host/volume access). A WAL leak exposes both
+  PII and valid bearer tokens (which would allow request replay-auth).
+- The WAL is **transient**: records are truncated after persist + checkpoint, so a
+  span's raw body normally lives in the WAL only until it is persisted. A GDPR
+  erasure targets the store; it does not scrub the WAL, but an erased span's WAL
+  record is virtually always already truncated (it was persisted long before the
+  erasure). The residual case — a not-yet-persisted span erased while still in the
+  WAL — replays, is suppressed by the store (D4, no resurrection), and is truncated
+  on the next checkpoint. Operators who need hard on-erase WAL scrubbing must shorten
+  the checkpoint interval / segment size.
+
 ## Consequences
 
 - New hot-path dependency: a local WAL write+fsync on Append (bounded, no network).

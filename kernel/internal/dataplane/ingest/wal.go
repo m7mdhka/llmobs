@@ -55,7 +55,7 @@ func openWAL(dir string, maxSeg int64) (*wal, error) {
 	if maxSeg <= 0 {
 		maxSeg = defaultMaxSeg
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("wal mkdir: %w", err)
 	}
 	w := &wal{dir: dir, maxSeg: maxSeg, nextSeq: 1}
@@ -110,7 +110,7 @@ func (w *wal) rotate() error {
 		_ = w.cur.Close()
 	}
 	name := fmt.Sprintf("%s%020d%s", segPrefix, w.nextSeq, segSuffix)
-	f, err := os.OpenFile(filepath.Join(w.dir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(filepath.Join(w.dir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("wal rotate: %w", err)
 	}
@@ -191,7 +191,7 @@ func (w *wal) writeCheckpoint(seq uint64) error {
 	binary.LittleEndian.PutUint64(buf[:8], seq)
 	binary.LittleEndian.PutUint32(buf[8:], crc32.Checksum(buf[:8], crcTable))
 	tmp := filepath.Join(w.dir, checkpointFile+".tmp")
-	if err := os.WriteFile(tmp, buf, 0o644); err != nil {
+	if err := os.WriteFile(tmp, buf, 0o600); err != nil {
 		return err
 	}
 	// Rename is atomic; a crash leaves either the old or the new checkpoint, never a

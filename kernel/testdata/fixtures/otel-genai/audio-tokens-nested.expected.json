@@ -1,0 +1,28 @@
+[
+  {
+    "attributes": {
+      "resource.service.name": "audio-svc"
+    },
+    "end_time": "2024-07-03T09:46:42Z",
+    "environment": "default",
+    "id": "d4d4d4d4d4d4d4d4",
+    "kind": "generation",
+    "model": "gpt-4o-audio-preview",
+    "name": "chat gpt-4o-audio (nested)",
+    "project_id": "proj_demo",
+    "provided_usage_details": {
+      "audio_input": 300,
+      "audio_output": 150,
+      "input": 500,
+      "output": 200,
+      "total": 700
+    },
+    "provider": "openai",
+    "raw_kind": "chat",
+    "start_time": "2024-07-03T09:46:40Z",
+    "status": {
+      "code": "unset"
+    },
+    "trace_id": "33333f3577b34da6a3ce929d0e0e4736"
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "attributes": {
+      "resource.service.name": "cache-svc"
+    },
+    "end_time": "2024-07-03T09:46:42Z",
+    "environment": "default",
+    "id": "e5e5e5e5e5e5e5e5",
+    "kind": "generation",
+    "model": "gpt-4o",
+    "name": "chat gpt-4o (cached)",
+    "project_id": "proj_demo",
+    "provided_usage_details": {
+      "cache_read": 800,
+      "input": 1000,
+      "output": 200,
+      "total": 1200
+    },
+    "provider": "openai",
+    "raw_kind": "chat",
+    "start_time": "2024-07-03T09:46:40Z",
+    "status": {
+      "code": "unset"
+    },
+    "trace_id": "44444f3577b34da6a3ce929d0e0e4736"
+  }
+]

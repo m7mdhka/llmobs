@@ -43,6 +43,14 @@ var usageAliases = []struct{ attr, bucket string }{
 	{"gen_ai.usage.input_cached_tokens", "cache_read"},
 	{"gen_ai.usage.cache_read_input_tokens", "cache_read"},
 	{"gen_ai.usage.cache_read.input_tokens", "cache_read"},
+	// OpenAI's REAL nested spellings for cached prompt tokens — Chat Completions
+	// (prompt_tokens_details.cached_tokens) and the Responses API
+	// (input_tokens_details.cached_tokens). Without these, a prompt-cached OpenAI span
+	// leaves its cached tokens in the raw bag → never reduced from `input` and never priced
+	// at the cheaper cache rate → billed at the FULL input text rate (a silent overcharge).
+	// Symmetric with the audio nested spellings below (#146, same class as #79).
+	{"gen_ai.usage.prompt_tokens_details.cached_tokens", "cache_read"},
+	{"gen_ai.usage.input_tokens_details.cached_tokens", "cache_read"},
 	{"gen_ai.usage.cache_creation_input_tokens", "cache_write"},
 	{"gen_ai.usage.input_cache_creation", "cache_write"},
 	{"gen_ai.usage.cache_creation.input_tokens", "cache_write"},

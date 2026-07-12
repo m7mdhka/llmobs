@@ -14,14 +14,14 @@ type memKV struct{ data map[string]json.RawMessage }
 
 func newMemKV() *memKV { return &memKV{data: map[string]json.RawMessage{}} }
 
-func (m *memKV) k(p, pr, key string) string { return p + "\x00" + pr + "\x00" + key }
+func (m *memKV) k(p, pr, u, key string) string { return p + "\x00" + pr + "\x00" + u + "\x00" + key }
 
-func (m *memKV) Get(_ context.Context, p, pr, key string) (json.RawMessage, bool, error) {
-	v, ok := m.data[m.k(p, pr, key)]
+func (m *memKV) Get(_ context.Context, p, pr, u, key string) (json.RawMessage, bool, error) {
+	v, ok := m.data[m.k(p, pr, u, key)]
 	return v, ok, nil
 }
-func (m *memKV) Set(_ context.Context, p, pr, key string, v json.RawMessage) error {
-	m.data[m.k(p, pr, key)] = v
+func (m *memKV) Set(_ context.Context, p, pr, u, key string, v json.RawMessage) error {
+	m.data[m.k(p, pr, u, key)] = v
 	return nil
 }
 
@@ -90,7 +90,7 @@ func TestSecretNeverRenderedBack(t *testing.T) {
 		t.Fatalf("secret plaintext leaked into the GET response: %s", blob)
 	}
 	// And it is stored ENCRYPTED — the raw kv document must not contain the plaintext.
-	rawDoc := kv.data[kv.k(plugin, project, settingsKey)]
+	rawDoc := kv.data[kv.k(plugin, project, "", settingsKey)]
 	if bytes.Contains(rawDoc, []byte(secretVal)) {
 		t.Fatalf("secret stored in the clear: %s", rawDoc)
 	}
@@ -230,7 +230,7 @@ func TestCustomModeOpaqueRoundTripAndSecret(t *testing.T) {
 		t.Fatal("secret must never be in custom-mode values")
 	}
 	// H4 at the storage layer: the raw KV bytes never contain the plaintext.
-	raw, _, _ := kv.Get(ctx, plugin, project, settingsKey)
+	raw, _, _ := kv.Get(ctx, plugin, project, "", settingsKey)
 	if bytes.Contains(raw, []byte(secretVal)) {
 		t.Fatalf("secret plaintext found in stored KV: %s", raw)
 	}

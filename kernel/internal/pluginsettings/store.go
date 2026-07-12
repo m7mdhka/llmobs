@@ -12,10 +12,12 @@ import (
 const settingsKey = "__settings__"
 
 // KV is the storage surface (interface-at-consumer): the plugin kv store scoped to
-// (plugin_id, project_id). The store never opens a DB itself.
+// (plugin_id, project_id, user_id). Settings are PROJECT-shared plugin config, so this store
+// always passes the project-scope sentinel (user_id "") — a plugin's settings are the same for
+// every user of the project (per-user state uses the kv primitive's user scope, O6).
 type KV interface {
-	Get(ctx context.Context, pluginID, projectID, key string) (json.RawMessage, bool, error)
-	Set(ctx context.Context, pluginID, projectID, key string, value json.RawMessage) error
+	Get(ctx context.Context, pluginID, projectID, userID, key string) (json.RawMessage, bool, error)
+	Set(ctx context.Context, pluginID, projectID, userID, key string, value json.RawMessage) error
 }
 
 // Box seals/opens secret values with the kernel master key (the same envelope used
@@ -188,11 +190,11 @@ func (s *Store) Set(ctx context.Context, m *Model, pluginID, projectID string, i
 	if len(out) > MaxValueBytes {
 		return &ValidationError{Field: "", Reason: fmt.Sprintf("settings document exceeds %d bytes", MaxValueBytes)}
 	}
-	return s.kv.Set(ctx, pluginID, projectID, settingsKey, out)
+	return s.kv.Set(ctx, pluginID, projectID, "", settingsKey, out)
 }
 
 func (s *Store) load(ctx context.Context, pluginID, projectID string) (stored, error) {
-	raw, found, err := s.kv.Get(ctx, pluginID, projectID, settingsKey)
+	raw, found, err := s.kv.Get(ctx, pluginID, projectID, "", settingsKey)
 	if err != nil {
 		return stored{}, fmt.Errorf("load settings: %w", err)
 	}

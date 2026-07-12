@@ -8,16 +8,18 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/gateway/pluginauth"
 )
 
-// KVStore is the storage surface the kv endpoints need (interface-at-consumer).
+// KVStore is the storage surface the kv endpoints need (interface-at-consumer). userID is the
+// per-user scope dimension (O6): "" = project scope (shared), a user identity = per-user scope.
 type KVStore interface {
-	Get(ctx context.Context, pluginID, projectID, key string) (json.RawMessage, bool, error)
-	Set(ctx context.Context, pluginID, projectID, key string, value json.RawMessage) error
-	Delete(ctx context.Context, pluginID, projectID, key string) error
-	List(ctx context.Context, pluginID, projectID, prefix string) ([]string, error)
+	Get(ctx context.Context, pluginID, projectID, userID, key string) (json.RawMessage, bool, error)
+	Set(ctx context.Context, pluginID, projectID, userID, key string, value json.RawMessage) error
+	Delete(ctx context.Context, pluginID, projectID, userID, key string) error
+	List(ctx context.Context, pluginID, projectID, userID, prefix string) ([]string, error)
 }
 
 // KV serves the `kv` primitive endpoints, gated on the kv capability.
@@ -58,6 +60,37 @@ type kvReq struct {
 	Key    string          `json:"key"`
 	Value  json.RawMessage `json:"value,omitempty"`
 	Prefix string          `json:"prefix,omitempty"`
+	// Scope is "project" (default — shared across the project's users) or "user" (per-user,
+	// isolated). The user IDENTITY is never taken from the body — only the scope choice is —
+	// so a plugin can select ITS user's private bucket but can never name another user's.
+	Scope string `json:"scope,omitempty"`
+}
+
+// reservedPrefix marks kernel-internal kv keys (the settings document lives at "__settings__").
+// The settings store shares the plugin_kv namespace at project scope, so the PUBLIC kv surface
+// reserves the "__" prefix: a plugin cannot read, overwrite, delete, or list its own settings
+// document through the raw kv primitive — closing that overlap at the one seam (defense in depth;
+// impact was already bounded to a plugin's own project with secrets sealed).
+const reservedPrefix = "__"
+
+func reservedKey(key string) bool { return strings.HasPrefix(key, reservedPrefix) }
+
+// scopeUserID resolves the storage user-scope from the request's scope choice + the VERIFIED
+// caller identity (O6/O2 lesson: resolve against the acting user, never a client field). "" =
+// project scope. "user" keys on the caller's Subject (the O1-resolved email); a user-less
+// credential (empty Subject) cannot use per-user scope.
+func scopeUserID(c pluginauth.Caller, scope string) (userID string, ok bool) {
+	switch scope {
+	case "", "project":
+		return "", true
+	case "user":
+		if c.Subject == "" {
+			return "", false
+		}
+		return strings.ToLower(c.Subject), true
+	default:
+		return "", false
+	}
 }
 
 func (h *KV) get(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
@@ -65,7 +98,16 @@ func (h *KV) get(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 	if !ok {
 		return
 	}
-	v, found, err := h.store.Get(r.Context(), c.PluginID, c.ProjectID, req.Key)
+	if reservedKey(req.Key) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "reserved key"})
+		return
+	}
+	uid, ok := scopeUserID(c, req.Scope)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid scope for this caller"})
+		return
+	}
+	v, found, err := h.store.Get(r.Context(), c.PluginID, c.ProjectID, uid, req.Key)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kv get failed"})
 		return
@@ -86,7 +128,16 @@ func (h *KV) set(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "key and value required"})
 		return
 	}
-	if err := h.store.Set(r.Context(), c.PluginID, c.ProjectID, req.Key, req.Value); err != nil {
+	if reservedKey(req.Key) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "reserved key"})
+		return
+	}
+	uid, ok := scopeUserID(c, req.Scope)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid scope for this caller"})
+		return
+	}
+	if err := h.store.Set(r.Context(), c.PluginID, c.ProjectID, uid, req.Key, req.Value); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kv set failed"})
 		return
 	}
@@ -98,7 +149,16 @@ func (h *KV) del(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 	if !ok {
 		return
 	}
-	if err := h.store.Delete(r.Context(), c.PluginID, c.ProjectID, req.Key); err != nil {
+	if reservedKey(req.Key) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "reserved key"})
+		return
+	}
+	uid, ok := scopeUserID(c, req.Scope)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid scope for this caller"})
+		return
+	}
+	if err := h.store.Delete(r.Context(), c.PluginID, c.ProjectID, uid, req.Key); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kv delete failed"})
 		return
 	}
@@ -110,15 +170,24 @@ func (h *KV) list(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 	if !ok {
 		return
 	}
-	keys, err := h.store.List(r.Context(), c.PluginID, c.ProjectID, req.Prefix)
+	uid, ok := scopeUserID(c, req.Scope)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid scope for this caller"})
+		return
+	}
+	keys, err := h.store.List(r.Context(), c.PluginID, c.ProjectID, uid, req.Prefix)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kv list failed"})
 		return
 	}
-	if keys == nil {
-		keys = []string{}
+	// Never surface kernel-internal keys (the settings doc) through the public kv surface.
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if !reservedKey(k) {
+			out = append(out, k)
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
+	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
 }
 
 func decode(w http.ResponseWriter, r *http.Request) (kvReq, bool) {

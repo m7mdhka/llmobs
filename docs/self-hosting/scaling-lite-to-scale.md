@@ -64,6 +64,29 @@ is 32 MiB; `0` disables the bound (not recommended).
 LLMOBS_QUERY_MAX_RESPONSE_BYTES=33554432   # 32 MiB (default); both profiles
 ```
 
+### Scale event bus (Redis/Valkey Streams)
+
+**Managed-cloud auth (AWS ElastiCache IAM / GCP Memorystore).** Beyond a static
+`LLMOBS_EVENT_REDIS_PASSWORD`, the bus supports an ACL/IAM **username** and a
+**rotating token** read from a file on every (re)connect — so a sidecar can refresh a
+short-lived credential (ElastiCache IAM tokens ~15 min) without restarting the kernel.
+The password file takes precedence over the static password. A credential rejection is
+classified **permanent** (it fails loud rather than retrying a doomed AUTH forever); a
+network blip stays transient/retriable.
+
+```
+LLMOBS_EVENT_REDIS_USERNAME=my-iam-user       # ACL/IAM user (optional)
+LLMOBS_EVENT_REDIS_PASSWORD_FILE=/var/run/redis/token  # rotating token; re-read each connect
+```
+
+**Durability + retention.** Run Valkey with AOF on and a **non-evicting** memory
+policy so the unconsumed Streams backlog is never silently lost or evicted — a full
+memory returns loud backpressure to the producer instead. The kernel bounds each
+stream to the delivery window (`LLMOBS_EVENT_BACKLOG_CAP`) via an approximate trim, so
+the log cannot grow without limit while the full deliverable window is always retained.
+The bundled `deploy/compose/scale.yaml` sets `--appendonly yes --appendfsync everysec
+--maxmemory-policy noeviction`; mirror it in any custom Valkey deployment.
+
 A store that is 0%, 50%, or 100% migrated is **equally correct to a reader**. That
 is the whole point: correctness never depends on the backfill having finished.
 

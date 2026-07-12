@@ -78,6 +78,13 @@ type Config struct {
 	EventRedisSentinelAddrs    []string `json:"event_redis_sentinel_addrs"`
 	EventRedisPassword         string   `json:"event_redis_password"`
 	EventRedisSentinelPassword string   `json:"event_redis_sentinel_password"`
+	// Managed-cloud Redis auth (#126). EventRedisUsername is the ACL/IAM user (AWS
+	// ElastiCache IAM user, GCP Memorystore ACL user). EventRedisPasswordFile, when set,
+	// is re-read on every (re)connect for the CURRENT rotating token, so an external
+	// sidecar can refresh short-lived credentials without a kernel restart; it takes
+	// precedence over the static EventRedisPassword.
+	EventRedisUsername     string `json:"event_redis_username"`
+	EventRedisPasswordFile string `json:"event_redis_password_file"`
 	// Scale dual-read (ADR-0026 RULING-MIG6): when ClickHouseURL is set, the kernel
 	// runs the PERMANENT dual-read layer — every read unifies Postgres-lite
 	// (historical) and ClickHouse-scale (new), and writes go to scale with
@@ -177,6 +184,8 @@ func LoadConfig() (Config, error) {
 	envStrList(brand.Env("EVENT_REDIS_SENTINEL_ADDRS"), &c.EventRedisSentinelAddrs)
 	envStr(brand.Env("EVENT_REDIS_PASSWORD"), &c.EventRedisPassword)
 	envStr(brand.Env("EVENT_REDIS_SENTINEL_PASSWORD"), &c.EventRedisSentinelPassword)
+	envStr(brand.Env("EVENT_REDIS_USERNAME"), &c.EventRedisUsername)
+	envStr(brand.Env("EVENT_REDIS_PASSWORD_FILE"), &c.EventRedisPasswordFile)
 	envStr(brand.Env("CLICKHOUSE_URL"), &c.ClickHouseURL)
 	envStr(brand.Env("CH_CLUSTER"), &c.CHCluster)
 	envStr(brand.Env("CH_MAX_EXECUTION_TIME"), &c.CHMaxExecutionTime)

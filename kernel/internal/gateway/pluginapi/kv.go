@@ -66,6 +66,15 @@ type kvReq struct {
 	Scope string `json:"scope,omitempty"`
 }
 
+// reservedPrefix marks kernel-internal kv keys (the settings document lives at "__settings__").
+// The settings store shares the plugin_kv namespace at project scope, so the PUBLIC kv surface
+// reserves the "__" prefix: a plugin cannot read, overwrite, delete, or list its own settings
+// document through the raw kv primitive — closing that overlap at the one seam (defense in depth;
+// impact was already bounded to a plugin's own project with secrets sealed).
+const reservedPrefix = "__"
+
+func reservedKey(key string) bool { return strings.HasPrefix(key, reservedPrefix) }
+
 // scopeUserID resolves the storage user-scope from the request's scope choice + the VERIFIED
 // caller identity (O6/O2 lesson: resolve against the acting user, never a client field). "" =
 // project scope. "user" keys on the caller's Subject (the O1-resolved email); a user-less
@@ -87,6 +96,10 @@ func scopeUserID(c pluginauth.Caller, scope string) (userID string, ok bool) {
 func (h *KV) get(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 	req, ok := decode(w, r)
 	if !ok {
+		return
+	}
+	if reservedKey(req.Key) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "reserved key"})
 		return
 	}
 	uid, ok := scopeUserID(c, req.Scope)
@@ -115,6 +128,10 @@ func (h *KV) set(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "key and value required"})
 		return
 	}
+	if reservedKey(req.Key) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "reserved key"})
+		return
+	}
 	uid, ok := scopeUserID(c, req.Scope)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid scope for this caller"})
@@ -130,6 +147,10 @@ func (h *KV) set(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 func (h *KV) del(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 	req, ok := decode(w, r)
 	if !ok {
+		return
+	}
+	if reservedKey(req.Key) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "reserved key"})
 		return
 	}
 	uid, ok := scopeUserID(c, req.Scope)
@@ -159,10 +180,14 @@ func (h *KV) list(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kv list failed"})
 		return
 	}
-	if keys == nil {
-		keys = []string{}
+	// Never surface kernel-internal keys (the settings doc) through the public kv surface.
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if !reservedKey(k) {
+			out = append(out, k)
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
+	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
 }
 
 func decode(w http.ResponseWriter, r *http.Request) (kvReq, bool) {

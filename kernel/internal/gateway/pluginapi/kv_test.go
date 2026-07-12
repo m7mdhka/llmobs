@@ -205,6 +205,29 @@ func TestKVUserScopeIsolation(t *testing.T) {
 	}
 }
 
+// TestKVReservedKeyOpaque: the settings namespace ("__"-prefixed keys) is not reachable via
+// the raw kv surface — a plugin can't read/write/delete or even see its own settings document
+// through kv (defense-in-depth for the shared plugin_kv namespace).
+func TestKVReservedKeyOpaque(t *testing.T) {
+	h, signer := setup(t)
+	svc, asr := tokens(t, signer, "acme/w", "projA")
+	for _, op := range []struct{ name, body string }{
+		{"get", `{"key":"__settings__"}`},
+		{"set", `{"key":"__settings__","value":{"x":1}}`},
+		{"delete", `{"key":"__x"}`},
+	} {
+		if rec := call(h, op.name, svc, asr, op.body); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s of a reserved key must be 403, got %d", op.name, rec.Code)
+		}
+	}
+	// A normal key still works, and a reserved key never appears in a list.
+	call(h, "set", svc, asr, `{"key":"normal","value":1}`)
+	rec := call(h, "list", svc, asr, `{"prefix":""}`)
+	if !strings.Contains(rec.Body.String(), "normal") || strings.Contains(rec.Body.String(), "__") {
+		t.Fatalf("list must show normal keys but never reserved ones, got %s", rec.Body.String())
+	}
+}
+
 func TestKVRequiresCapability(t *testing.T) {
 	h, signer := setup(t)
 	// A plugin without cap:kv (only cap:query) is forbidden.

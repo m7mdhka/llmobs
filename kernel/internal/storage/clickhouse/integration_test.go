@@ -564,6 +564,63 @@ func TestIntegrationSuppressedIdNotReadableEvenIfReinserted(t *testing.T) {
 	}
 }
 
+// TestIntegrationReadYourWritesSettingsValid is the #109 prove-the-negative achievable on
+// a single node: with the read-your-writes settings an operator opts into
+// (insert_quorum + select_sequential_consistency) applied to the connection, a
+// just-written span is IMMEDIATELY readable through the read paths — no transient 404.
+// The settings must be VALID (not error) so they can be safely enabled, and the
+// write→immediate-read contract must hold with them on. On this single node RYW holds
+// trivially; the settings are the mechanism that extends the same guarantee across
+// replicas behind a distributing LB (full multi-replica no-404 validation needs a
+// replicated cluster — a real deployment / the kind e2e).
+func TestIntegrationReadYourWritesSettingsValid(t *testing.T) {
+	dsn := os.Getenv("LLMOBS_CH_TEST_DSN")
+	if dsn == "" {
+		t.Skip("LLMOBS_CH_TEST_DSN unset — skipping read-your-writes integration test")
+	}
+	opts, err := ch.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	ApplyReadYourWrites(opts) // the #109 operator opt-in — must not break a valid connection
+	conn, err := ch.Open(opts)
+	if err != nil {
+		t.Fatalf("open with read-your-writes settings: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := conn.Ping(context.Background()); err != nil {
+		t.Fatalf("ping with read-your-writes settings: %v", err)
+	}
+	freshSchema(t, conn)
+	ctx := context.Background()
+	s := readyStore(t, conn)
+	start := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	ev := up(1, "rywspan", map[string]any{
+		"user_id": "u1", "kind": "generation", "name": "gen",
+		"start_time": start.Format(time.RFC3339Nano),
+	})
+	if err := s.PersistSpan(ctx, ev); err != nil {
+		t.Fatalf("persist with insert_quorum on: %v", err)
+	}
+	// IMMEDIATELY readable — the #109 no-transient-404 guarantee.
+	doc, err := s.GetSpan(ctx, "p", "rywspan")
+	if err != nil {
+		t.Fatalf("get with select_sequential_consistency on: %v", err)
+	}
+	if doc == nil {
+		t.Fatal("a just-written span was not immediately readable with read-your-writes settings on")
+	}
+	cs := compileCH(t, "spans")
+	rows, err := s.QuerySpans(ctx, cs.Where, cs.Args, cs.Order, cs.Limit)
+	if err != nil {
+		t.Fatalf("query with read-your-writes settings: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("just-written span not visible to QuerySpans with read-your-writes settings on")
+	}
+}
+
 func TestIntegrationPreflightPasses(t *testing.T) {
 	conn := dialCH(t)
 	// The test user (DEFAULT_ACCESS_MANAGEMENT) holds the full grant set, so the

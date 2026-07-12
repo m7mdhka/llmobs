@@ -188,7 +188,32 @@ func run() error {
 				ChunkSize: cfg.BackfillChunkSize, Budget: budget,
 			}, log)
 			go func() {
-				log.Info("lite→scale backfill started (background, resumable)")
+				// #90: single-flight across replicas. Without a guard, EVERY replica with
+				// BackfillOnBoot runs the backfill concurrently — racing the shared
+				// (ts,project_id,id) cursor and hammering ClickHouse with N× the load. A
+				// dedicated advisory-locked connection (the same pg_try_advisory_lock
+				// pattern the supervisor uses, a DISTINCT key) makes exactly one replica
+				// run it; the rest skip. A skipped replica loses nothing — dual-read already
+				// serves the data, so the backfill is pure housekeeping. The lock is held
+				// for the run's duration and released when it finishes.
+				const backfillLockKey int64 = 0x6c6c6d6f627366 // "llmobsf" — distinct from the supervisor lock
+				conn, err := pool.Acquire(rootCtx)
+				if err != nil {
+					log.Warn("backfill: cannot acquire leader connection; skipping this replica", "err", err.Error())
+					return
+				}
+				defer conn.Release()
+				var leader bool
+				if err := conn.QueryRow(rootCtx, "SELECT pg_try_advisory_lock($1)", backfillLockKey).Scan(&leader); err != nil {
+					log.Warn("backfill: leader election failed; skipping this replica", "err", err.Error())
+					return
+				}
+				if !leader {
+					log.Info("backfill: another replica holds the backfill lock; skipping (dual-read still serves the data)")
+					return
+				}
+				defer func() { _, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", backfillLockKey) }()
+				log.Info("lite→scale backfill started (background, resumable, single-flight leader)")
 				res, berr := runner.Run(rootCtx)
 				if berr != nil {
 					log.Error("lite→scale backfill stopped with error (resumable on next boot)", "err", berr.Error())
@@ -574,6 +599,13 @@ func buildScaleStore(ctx context.Context, cfg platform.Config, log *slog.Logger)
 	opts, err := ch.ParseDSN(cfg.ClickHouseURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing CLICKHOUSE_URL: %w", err)
+	}
+	// #109 read-after-write: OFF by default. Enable only for a multi-replica ClickHouse
+	// behind a distributing LB with a hard RYW requirement (accepts the quorum write cost).
+	// Single-node / sticky-endpoint deployments get RYW for free and should leave this off.
+	if cfg.CHReadYourWrites {
+		clickhouse.ApplyReadYourWrites(opts)
+		log.Info("ClickHouse read-your-writes enabled (insert_quorum=auto + select_sequential_consistency); writes wait for replica quorum")
 	}
 	conn, err := ch.Open(opts)
 	if err != nil {

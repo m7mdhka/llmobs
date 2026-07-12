@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"fmt"
+
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
 // QueryAggregation runs a compiled aggregation (QD-4) for one target and returns
@@ -37,8 +39,9 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	if groupBy != "" {
 		sql += " GROUP BY " + groupBy
 	}
-	// A bounded safety limit on group cardinality.
-	sql += " LIMIT 10000"
+	// Over-fetch ONE past the cap so the caller can DETECT truncation and flag it loudly
+	// (#108), rather than silently returning a truncated (wrong) aggregate.
+	sql += " LIMIT " + storage.AggOverfetchLimitSQL()
 
 	rows, done, err := s.queryRead(ctx, sql, args...)
 	if err != nil {

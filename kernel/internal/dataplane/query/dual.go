@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/dualstore"
 )
 
@@ -43,7 +44,30 @@ func (s *Server) aggRows(ctx context.Context, target string, doc map[string]any,
 		return s.dualAgg(ctx, target, doc, projectID)
 	}
 	groups, err := s.store.QueryAggregation(ctx, target, ca.Select, ca.Where, ca.GroupBy, ca.Args)
-	return groups, nil, err
+	if err != nil {
+		return nil, nil, err
+	}
+	groups, warnings := flagAggTruncation(groups, nil)
+	return groups, warnings, nil
+}
+
+// flagAggTruncation enforces the #108 no-silent-truncation rule. The adapters over-fetch
+// one past MaxAggregationGroups, so a result of cap+1 is PROVABLY truncated: trim it back
+// to the cap and emit a LOUD warning, so an incomplete aggregate is never returned as if
+// complete (a silent-wrong result the user trusts, and which corrupts the dual-read
+// merge). Returns the trimmed groups + any warning appended.
+func flagAggTruncation(groups []map[string]any, warnings []string) ([]map[string]any, []string) {
+	if len(groups) > storage.MaxAggregationGroups {
+		groups = groups[:storage.MaxAggregationGroups]
+		warnings = append(warnings, aggTruncationWarning())
+	}
+	return groups, warnings
+}
+
+func aggTruncationWarning() string {
+	return fmt.Sprintf(
+		"aggregation truncated at %d groups: the GROUP BY cardinality exceeds the cap, so these results are INCOMPLETE. Narrow the query (add filters or a coarser grouping) for a complete answer.",
+		storage.MaxAggregationGroups)
 }
 
 // dualRows runs a spans/scores/traces list query across both backends and merges.
@@ -139,16 +163,25 @@ func (s *Server) dualAgg(ctx context.Context, target string, doc map[string]any,
 	if err != nil {
 		return nil, nil, err
 	}
+	// #108: detect truncation on EITHER store BEFORE the merge. Merging a truncated set
+	// with a complete one silently corrupts the combined groups (a group present only in
+	// the truncated store's dropped tail looks single-store), so the truncation must be
+	// flagged loudly — never a silent wrong merge. Trim each to the cap and warn once.
+	var warnings []string
+	if len(liteRows) > storage.MaxAggregationGroups || len(scaleRows) > storage.MaxAggregationGroups {
+		warnings = append(warnings, aggTruncationWarning())
+	}
+	liteRows, _ = flagAggTruncation(liteRows, nil)
+	scaleRows, _ = flagAggTruncation(scaleRows, nil)
 	// Single-store passthrough is exact (no straddle → no approximation).
 	if len(liteRows) == 0 {
-		return scaleRows, nil, nil
+		return scaleRows, warnings, nil
 	}
 	if len(scaleRows) == 0 {
-		return liteRows, nil, nil
+		return liteRows, warnings, nil
 	}
 	spec := dualstore.AggSpec{GroupCols: pg.GroupAliases, Ops: aggOps(pg.AggMetas)}
 	merged, nonMergeable := dualstore.MergeAggregation(scaleRows, liteRows, spec)
-	var warnings []string
 	if len(nonMergeable) > 0 {
 		warnings = append(warnings, fmt.Sprintf(
 			"columns %v are approximate: a non-mergeable aggregate (avg/count_distinct/percentile) "+

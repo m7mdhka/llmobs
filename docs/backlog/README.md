@@ -79,19 +79,26 @@ These four apply to code that ships today. Recommended order:
 *Dependency: A1–A7 all depend on the enrich stage existing. The complete ordered
 rule+fixture set for that arc is in [§ Enrich-stage build spec](#enrich-stage-build-spec).*
 
-### Cluster B — Auth / RBAC / #21 (gates on the auth arc → issue #21, demand #41)
+### Cluster B — Auth / RBAC / #21 (**ARC O COMPLETE** — the core auth stack shipped in Apache-2.0)
+
+**Arc O (issue #21) is complete for the shipped scope: O1–O6 merged to develop.** Users +
+per-org membership + `resource:verb` RBAC (O1 #123), the per-project intersection seam
+(O2 #124), safe provisioning with the strictly-below cap (O3 #125), immediate revocation
+(O4 #128, closes #63), OIDC/SSO with verify-before-trust (O5 #131), and per-user state
+(O6 #132). **Tracked follow-ons (named, not gaps):** SAML (OIDC shipped first — B2/B3),
+SCIM (B4), agent-token identity tools (B8), MCP OAuth DCR (B9), token refresh-at-ratio (B7).
 
 | ID | Entry | Type | Effort | Sources | Issue |
 |---|---|---|---|---|---|
-| B1 | Real `resource:verb` RBAC + static role map (`perm.RoleScopes` binary→real; `query/server.go` fixed-admin → true intersection) | feature | L | issue-21 notes §6; round-01 auth | #21/#41 |
-| B2 | OIDC login minting the standard session | feature | L | issue-21 notes §6 | #21 |
-| B3 | SSO/domain data model (client secret separate, never-exported; per-domain enforcement as a record) | feature | M | issue-21 notes §6 (#14713) | #21 |
-| B4 | SCIM under the one-shared-guard rule (authz at handler entry before any I/O) | feature | M | issue-21 notes (#14448) | #21 |
-| B5 | Server-resolved subject == client-supplied identity (audit integrity) | enforce-pinned-rule | S | issue-21 notes (#14790) | #21 |
+| ~~B1~~ | ~~Real `resource:verb` RBAC + static role map~~ **RESOLVED — Arc O / O1+O2 (PR #123, #124).** `perm.RoleScopes` is a real per-role map; per-project-per-org resolution at the ONE `query.auth` intersection seam. ADR-0031/0032. | feature | L | issue-21 notes §6 | #21 ✅ |
+| ~~B2~~ | ~~OIDC login minting the standard session~~ **RESOLVED — Arc O / O5 (PR #131).** Auth-code flow, verify-before-trust (sig/iss/aud/exp/nonce/state), group→role fail-closed, JIT through the O3 discipline. ADR-0034. (SAML deferred — a named follow-on.) | feature | L | issue-21 notes §6 | #21 ✅ |
+| ~~B3~~ | ~~SSO/domain data model (client secret separate, never-exported)~~ **RESOLVED — Arc O / O5 (PR #131).** Per-org `sso_providers`; client secret secretbox-sealed, never returned; single-login-org + identity-ownership guards. | feature | M | issue-21 notes §6 (#14713) | #21 ✅ |
+| B4 | SCIM under the one-shared-guard rule (authz at handler entry before any I/O) — **tracked follow-on** (provisioning gates + the shared-guard rule are in place from O3). | feature | M | issue-21 notes (#14448) | #21 |
+| ~~B5~~ | ~~Server-resolved subject == client-supplied identity (audit integrity)~~ **RESOLVED — Arc O / O3 (PR #125).** Every provisioning + auth path resolves the actor from the server session/assertion, never a client-supplied id. | enforce-pinned-rule | S | issue-21 notes (#14790) | #21 ✅ |
 | ~~B6~~ | ~~**Plugin-token revocation seam** (per-plugin/`jti` denylist in verify path) — LIVE CODE gap, gates pilot→prod~~ **RESOLVED — Arc O / O4, PR #128 (`6b0b631`).** Revocation epoch store checked inside `plugintoken.Signer.Verify*` (the one chokepoint); per-user/plugin/`jti` denial with `revoked_at >= issued_at` (still-within-TTL denied); `RevokeUser` cascade; one supervisor disable seam. ADR-0033. | feature | M | ADR-0025 R3; ADR-0033; **#63** | #63 ✅ |
 | B8 | Agent-callable identity tools privileged + scope-gated; H3 intersection on agent tokens | enforce-pinned-rule | S | ADR-0025 R5 | #21 |
 | B9 | MCP OAuth dynamic client registration (RFC 7591) for agent/plugin surfaces | feature | M | round-02 §5 (#7093); issue-21 §7 | #21 |
-| B10 | Group-mappable workspace + per-user project/dataset isolation | feature | M | round-02 §5 (#3327); issue-21 §7 | #21 |
+| ~~B10~~ | ~~Group-mappable workspace + per-user project/dataset isolation~~ **PARTLY RESOLVED — Arc O / O6 (PR #132).** Per-user state isolation shipped: the `kv` primitive gains a user scope keyed on the O1-resolved identity (one user's per-user state is unreadable/unwritable by another); ADR-0035. Group→role mapping shipped in O5 (SSO). The broader group-mappable multi-workspace model remains a follow-on. (This is the "per-user state" the Arc-N audit tracked as #69 — an audit label, not GH issue #69, which is the unrelated D1 compose-creds item.) | feature | M | round-02 §5 (#3327); issue-21 §7 | #21 ◑ |
 
 ### Cluster C — Live-surface verify (the non-P0 remainder)
 

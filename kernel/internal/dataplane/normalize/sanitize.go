@@ -37,6 +37,58 @@ func SanitizeAttributeKeys(attrs map[string]any) map[string]any {
 	return attrs
 }
 
+// SanitizeNullBytes strips NUL (U+0000) from every string VALUE in the canonical span,
+// recursively (attribute values, nested maps/slices in the bag, and promoted string fields
+// like input/output/name). PostgreSQL cannot store a NUL in a text or JSONB column (error
+// 22P05), so a span carrying a NUL in ANY value fails the lite INSERT and is dropped — while
+// the identical span lands on ClickHouse (scale), a SILENT lite-vs-scale divergence and a lost
+// span (#127). Stripping in the ONE shared normalize stage keeps the span AND makes both
+// profiles byte-identical. NUL is the ONLY character Postgres rejects; other control chars
+// (tab, newline) are storable and legitimate in opaque payloads, so they are left intact — we
+// don't corrupt data beyond the one character that cannot be stored at all. The count of
+// affected strings is stamped as a dq signal. Mutates and returns out.
+func SanitizeNullBytes(out map[string]any) map[string]any {
+	if out == nil {
+		return out
+	}
+	if _, n := stripNulls(out); n > 0 {
+		out["llmobs.dq.sanitized_null_bytes"] = n
+	}
+	return out
+}
+
+// stripNulls removes NUL from strings recursively, mutating maps/slices in place. Returns the
+// (possibly replaced) value and the count of strings from which a NUL was removed.
+func stripNulls(v any) (any, int) {
+	switch t := v.(type) {
+	case string:
+		if strings.IndexByte(t, 0) >= 0 {
+			return strings.ReplaceAll(t, "\x00", ""), 1
+		}
+		return t, 0
+	case map[string]any:
+		n := 0
+		for k, val := range t {
+			if cleaned, c := stripNulls(val); c > 0 {
+				t[k] = cleaned
+				n += c
+			}
+		}
+		return t, n
+	case []any:
+		n := 0
+		for i, val := range t {
+			if cleaned, c := stripNulls(val); c > 0 {
+				t[i] = cleaned
+				n += c
+			}
+		}
+		return t, n
+	default:
+		return v, 0
+	}
+}
+
 func hasControlChar(s string) bool {
 	for _, r := range s {
 		if r <= 0x1F || r == 0x7F {

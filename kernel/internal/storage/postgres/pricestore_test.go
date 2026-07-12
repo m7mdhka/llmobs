@@ -292,3 +292,72 @@ func mustTime(t *testing.T, s string) time.Time {
 	}
 	return tt
 }
+
+// TestResolveDateSuffixFallback is the #102 prove-the-negative: a dated model snapshot prices
+// against its base entry instead of silently deriving NO cost — across ISO, compact, and valid
+// MMDD forms — while a 4-digit run that is NOT a real date does NOT false-match, and the exact
+// base still resolves.
+func TestResolveDateSuffixFallback(t *testing.T) {
+	s, _ := setupPrices(t)
+	ctx := context.Background()
+	at := mustTime(t, "2026-06-01T00:00:00Z")
+
+	if _, err := s.Upsert(ctx, pricing.Entry{
+		Provider: "openai", Model: "gpt-4o", EffectiveFrom: "2026-01-01T00:00:00Z",
+		Rates: map[string]pricing.Rate{"input": {PerToken: 0.0000025}},
+	}, "session:admin@x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Upsert(ctx, pricing.Entry{
+		Provider: "openai", Model: "gpt-4", EffectiveFrom: "2026-01-01T00:00:00Z",
+		Rates: map[string]pricing.Rate{"input": {PerToken: 0.00003}},
+	}, "session:admin@x"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Dated snapshots resolve to the base.
+	for _, dated := range []string{"gpt-4o-2024-05-13", "gpt-4o-20240513"} {
+		if e, _ := s.Resolve(ctx, "openai", dated, at); e == nil || e.Model != "gpt-4o" {
+			t.Fatalf("%s must price against gpt-4o, got %v", dated, e)
+		}
+	}
+	// Valid MMDD snapshot (OpenAI style) resolves to base.
+	if e, _ := s.Resolve(ctx, "openai", "gpt-4-0613", at); e == nil || e.Model != "gpt-4" {
+		t.Fatalf("gpt-4-0613 must price against gpt-4, got %v", e)
+	}
+	// Exact base still resolves.
+	if e, _ := s.Resolve(ctx, "openai", "gpt-4o", at); e == nil {
+		t.Fatal("exact base must resolve")
+	}
+	// A trailing 4-digit run that is NOT a valid month/day must NOT be stripped → no false match.
+	if e, _ := s.Resolve(ctx, "openai", "gpt-4o-1234", at); e != nil {
+		t.Fatalf("'-1234' is not a date; must not false-match a base, got %v", e)
+	}
+	// A base that doesn't exist → still nil (date-strip doesn't fabricate a price).
+	if e, _ := s.Resolve(ctx, "openai", "o1-mini-2024-09-12", at); e != nil {
+		t.Fatalf("no base entry → must stay nil, got %v", e)
+	}
+}
+
+// TestStripDateSuffix unit-covers the conservative date detection directly.
+func TestStripDateSuffix(t *testing.T) {
+	cases := []struct {
+		in, base string
+		ok       bool
+	}{
+		{"gpt-4o-2024-05-13", "gpt-4o", true},
+		{"claude-3-5-sonnet-20241022", "claude-3-5-sonnet", true},
+		{"gpt-4-0613", "gpt-4", true},   // valid MMDD
+		{"gpt-3.5-turbo-0125", "gpt-3.5-turbo", true},
+		{"gpt-4o-1234", "gpt-4o-1234", false}, // month 12 day 34 invalid
+		{"gpt-4o-9999", "gpt-4o-9999", false}, // invalid
+		{"gpt-4o", "gpt-4o", false},           // no suffix
+		{"text-embedding-3", "text-embedding-3", false}, // single digit, not a date
+	}
+	for _, c := range cases {
+		base, ok := stripDateSuffix(c.in)
+		if base != c.base || ok != c.ok {
+			t.Errorf("stripDateSuffix(%q) = (%q,%v), want (%q,%v)", c.in, base, ok, c.base, c.ok)
+		}
+	}
+}

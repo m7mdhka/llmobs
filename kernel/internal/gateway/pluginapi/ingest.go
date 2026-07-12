@@ -59,9 +59,16 @@ func (h *Ingest) traces(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]any{"error": err.Error()})
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxIngestBytes))
+	// Read one byte past the cap so an over-cap body is REJECTED (413), never silently
+	// truncated then partially accepted (#97) — a compat plugin pushing a big batch must get
+	// an honest "too large", not a partial ingest that looks like success.
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxIngestBytes+1))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "read error"})
+		return
+	}
+	if len(body) > maxIngestBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "request body exceeds the ingest size cap"})
 		return
 	}
 	ing := &pipeline.Ingestion{

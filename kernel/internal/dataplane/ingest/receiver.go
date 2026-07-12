@@ -210,10 +210,16 @@ func decodeBody(req *http.Request) ([]byte, int) {
 		}
 		return body, http.StatusOK
 	}
-	// Non-gzip path: unchanged here (its silent-truncation cap is fixed under #97).
-	body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes))
+	// Non-gzip path: read one byte past the cap so an over-cap body is DETECTED and rejected
+	// (413), never silently truncated then acked 2xx (#97). Silent truncation is data loss
+	// disguised as success — the client believes its whole batch landed. 413 is the honest
+	// signal to split the batch.
+	body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes+1))
 	if err != nil {
 		return nil, http.StatusBadRequest
+	}
+	if len(body) > maxBodyBytes {
+		return nil, http.StatusRequestEntityTooLarge
 	}
 	return body, http.StatusOK
 }

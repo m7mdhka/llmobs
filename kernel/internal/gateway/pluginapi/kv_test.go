@@ -24,35 +24,35 @@ type fakeKV struct {
 	m  map[string]json.RawMessage
 }
 
-func newFakeKV() *fakeKV        { return &fakeKV{m: map[string]json.RawMessage{}} }
-func fk(p, pr, k string) string { return p + "\x00" + pr + "\x00" + k }
+func newFakeKV() *fakeKV           { return &fakeKV{m: map[string]json.RawMessage{}} }
+func fk(p, pr, u, k string) string { return p + "\x00" + pr + "\x00" + u + "\x00" + k }
 
-func (f *fakeKV) Get(_ context.Context, p, pr, k string) (json.RawMessage, bool, error) {
+func (f *fakeKV) Get(_ context.Context, p, pr, u, k string) (json.RawMessage, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	v, ok := f.m[fk(p, pr, k)]
+	v, ok := f.m[fk(p, pr, u, k)]
 	return v, ok, nil
 }
-func (f *fakeKV) Set(_ context.Context, p, pr, k string, v json.RawMessage) error {
+func (f *fakeKV) Set(_ context.Context, p, pr, u, k string, v json.RawMessage) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.m[fk(p, pr, k)] = v
+	f.m[fk(p, pr, u, k)] = v
 	return nil
 }
-func (f *fakeKV) Delete(_ context.Context, p, pr, k string) error {
+func (f *fakeKV) Delete(_ context.Context, p, pr, u, k string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.m, fk(p, pr, k))
+	delete(f.m, fk(p, pr, u, k))
 	return nil
 }
-func (f *fakeKV) List(_ context.Context, p, pr, prefix string) ([]string, error) {
+func (f *fakeKV) List(_ context.Context, p, pr, u, prefix string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []string
 	for k := range f.m {
-		parts := strings.SplitN(k, "\x00", 3)
-		if parts[0] == p && parts[1] == pr && strings.HasPrefix(parts[2], prefix) {
-			out = append(out, parts[2])
+		parts := strings.SplitN(k, "\x00", 4)
+		if parts[0] == p && parts[1] == pr && parts[2] == u && strings.HasPrefix(parts[3], prefix) {
+			out = append(out, parts[3])
 		}
 	}
 	return out, nil
@@ -140,6 +140,68 @@ func TestKVIsolation(t *testing.T) {
 	// The owner still reads its own value.
 	if rec := call(h, "get", aSvc, aAsr, `{"key":"k"}`); rec.Code != http.StatusOK {
 		t.Fatalf("owner read should be 200, got %d", rec.Code)
+	}
+}
+
+// tokensSub is tokens() but with an explicit assertion subject (the acting user), so the
+// per-user scope tests can act as different users.
+func tokensSub(t *testing.T, signer *plugintoken.Signer, pluginID, projectID, subject string) (svc, asr string) {
+	t.Helper()
+	now := time.Now()
+	svc, _, err := signer.MintServiceToken(pluginID, []string{perm.CapMarker("kv")}, now, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asr, _, err = signer.MintIdentityAssertion(pluginID, subject, projectID, "session:"+subject, perm.All(), now, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return svc, asr
+}
+
+// TestKVUserScopeIsolation is the O6 prove-the-negative: within the SAME plugin+project, one
+// user's per-user (scope="user") state is invisible and unwritable to another user — because
+// the store keys on the caller's VERIFIED subject, never a client-supplied field. Project scope
+// stays shared. A user-less credential cannot use per-user scope.
+func TestKVUserScopeIsolation(t *testing.T) {
+	h, signer := setup(t)
+	aSvc, aAsr := tokensSub(t, signer, "acme/w", "projA", "alice@x")
+	bSvc, bAsr := tokensSub(t, signer, "acme/w", "projA", "bob@x")
+
+	// Alice writes her per-user value.
+	if rec := call(h, "set", aSvc, aAsr, `{"scope":"user","key":"prefs","value":{"theme":"dark"}}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("alice user-set: %d %s", rec.Code, rec.Body.String())
+	}
+	// Bob CANNOT read Alice's per-user value (same plugin, same project, same key).
+	if rec := call(h, "get", bSvc, bAsr, `{"scope":"user","key":"prefs"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("bob must NOT read alice's per-user state, got %d %s", rec.Code, rec.Body.String())
+	}
+	// Bob writing "the same key" writes HIS OWN bucket — it does not overwrite Alice's.
+	if rec := call(h, "set", bSvc, bAsr, `{"scope":"user","key":"prefs","value":{"theme":"light"}}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("bob user-set: %d", rec.Code)
+	}
+	rec := call(h, "get", aSvc, aAsr, `{"scope":"user","key":"prefs"}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "dark") {
+		t.Fatalf("alice must still read HER value (dark), got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Per-user state is a different bucket from project state: a user-scoped key is not visible
+	// at project scope.
+	if rec := call(h, "get", aSvc, aAsr, `{"scope":"project","key":"prefs"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("alice's user-scoped key must not appear at project scope, got %d", rec.Code)
+	}
+	// Project scope IS shared: Alice writes project-scoped, Bob reads it.
+	if rec := call(h, "set", aSvc, aAsr, `{"scope":"project","key":"shared","value":1}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("project set: %d", rec.Code)
+	}
+	if rec := call(h, "get", bSvc, bAsr, `{"scope":"project","key":"shared"}`); rec.Code != http.StatusOK {
+		t.Fatalf("project scope must be shared across users, got %d", rec.Code)
+	}
+
+	// List is scoped too: Alice's user-scope list shows only her keys, not Bob's or project's.
+	rec = call(h, "list", aSvc, aAsr, `{"scope":"user","prefix":""}`)
+	if !strings.Contains(rec.Body.String(), "prefs") || strings.Contains(rec.Body.String(), "shared") {
+		t.Fatalf("alice user-list must show her keys only, got %s", rec.Body.String())
 	}
 }
 

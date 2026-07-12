@@ -26,6 +26,12 @@ type Caller struct {
 	PluginID  string
 	ProjectID string
 	Actor     string
+	// Subject is the O1-resolved acting USER (the verified assertion Sub — the user's email),
+	// stable across the backend (session:) and frontend (frontend:) paths for the same user.
+	// It is the ONLY basis for per-user scoping (O6): a per-user store keys on this, never on a
+	// client-supplied field, so one user's per-user state is unreachable by another. Empty for a
+	// user-less credential (a bare service token / system job).
+	Subject string
 }
 
 // Authorizer verifies plugin double tokens against the kernel signer.
@@ -67,7 +73,7 @@ func (a *Authorizer) Require(r *http.Request, capability string) (Caller, int, e
 	if !perm.Has(caps, perm.CapMarker(capability)) {
 		return Caller{}, http.StatusForbidden, fmt.Errorf("plugin lacks capability %q", capability)
 	}
-	return Caller{PluginID: stc.PluginID, ProjectID: ac.ProjectID, Actor: ac.Actor}, http.StatusOK, nil
+	return Caller{PluginID: stc.PluginID, ProjectID: ac.ProjectID, Actor: ac.Actor, Subject: ac.Sub}, http.StatusOK, nil
 }
 
 // RequireFrontend authorizes a plugin FRONTEND call (J2) using the J1 frontend
@@ -93,7 +99,7 @@ func (a *Authorizer) RequireFrontend(r *http.Request) (Caller, int, error) {
 	if !ok {
 		return Caller{}, http.StatusUnauthorized, errors.New("frontend token has no plugin audience")
 	}
-	return Caller{PluginID: pluginID, ProjectID: ac.ProjectID, Actor: ac.Actor}, http.StatusOK, nil
+	return Caller{PluginID: pluginID, ProjectID: ac.ProjectID, Actor: ac.Actor, Subject: ac.Sub}, http.StatusOK, nil
 }
 
 // RequirePluginToken verifies the SERVICE TOKEN ALONE (no user assertion) and the

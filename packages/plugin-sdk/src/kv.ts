@@ -2,9 +2,17 @@
 // BACKEND primitive: calls carry the plugin's double token (service token +
 // forwarded identity assertion), so the kernel scopes every operation to
 // (plugin_id, project_id) and gates on the kv capability. A plugin never touches
-// the database. (A frontend-direct path — session-scoped plugin identity — needs
-// shell-minted frontend assertions and is a tracked follow-up.)
+// the database.
+//
+// Scope (Arc O / O6): each call is "project" (default — shared across the project's
+// users) or "user" (per-user, isolated). For USER scope the kernel keys on the
+// caller's server-resolved identity (from the verified assertion) — never a value the
+// plugin supplies — so a plugin can store per-user config (dashboard prefs, saved
+// views) that one user cannot read or overwrite for another, even in the same project.
 import { SdkError } from "./client.js";
+
+/** "project" = shared across the project's users; "user" = per-user, isolated. */
+export type KvScope = "project" | "user";
 
 export interface KvConfig {
   /** Kernel base URL. */
@@ -14,10 +22,15 @@ export interface KvConfig {
   fetchImpl?: typeof fetch;
 }
 
+export interface KvOpts {
+  /** Storage scope; defaults to "project". */
+  scope?: KvScope;
+}
+
 export class KvClient {
   constructor(private readonly cfg: KvConfig) {}
 
-  private async call<T>(op: string, body: unknown): Promise<Response> {
+  private async call(op: string, body: unknown): Promise<Response> {
     const f = this.cfg.fetchImpl ?? fetch;
     return f(`${this.cfg.baseUrl}/v1alpha1/plugin/kv/${op}`, {
       method: "POST",
@@ -27,28 +40,28 @@ export class KvClient {
   }
 
   /** Get a value, or undefined if the key is absent. */
-  async get<T = unknown>(key: string): Promise<T | undefined> {
-    const res = await this.call("get", { key });
+  async get<T = unknown>(key: string, opts?: KvOpts): Promise<T | undefined> {
+    const res = await this.call("get", { key, scope: opts?.scope });
     if (res.status === 404) return undefined;
     if (!res.ok) throw await sdkErr(res);
     return (await res.json()).value as T;
   }
 
   /** Set a value (JSON-serializable). */
-  async set(key: string, value: unknown): Promise<void> {
-    const res = await this.call("set", { key, value });
+  async set(key: string, value: unknown, opts?: KvOpts): Promise<void> {
+    const res = await this.call("set", { key, value, scope: opts?.scope });
     if (!res.ok && res.status !== 204) throw await sdkErr(res);
   }
 
   /** Delete a key (no-op if absent). */
-  async delete(key: string): Promise<void> {
-    const res = await this.call("delete", { key });
+  async delete(key: string, opts?: KvOpts): Promise<void> {
+    const res = await this.call("delete", { key, scope: opts?.scope });
     if (!res.ok && res.status !== 204) throw await sdkErr(res);
   }
 
   /** List keys with an optional prefix. */
-  async list(prefix = ""): Promise<string[]> {
-    const res = await this.call("list", { prefix });
+  async list(prefix = "", opts?: KvOpts): Promise<string[]> {
+    const res = await this.call("list", { prefix, scope: opts?.scope });
     if (!res.ok) throw await sdkErr(res);
     return (await res.json()).keys as string[];
   }

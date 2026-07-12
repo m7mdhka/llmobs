@@ -23,7 +23,7 @@ export type { QueryResponse, TraceTree, ClientConfig, QueryInput, ScoreInput, Se
 
 // Data primitive: `kv` (per-plugin, tenant-scoped key/value; backend double-token).
 export { KvClient } from "./kv.js";
-export type { KvConfig } from "./kv.js";
+export type { KvConfig, KvOpts, KvScope } from "./kv.js";
 
 // Data primitive: `secrets` (per-plugin encrypted store; backend double-token).
 export { SecretsClient } from "./secrets.js";

@@ -127,3 +127,14 @@ func TestIngestRequiresServiceToken(t *testing.T) {
 		t.Fatalf("missing service token must be 401, got %d", rec.Code)
 	}
 }
+
+// TestIngestOverCapRejected413 is the #97 fix on the compat-plugin ingest path: an over-cap
+// body is rejected 413, never silently truncated then partially accepted.
+func TestIngestOverCapRejected413(t *testing.T) {
+	h, _, signer := ingestSetup(t)
+	svc := ingToken(t, signer, "acme/w")
+	big := strings.Repeat("x", maxIngestBytes+1)
+	if rec := postIngest(h, svc, big); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("over-cap plugin ingest must be 413, got %d %s", rec.Code, rec.Body.String())
+	}
+}

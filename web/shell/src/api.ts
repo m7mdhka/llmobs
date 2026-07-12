@@ -51,6 +51,32 @@ export async function login(email: string, password: string): Promise<Session> {
   return { user: data.user, csrfToken: data.csrf_token };
 }
 
+export interface SSOProvider {
+  org_id: string;
+  name: string;
+  issuer: string;
+}
+
+// ssoProviders lists the orgs offering SSO login (unauthenticated). The login page renders a
+// "Sign in with SSO" button per provider; clicking it navigates to the kernel start endpoint,
+// which redirects to the external IdP. SSO ships in the OSS core — never plan-gated.
+export async function ssoProviders(): Promise<SSOProvider[]> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/sso/providers`, { credentials: "same-origin" });
+    if (!res.ok) return [];
+    const data = await json<{ providers: SSOProvider[] }>(res);
+    return data.providers ?? [];
+  } catch {
+    return [];
+  }
+}
+
+// ssoStartUrl is a top-level navigation (not fetch) so the browser follows the IdP redirect and
+// carries the state cookie back on the callback.
+export function ssoStartUrl(orgId: string): string {
+  return `${API_BASE}/auth/sso/${encodeURIComponent(orgId)}/start`;
+}
+
 export async function me(): Promise<Session | null> {
   const res = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
   if (res.status === 401) return null;

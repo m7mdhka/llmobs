@@ -63,6 +63,12 @@ func ResolveSession(ctx context.Context, pool *pgxpool.Pool, token string) (Sess
 	// users.role, and never a client-supplied claim. A user with no membership resolves to
 	// role "" → perm.RoleScopes returns no scopes (fail closed). O2 wires per-project-org
 	// resolution; O1 resolves the default org here (OrgForProject/RoleInOrg exist for it).
+	//
+	// COUPLING (O5): the org this resolves authority from (the earliest project's org) MUST stay
+	// equal to controlplane.DefaultOrgID — SSO's single-login-org guard (authhttp isLoginOrg)
+	// relies on it, so an SSO login can only provision into the org whose authority a session
+	// resolves here. If this ever becomes org-scoped (multi-org login), revisit the SSO guard in
+	// lockstep or the cross-org escalation reopens.
 	err := pool.QueryRow(ctx,
 		`SELECT s.csrf_token, s.expires_at, u.id, u.email, COALESCE(m.role, '')
 		   FROM sessions s

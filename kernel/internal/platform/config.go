@@ -29,6 +29,8 @@ type Config struct {
 	QueryMaxWindow     string `json:"query_max_window"`     // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
 	QueryStmtTimeout   string `json:"query_stmt_timeout"`   // server-side statement_timeout for DSL reads; e.g. "30s"
 	CookieSecure       bool   `json:"cookie_secure"`        // set Secure on session cookies
+	PublicURL          string `json:"public_url"`           // external origin for OIDC redirect_uri (O5); empty => derive from request Host
+	SecretboxKey       string `json:"secretbox_key"`        // base64 32-byte key sealing SSO client secrets (O5); empty => ephemeral (config lost on restart)
 	WebUIDir           string `json:"webui_dir"`            // dir of the built shell; empty => placeholder
 	PluginDir          string `json:"plugin_dir"`           // dir of dev-mode plugins; empty => none
 	DevPluginRemotes   string `json:"dev_plugin_remotes"`   // J3 `make dev`: "id=url,id=url" — advertise live dev-server remoteEntry URLs; empty in prod
@@ -180,6 +182,8 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("BACKFILL_BUDGET"), &c.BackfillBudget)
 	envBool(brand.Env("MIGRATE_ON_BOOT"), &c.MigrateOnBoot)
 	envBool(brand.Env("COOKIE_SECURE"), &c.CookieSecure)
+	envStr(brand.Env("PUBLIC_URL"), &c.PublicURL)
+	envStr(brand.Env("SECRETBOX_KEY"), &c.SecretboxKey)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)
 	return c, nil
 }

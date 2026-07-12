@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Button, Field, Input } from "@llmobs/ui";
-import { login, ApiError, type Session } from "./api.js";
+import { login, ApiError, ssoProviders, ssoStartUrl, type Session, type SSOProvider } from "./api.js";
 import { brand } from "@llmobs/brand";
 
 export function LoginPage({ onSignedIn }: { onSignedIn: (s: Session) => void }): React.ReactElement {
@@ -8,6 +8,17 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (s: Session) => void }):
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [providers, setProviders] = useState<SSOProvider[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    void ssoProviders().then((p) => {
+      if (live) setProviders(p);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   async function submit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -64,6 +75,22 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (s: Session) => void }):
         <Button type="submit" variant="primary" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </Button>
+        {providers.length > 0 && (
+          <div className="shell-login__sso">
+            {providers.map((p) => (
+              <Button
+                key={p.org_id}
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  window.location.href = ssoStartUrl(p.org_id);
+                }}
+              >
+                Sign in with {p.name || "SSO"}
+              </Button>
+            ))}
+          </div>
+        )}
       </form>
     </div>
   );

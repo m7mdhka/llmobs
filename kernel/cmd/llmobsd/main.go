@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -316,6 +317,16 @@ func run() error {
 	// User revocation (Arc O / O4, #63): instance-admin disables an account and denies its
 	// entire credential subtree immediately (sessions + minted keys + live plugin tokens).
 	auth.RegisterRevocation(apiMux)
+	// OIDC/SSO (Arc O / O5, #21): per-org external IdP login. The client secret is sealed with a
+	// STABLE key (SECRETBOX_KEY) so config survives restart; without one it falls back to an
+	// ephemeral box (config re-entry after restart — dev only). NO plan gating: OSS core.
+	ssoBox, ssoStable := ssoSecretBox(cfg.SecretboxKey)
+	if !ssoStable {
+		log.Warn("SSO secret box is EPHEMERAL — SSO config will not survive a restart",
+			"set_env", brand.Env("SECRETBOX_KEY"), "value", "base64 32-byte key")
+	}
+	ssoHTTP := &http.Client{Timeout: 15 * time.Second}
+	auth.RegisterSSO(apiMux, ssoBox, ssoHTTP, cfg.PublicURL)
 	// Price table management (ADR-0029): session-authed; reads open to any session,
 	// writes gated to admin (config authority). Global entries carry no project; the
 	// per-project discount is scoped to the caller's own project.
@@ -580,6 +591,27 @@ func buildScaleStore(ctx context.Context, cfg platform.Config, log *slog.Logger)
 	}
 	log.Info("ClickHouse-scale store ready", "migrate_on_boot", cfg.MigrateOnBoot, "cluster", cfg.CHCluster)
 	return scale, closeFn, nil
+}
+
+// ssoSecretBox builds the box that seals SSO client secrets. A base64 32-byte SECRETBOX_KEY
+// yields a STABLE box (config survives restart); an empty/invalid key falls back to an ephemeral
+// random box (stable=false) so SSO still works within a single boot for dev. Returns stable=false
+// when the fallback is used.
+func ssoSecretBox(b64Key string) (*secretbox.Box, bool) {
+	if b64Key != "" {
+		if raw, err := base64.StdEncoding.DecodeString(b64Key); err == nil && len(raw) == 32 {
+			var key [32]byte
+			copy(key[:], raw)
+			if box, err := secretbox.New(key); err == nil {
+				return box, true
+			}
+		}
+	}
+	box, err := secretbox.NewRandom()
+	if err != nil {
+		return nil, false
+	}
+	return box, false
 }
 
 // parseRedactConfig turns the CSV preset list ("none" disables) and the JSON

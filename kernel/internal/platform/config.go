@@ -100,6 +100,11 @@ type Config struct {
 	CHMaxMemoryBytes   int64  `json:"ch_max_memory_bytes"`
 	CHMaxRowsToRead    int64  `json:"ch_max_rows_to_read"`
 	CHMaxBytesToRead   int64  `json:"ch_max_bytes_to_read"`
+	// CHReadYourWrites (#109) opts a MULTI-REPLICA ClickHouse behind a distributing LB
+	// into read-after-write consistency (insert_quorum + select_sequential_consistency),
+	// at the cost of quorum write latency. OFF by default: single-node / sticky-endpoint
+	// deployments already have RYW for free. LLMOBS_CH_READ_YOUR_WRITES.
+	CHReadYourWrites bool `json:"ch_read_your_writes"`
 	// Lite→scale backfill (L5, RULING-MIG6). OPTIONAL and convenience-only — dual-read
 	// already makes lite data readable, so this just moves cold rows onto scale in the
 	// background. Decoupled from boot readiness; resumable across restarts. Only runs
@@ -193,6 +198,7 @@ func LoadConfig() (Config, error) {
 	envInt64(brand.Env("CH_MAX_ROWS_TO_READ"), &c.CHMaxRowsToRead)
 	envInt64(brand.Env("CH_MAX_BYTES_TO_READ"), &c.CHMaxBytesToRead)
 	envInt64(brand.Env("QUERY_MAX_RESPONSE_BYTES"), &c.QueryMaxResponseBytes)
+	envBool(brand.Env("CH_READ_YOUR_WRITES"), &c.CHReadYourWrites)
 	envBool(brand.Env("BACKFILL_ON_BOOT"), &c.BackfillOnBoot)
 	envInt(brand.Env("BACKFILL_CHUNK_SIZE"), &c.BackfillChunkSize)
 	envStr(brand.Env("BACKFILL_BUDGET"), &c.BackfillBudget)

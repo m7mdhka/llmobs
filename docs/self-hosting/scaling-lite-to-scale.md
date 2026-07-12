@@ -31,6 +31,35 @@ and a historical span in lite is always readable, with **no window where either
 is missing** — proven in both directions and under concurrent load
 (`internal/storage/dualstore/dualread_test.go`).
 
+**Read-after-write across replicas (multi-replica ClickHouse).** A just-ingested span
+is immediately readable — **as long as reads and writes reach the same ClickHouse
+replica.** The recommended, zero-cost topology is a **single or sticky ClickHouse
+endpoint** (a replica always sees its own writes). If you instead put a **distributing
+load balancer** in front of a multi-replica cluster, a read can land on a replica that
+has not yet replicated the write, so a just-written span may **transiently 404** until
+replication catches up. Two ways to handle it:
+
+- *Recommended:* point `LLMOBS_CLICKHOUSE_URL` at a single/sticky endpoint — read-after-
+  write holds for free, no quorum cost.
+- *If you must run behind a distributing LB* with a hard read-after-write requirement,
+  set `LLMOBS_CH_READ_YOUR_WRITES=true`. This enables `insert_quorum` (writes wait for a
+  replica majority) + `select_sequential_consistency` (reads return only quorum-committed
+  rows), guaranteeing no transient 404 — at the cost of **quorum write latency**. Leave
+  it **off** for single-node / sticky-endpoint deployments, where it buys nothing.
+
+Running behind a distributing LB **without** this setting means you have opted into
+eventual read-consistency: a just-written span may briefly 404. That is a deliberate
+default (the common case pays no quorum tax); the setting is the fix when you need it.
+
+```
+LLMOBS_CH_READ_YOUR_WRITES=false   # default; set true only for multi-replica behind a distributing LB
+```
+
+**Aggregation cardinality.** A `GROUP BY` is bounded at 10 000 groups. If a query would
+exceed it, the result is trimmed to the cap and carries a **loud `warnings` entry** — an
+aggregation is never silently truncated (which would return a wrong number the caller
+trusts, and corrupt the dual-read merge). Narrow the query for a complete answer.
+
 **ClickHouse version requirement (GDPR erasure).** The kernel refuses to start against
 a ClickHouse older than **23.8**. GDPR erasure uses a lightweight `DELETE`, and reads
 rely on `apply_deleted_mask` to guarantee an erased span is *never* read back (even

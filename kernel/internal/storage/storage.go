@@ -25,6 +25,18 @@ import (
 	"time"
 )
 
+// MaxAggregationGroups bounds the group cardinality an aggregation returns, a safety
+// limit against an unbounded high-cardinality GROUP BY. Both adapters over-fetch ONE
+// past it (MaxAggregationGroups+1) so the caller can DETECT truncation — a result at the
+// cap is silently-maybe-complete, but a result of cap+1 is provably truncated and must be
+// flagged loudly, never returned as if complete (#108: silent-wrong aggregation is the
+// worst class — it corrupts the dual-read merge and the user trusts the number).
+const MaxAggregationGroups = 10000
+
+// AggOverfetchLimitSQL is the LIMIT both adapters apply to an aggregation: one past the
+// cap, so cap+1 rows coming back proves truncation.
+func AggOverfetchLimitSQL() string { return strconv.Itoa(MaxAggregationGroups + 1) }
+
 // CostRoundDecimals is the fixed decimal scale the DERIVED trace-level total_cost is
 // rounded to in EVERY adapter (Postgres, ClickHouse) and the dual-read re-synthesis, so
 // the roll-up is BYTE-IDENTICAL cross-adapter (the strict row-projection contract) rather

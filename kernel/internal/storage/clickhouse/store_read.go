@@ -413,7 +413,8 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	if groupBy != "" {
 		sql += " GROUP BY " + groupBy
 	}
-	sql += " LIMIT 10000" + settings
+	// Over-fetch one past the cap so truncation is DETECTABLE and flagged, never silent (#108).
+	sql += " LIMIT " + storage.AggOverfetchLimitSQL() + settings
 
 	rows, err := s.conn.Query(ctx, sql, bind...)
 	if err != nil {

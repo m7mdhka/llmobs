@@ -94,6 +94,11 @@ services:
       #   LLMOBS_BACKFILL_ON_BOOT: "true"     # start the background backfill on boot
       #   LLMOBS_BACKFILL_CHUNK_SIZE: "500"   # rows per bounded batch
       #   LLMOBS_BACKFILL_BUDGET: "30m"       # SEPARATE execution budget per run (not the read timeout)
+      # Read-after-write across CH replicas (#109): OFF by default. A single/sticky endpoint
+      # gives read-after-write for free. Set true ONLY for a multi-replica cluster behind a
+      # distributing LB with a hard RYW need — it enables insert_quorum + sequential
+      # consistency at the cost of quorum write latency (see docs/self-hosting).
+      #   LLMOBS_CH_READ_YOUR_WRITES: "false"
       LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:-sk-e2e-demo-key}"
       LLMOBS_BOOTSTRAP_ADMIN_EMAIL: "${LLMOBS_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
       LLMOBS_BOOTSTRAP_ADMIN_PASSWORD: "${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:-admin-dev-password}"

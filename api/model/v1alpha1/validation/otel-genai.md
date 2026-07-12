@@ -3,7 +3,7 @@
 > **Post-review:** the design review ruled on every finding below; the resolutions applied to the spec are tabulated in [`README.md`](README.md#resolutions-applied-post-review-2026-07-09). This worksheet is preserved as the pre-resolution analysis and fixture seed.
 
 **Dialect:** Official OpenTelemetry GenAI semantic conventions (`gen_ai.*`) carried on OTLP spans.
-**Target:** LLMObs canonical model `v1alpha1` (`api/model/v1alpha1/02-span.md`, `03-trace.md`, `04-score.md`, `06-usage-cost.md`, `08-data-quality.md`).
+**Target:** LLMObs canonical model `v1alpha1` (`../README.md` — the Span, Trace, Score, Usage-and-cost, and Data-quality sections).
 **Purpose:** Seed normalizer fixtures + surface unclean landings. Assumptions are marked **[A]**.
 
 Conventions note: OTel is mid-migration. `gen_ai.system` was renamed to `gen_ai.provider.name`; message content moved from **span events** (`gen_ai.{system,user,assistant,tool}.message`, `gen_ai.choice`) to **span attributes** (`gen_ai.input.messages`, `gen_ai.output.messages`). Both encodings are live in the wild, so the representative trace below carries **both** on the generation span to exercise the ambiguity. `[A]`: transport is OTLP/gRPC; ids are the raw OTLP binary rendered lowercase-hex.

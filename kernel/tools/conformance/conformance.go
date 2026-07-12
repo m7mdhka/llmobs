@@ -1,5 +1,6 @@
 // Package conformance is the cross-adapter storage conformance harness. It runs
-// the normative merge suite — the V-vectors from 05-update-semantics.md and the
+// the normative merge suite — the V-vectors parsed from the canonical model spec
+// (the Update-semantics section) and the
 // order-independence property — against any storage.MergeConformer, so every
 // adapter (the lite Postgres adapter today; ClickHouse/Timescale tomorrow) is
 // held to one source of conformance truth.
@@ -22,9 +23,11 @@ import (
 )
 
 // specRelPath is the single source of the normative merge vectors, parsed
-// straight from the spec (no fixture duplication). Path is relative to this
-// package dir: kernel/tools/conformance -> repo root -> api.
-const specRelPath = "../../../api/model/v1alpha1/05-update-semantics.md"
+// straight from the spec (no fixture duplication). It points at the canonical
+// model README, whose Update-semantics section carries the V-vector ```json
+// blocks. Path is relative to this package dir: kernel/tools/conformance -> repo
+// root -> api.
+const specRelPath = "../../../api/model/v1alpha1/README.md"
 
 // minVectors guards against the spec's vector blocks silently disappearing.
 const minVectors = 17

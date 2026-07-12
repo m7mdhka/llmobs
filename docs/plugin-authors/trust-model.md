@@ -50,7 +50,7 @@ session — third-party, untrusted, or security-sensitive — put the logic in a
 **backend**. The kernel's double token genuinely confines backends: every data call
 is re-intersected server-side (`plugin-grant ∩ user ∩ project`), the session cookie
 is never forwarded, and audience-bound assertions prevent one plugin from acting as
-another. See [`api/plugin/v1alpha1/00-overview.md`](../../api/plugin/v1alpha1/00-overview.md).
+another. See [`api/plugin/v1alpha1/README.md`](../../api/plugin/v1alpha1/README.md).
 
 ## The future: origin isolation
 

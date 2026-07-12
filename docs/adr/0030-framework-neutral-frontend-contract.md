@@ -8,7 +8,7 @@
 - **Relates to:** ADR-0023 (plugin protocol; the J1 frontend token this contract
   carries unchanged), ADR-0024 (plugin settings SchemaForm; N2 adds a custom-settings
   mount over this contract), the plugin API overview
-  (`api/plugin/v1alpha1/00-overview.md` §6/§8), the manifest schema
+  (`api/plugin/v1alpha1/README.md` §6/§8), the manifest schema
   (`api/schemas/manifest/v1alpha1` — unchanged, it never named React). Closes the #1
   flexibility wall from the plugin-viability audit (#66).
 

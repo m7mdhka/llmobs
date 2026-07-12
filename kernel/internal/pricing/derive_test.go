@@ -12,7 +12,7 @@ func entry(rates map[string]Rate, tiers ...Tier) *Entry {
 	return &Entry{Rates: rates, Tiers: tiers}
 }
 
-// TestDeriveResidualEachBucketOwnRate is the R3 general-form proof (§7.4/§7.7.1): a
+// TestDeriveResidualEachBucketOwnRate is the residual general-form proof: a
 // call with cache + reasoning + audio buckets prices EACH at its own rate, bills the
 // base residual (input − cache − audio_input; output − reasoning) at the base rate, and
 // double-charges NOTHING. This is the case both incumbents got wrong in opposite
@@ -56,10 +56,10 @@ func TestDeriveResidualEachBucketOwnRate(t *testing.T) {
 	}
 }
 
-// TestDeriveReduceThenTierCrossover is the §7.7 REQUIRED fixture: a call with a cache
+// TestDeriveReduceThenTierCrossover is the reduce-then-tier REQUIRED fixture: a call with a cache
 // bucket AND a tier breakpoint, asserting the tier applies to the RESIDUAL, with the
 // just-under / just-over crossover computing correctly. Tiering the RAW input would
-// wrongly cross the breakpoint (the double-count §7.7.1 forbids).
+// wrongly cross the breakpoint (the double-count that reduce-first forbids).
 func TestDeriveReduceThenTierCrossover(t *testing.T) {
 	// input tier: tokens above 200k bill at 2 (base 10); cache_read reduces input.
 	e := entry(map[string]Rate{
@@ -101,7 +101,7 @@ func TestDeriveGraduatedContinuousAtBoundary(t *testing.T) {
 	}
 }
 
-// TestDeriveDataDrivenNoRateNoCost is R2/R4: a usage key with NO rate on the entry is
+// TestDeriveDataDrivenNoRateNoCost is the data-driven rule: a usage key with NO rate on the entry is
 // not billed (no provider case list); a provider whose entry simply lacks a cache rate
 // is not cache-priced — with zero code branching on provider.
 func TestDeriveDataDrivenNoRateNoCost(t *testing.T) {
@@ -145,7 +145,7 @@ func TestDeriveEmptyNilSafe(t *testing.T) {
 }
 
 // TestDeriveResidualClampsNonNegative: a bucket count exceeding its base never yields
-// negative cost (provider semantics vary; F3 forbids assuming inclusive/exclusive).
+// negative cost (provider semantics vary; we must not assume inclusive/exclusive).
 func TestDeriveResidualClampsNonNegative(t *testing.T) {
 	e := entry(map[string]Rate{"input": {PerToken: 10}, "cache_read": {PerToken: 1, Reduces: "input"}})
 	cost, _ := Derive(map[string]int64{"input": 100, "cache_read": 500}, e, 0)

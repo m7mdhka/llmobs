@@ -14,9 +14,9 @@ import (
 // Runner invokes a plugin's job endpoint, presenting a kernel-signed SYSTEM
 // identity assertion. A scheduled job runs user-less, so it skips the user half of
 // the double-token intersection — but that half is replaced by the plugin's OWN
-// grant, never god-mode (H6 pin 1): the assertion carries the plugin's declared
-// permissions on the plugin's project, and a system actor so job-initiated access
-// is audit-distinguishable from on-behalf-of-user access (pin 2).
+// grant, never god-mode: the assertion carries the plugin's declared permissions on
+// the plugin's project, and a system actor so job-initiated access is
+// audit-distinguishable from on-behalf-of-user access.
 type Runner struct {
 	signer      *plugintoken.Signer
 	client      *http.Client

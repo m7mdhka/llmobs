@@ -1,18 +1,19 @@
-// Package frontendtoken mints a per-plugin, per-session, short-TTL FRONTEND token
-// (J1): the browser-side least-privilege credential for a plugin's frontend. Its
-// scopes are the plugin's manifest grant ∩ the calling user's session ∩ project —
-// the same intersection H3 computes for backends, pre-computed here because a
-// frontend has no service token to intersect at the Query API.
+// Package frontendtoken mints a per-plugin, per-session, short-TTL FRONTEND token:
+// the browser-side least-privilege credential for a plugin's frontend. Its scopes
+// are the plugin's manifest grant ∩ the calling user's session ∩ project — the same
+// intersection computed for a backend plugin's identity assertion, pre-computed here
+// because a frontend has no service token to intersect at the Query API.
 //
 // IMPORTANT — this is least-privilege-BY-DEFAULT for SDK-using plugins, NOT a hard
 // boundary against a hostile frontend. Plugin frontends load into the shell's
-// origin + JS realm (ADR-0004 Module Federation), so a malicious plugin can bypass
-// the SDK and call the Query API with the ambient session cookie directly, getting
-// the user's full session scope. The documented v1 trust model is therefore:
+// origin + JS realm (Module Federation), so a malicious plugin can bypass the SDK
+// and call the Query API with the ambient session cookie directly, getting the
+// user's full session scope. The documented v1 trust model is therefore:
 // frontend-only plugins are trusted-at-install (like a browser/IDE extension); a
-// plugin that needs HARD confinement runs a backend (H3 confines those). Origin
-// isolation (ADR-0004 amendment) is the future path to a real frontend boundary,
-// built when an untrusted third-party frontend plugin is a real requirement.
+// plugin that needs HARD confinement runs a backend (a backend is confined by the
+// double-token intersection at the Query API). Origin isolation is the future path
+// to a real frontend boundary, built when an untrusted third-party frontend plugin
+// is a real requirement.
 package frontendtoken
 
 import (
@@ -36,8 +37,8 @@ type Handler struct {
 	source  registry.Source
 	project func(*http.Request) (string, error)
 	// role resolves the session user's membership role in the org that owns a project
-	// (Arc O / O2) — the token is scoped to the user's role IN THAT PROJECT'S ORG, not an
-	// ambient default-org role. Injected so this package need not import the pool.
+	// — the token is scoped to the user's role IN THAT PROJECT'S ORG, not an ambient
+	// default-org role. Injected so this package need not import the pool.
 	role func(ctx context.Context, userID, projectID string) (string, error)
 }
 
@@ -78,7 +79,7 @@ func (h *Handler) Mint(w http.ResponseWriter, r *http.Request) {
 	// The intersection: plugin manifest perms ∩ the user's session perms. The
 	// plugin can never exceed its own grant OR the user's, and the project is the
 	// session's (a plugin cannot request another tenant).
-	// The user half is the session user's role IN THE PROJECT'S ORG (O2), not an ambient
+	// The user half is the session user's role IN THE PROJECT'S ORG, not an ambient
 	// default-org role — a user who is viewer in this project's org mints a viewer-scoped
 	// token even if they are owner elsewhere. A non-member → "" → no scopes → an empty
 	// token (fail closed). DataPermsOnly strips management scopes (owner/admin hold them)

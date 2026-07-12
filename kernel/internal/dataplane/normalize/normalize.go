@@ -1,5 +1,5 @@
 // Package normalize maps ingestion dialects onto the canonical model. Normalizers
-// are pure per-span functions (02-span.md §2.3): attributes in, canonical span
+// are pure per-span functions: attributes in, canonical span
 // out, no I/O. New dialects drop in as files implementing Normalizer and register
 // in the registry; first match wins.
 package normalize
@@ -56,8 +56,8 @@ func NewRegistry(fallback Normalizer, ns ...Normalizer) *Registry {
 }
 
 // Normalize picks the first matching normalizer (else the fallback), maps, and
-// runs the shared post-map passes every transport must share (02-span.md §4.2):
-// attribute-key sanitization (§6.3).
+// runs the shared post-map passes every transport must share:
+// attribute-key sanitization.
 func (r *Registry) Normalize(in SpanInput, ctx Context) map[string]any {
 	var out map[string]any
 	for _, n := range r.normalizers {
@@ -74,7 +74,7 @@ func (r *Registry) Normalize(in SpanInput, ctx Context) map[string]any {
 	}
 	// Strip NUL from every string value (attributes, nested, and promoted fields) so a span
 	// with a NUL never fails the lite Postgres INSERT while landing on scale — one shared stage,
-	// both profiles identical (#127).
+	// both profiles identical.
 	SanitizeNullBytes(out)
 	return out
 }

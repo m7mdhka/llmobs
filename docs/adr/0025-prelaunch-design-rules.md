@@ -4,9 +4,11 @@
 - **Date:** 2026-07-11
 - **Deciders:** m7mdhka (Arc K — pre-launch correctness pass)
 - **Relates to:** ADR-0023 (plugin protocol), ADR-0024 (settings), ADR-0016/0021
-  (canonical model / merge), the Query DSL (ADR-0019). Source evidence: the
-  Langfuse merged-PR mine (`docs/research/langfuse-merged-pr-mine.md` findings; 400
-  merged PRs #14317–#14991).
+  (canonical model / merge), the Query DSL (ADR-0019). Source evidence: the Langfuse
+  merged-PR mine — 400 merged PRs (`langfuse/langfuse` #14317–#14991) read for the bugs
+  and hardenings a mature incumbent actually shipped. Every rule below cites the public
+  PR/issue number it was derived from, checkable in that tracker; the mining method is
+  recorded in `docs/positioning.md` (Evidence appendix).
 
 ## Context
 

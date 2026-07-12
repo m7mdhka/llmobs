@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// TestSignerConsultsRevocationForEverySignedToken is the O4 crown proof at the signer seam:
+// TestSignerConsultsRevocationForEverySignedToken is the crown proof at the signer seam:
 // a token that is PERFECTLY VALID by signature + TTL (now is well inside its lifetime) is
 // nonetheless DENIED when the injected revocation checker says its principal is revoked. This
 // test FAILS if a Verify* ever reverts to TTL-only (ignores the checker) — which is exactly

@@ -15,10 +15,10 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/clickhouse"
 )
 
-// TestG3ForgedReplayAfterErase is the load-bearing L3 proof: a GDPR-erased span
+// TestG3ForgedReplayAfterErase is the load-bearing durability proof: a GDPR-erased span
 // re-delivered and sitting in the WAL uncommitted across a crash must NOT resurrect
-// on replay. Erasure has been the bug site in two consecutive PRs (L1 timestamp
-// bypass, L2 erase-skips-soft-deleted), so this gets the full prove-the-negative
+// on replay. Erasure has been the bug site in two consecutive prior fixes (a timestamp
+// bypass, and erase-skipping-soft-deleted), so this gets the full prove-the-negative
 // treatment against a REAL store — the WAL replay path funnels through the same
 // server-time suppression guard, never around it.
 //

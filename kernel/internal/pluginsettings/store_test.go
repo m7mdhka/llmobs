@@ -55,7 +55,7 @@ func newStore(t *testing.T) (*Store, *memKV) {
 	return NewStore(kv, box), kv
 }
 
-// TestSecretNeverRenderedBack is the J2 prove-the-negative: a secret (writeOnly)
+// TestSecretNeverRenderedBack is the prove-the-negative: a secret (writeOnly)
 // field, once written, is NEVER returned by Get — the client only learns it is set —
 // and the stored ciphertext never contains the plaintext.
 func TestSecretNeverRenderedBack(t *testing.T) {
@@ -185,7 +185,7 @@ func TestRequiredSecretSatisfiedByExisting(t *testing.T) {
 	}
 }
 
-// customModel is a custom-mode (N2) model declaring one secret; everything else is opaque.
+// customModel is a custom-mode model declaring one secret; everything else is opaque.
 func customModel(t *testing.T) *Model {
 	t.Helper()
 	m, err := ParseSchema([]byte(`{"type":"object","properties":{"apiKey":{"type":"string","writeOnly":true}}}`), true)
@@ -199,7 +199,7 @@ func customModel(t *testing.T) *Model {
 }
 
 // TestCustomModeOpaqueRoundTripAndSecret: custom mode persists arbitrary nested non-secret
-// JSON verbatim, keeps the declared secret encrypted + never-returned (H4), and the raw
+// JSON verbatim, keeps the declared secret encrypted + never-returned, and the raw
 // stored KV bytes never contain the secret plaintext.
 func TestCustomModeOpaqueRoundTripAndSecret(t *testing.T) {
 	m := customModel(t)
@@ -229,7 +229,7 @@ func TestCustomModeOpaqueRoundTripAndSecret(t *testing.T) {
 	if _, leaked := view.Values["apiKey"]; leaked {
 		t.Fatal("secret must never be in custom-mode values")
 	}
-	// H4 at the storage layer: the raw KV bytes never contain the plaintext.
+	// Encrypt-and-never-return at the storage layer: the raw KV bytes never contain the plaintext.
 	raw, _, _ := kv.Get(ctx, plugin, project, "", settingsKey)
 	if bytes.Contains(raw, []byte(secretVal)) {
 		t.Fatalf("secret plaintext found in stored KV: %s", raw)
@@ -279,10 +279,10 @@ func TestCustomModeSizeCap(t *testing.T) {
 	}
 }
 
-// TestCustomModeReclassifiedSecretNotLeaked is the prove-the-negative for the review's
-// H4 edge: a value stored as OPAQUE under a name, then that name is later reclassified as
+// TestCustomModeReclassifiedSecretNotLeaked is the prove-the-negative for the
+// reclassification edge: a value stored as OPAQUE under a name, then that name is later reclassified as
 // a secret (a trusted manifest evolution), must NEVER be returned in the clear by Get.
-// The read seam excludes declared-secret keys by construction (invariant #11).
+// The read seam excludes declared-secret keys by construction.
 func TestCustomModeReclassifiedSecretNotLeaked(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()

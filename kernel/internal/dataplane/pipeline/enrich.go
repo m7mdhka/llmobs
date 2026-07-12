@@ -17,10 +17,10 @@ type PriceResolver interface {
 }
 
 // enrich resolves usage_details and derives cost_details/total_cost/cost_source/
-// pricing_snapshot_ref for each span (06-usage-cost.md §3.2, §4, §7), DERIVE-ONCE at
-// ingest (not read time). It is fail-soft: a price-lookup error leaves cost null and
-// never fails the pipeline (§9.1 — bad data / a transient lookup never breaks a valid
-// ingest; a later re-pricing backfill fills it in). No price table configured (nil
+// pricing_snapshot_ref for each span, DERIVE-ONCE at ingest (not read time). It is
+// fail-soft: a price-lookup error leaves cost null and never fails the pipeline (bad
+// data / a transient lookup never breaks a valid ingest; a later re-pricing backfill
+// fills it in). No price table configured (nil
 // resolver) → a no-op pass-through, so cost is simply absent, never wrong. The actual
 // derivation is costderive.DeriveSpanCost — the SAME path the re-pricing backfill uses,
 // so an ingest-priced span and a re-priced span compute identically.
@@ -42,7 +42,7 @@ func (s *enrichStage) Process(ctx context.Context, ing *Ingestion) error {
 	if derr != nil {
 		// A discount-lookup error must NOT derive at full price — that would silently
 		// OVERCHARGE a discounted project and stamp cost_source=derived, which a
-		// null-based re-pricing backfill (M4) cannot detect (the invariant #12 trap: the
+		// null-based re-pricing backfill cannot detect (the failure-path trap: the
 		// failure path producing wrong-but-plausible data). Instead skip derivation for
 		// this batch, leaving cost NULL — the backfill re-prices it correctly later. This
 		// mirrors the price-resolve failure (also null, backfillable).
@@ -54,7 +54,7 @@ func (s *enrichStage) Process(ctx context.Context, ing *Ingestion) error {
 	entryCache := map[string]*pricing.Entry{}
 	for _, ev := range ing.Events {
 		if _, err := costderive.DeriveSpanCost(ctx, ev.Payload, s.prices, discount, entryCache); err != nil {
-			// Fail-soft (§9.1): a price-resolve blip leaves this span's cost null (never a
+			// Fail-soft: a price-resolve blip leaves this span's cost null (never a
 			// wrong or fabricated value); the re-pricing backfill fills it later. At
 			// INGEST nulling is safe — the cost was never set. (The backfill, by contrast,
 			// STOPS on this error, because there nulling would drop an existing cost.)

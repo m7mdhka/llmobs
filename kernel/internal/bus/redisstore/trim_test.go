@@ -9,7 +9,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/bus/redisstore"
 )
 
-// TestStreamTrimBoundsLogWithoutDroppingDeliverable is the #98 proof: the Streams log is
+// TestStreamTrimBoundsLogWithoutDroppingDeliverable is the proof: the Streams log is
 // bounded (it does not grow without limit), AND the trim never drops backlog a subscriber
 // can still consume. The retention is set to the bus backlog cap, and the bus dead-letters
 // anything more than backlogCap behind latest — so the last `cap` entries (the deliverable

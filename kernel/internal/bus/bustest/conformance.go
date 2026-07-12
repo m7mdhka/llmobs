@@ -1,9 +1,17 @@
-// Package bustest holds the event-bus conformance suite so the SAME proofs run
-// against EVERY bus.Store backend — the in-memory store, Postgres-lite, and the
-// Redis/Valkey scale backend. The contract is the interface, not the backend
-// (the bus analogue of the cross-adapter storage conformance): H6 backlog-replay,
-// at-least-once, backlog-cap→DLQ, and tenant/topic isolation all live here, driven
-// through the shared *bus.Bus, so a new backend proves itself by passing them.
+// Package bustest holds the event-bus conformance suite so the SAME proofs run against
+// EVERY bus.Store backend — the in-memory store, Postgres-lite, and the Redis/Valkey scale
+// backend. The contract is the interface, not the backend (the bus analogue of the
+// cross-adapter storage conformance). Every guarantee lives here, driven through the shared
+// *bus.Bus, so a new backend proves itself simply by passing them:
+//   - backlog replay: a subscriber that was down resumes from its stored offset and
+//     receives everything it missed, never only new events;
+//   - at-least-once delivery: a poll does NOT advance the offset — only an ack does — so a
+//     crash between receiving and acking re-delivers rather than drops;
+//   - backlog-cap → dead-letter: a subscriber that falls more than the per-subscriber cap
+//     behind the latest event has the overflow dead-lettered (never silently skipped) and
+//     its offset advanced, so one stuck subscriber can't pin the log forever;
+//   - tenant/topic isolation: a poll never returns another project's or another topic's
+//     events.
 package bustest
 
 import (
@@ -36,11 +44,15 @@ func RunConformance(t *testing.T, f Factory) {
 	t.Run("KeyInjectivity", func(t *testing.T) { keyInjectivity(t, f) })
 }
 
-// globalIDUniqueness: Delivered.ID is the at-least-once idempotency key the SDK
-// dedupes on, so it MUST be globally unique across topics — a subscriber to two
-// topics that dedupes on id alone must not silently drop events. (Caught the L4
-// per-topic-counter divergence: Postgres BIGSERIAL is global; the first Redis
-// backend restarted the id at 1 per topic, colliding ids across topics.)
+// globalIDUniqueness: Delivered.ID is the at-least-once idempotency key the SDK dedupes
+// on, so it MUST be globally unique across ALL topics — a subscriber to two topics that
+// dedupes on id alone must never silently drop an event. (This case exists because an
+// adversarial review caught a per-topic-counter divergence between the backends: Postgres
+// assigns ids from one table-wide sequence, so they are global, but the first Redis backend
+// restarted the id at 1 per topic — so ids collided across topics, and a two-topic
+// subscriber would drop the collisions on the Redis backend while the Postgres backend was
+// fine. The fix is one global sequence per instance; this test locks it in for every
+// backend.)
 func globalIDUniqueness(t *testing.T, f Factory) {
 	b, _ := f(t, 1000)
 	ctx := context.Background()
@@ -87,7 +99,7 @@ func keyInjectivity(t *testing.T, f Factory) {
 	}
 }
 
-// replayFromOffset is the H6 backlog-replay proof: a subscriber that was DOWN while
+// replayFromOffset is the backlog-replay proof: a subscriber that was DOWN while
 // events were published replays them from its offset on the next poll; polling
 // again without ack re-delivers (at-least-once); acking stops re-delivery; a new
 // event after the ack is delivered.

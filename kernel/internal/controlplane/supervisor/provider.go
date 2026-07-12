@@ -24,8 +24,8 @@ type PluginSpec struct {
 	GrantedScopes       []string
 	Backend             executors.Backend
 	WatermarkBudget     time.Duration
-	Collections         []plugindata.CollectionSpec // store collections to provision (H5)
-	Jobs                []jobs.JobSpec              // declared jobs to schedule (H6b)
+	Collections         []plugindata.CollectionSpec // store collections to provision
+	Jobs                []jobs.JobSpec              // declared jobs to schedule
 }
 
 // Provider supplies the currently-installed backend plugins to supervise.
@@ -141,7 +141,8 @@ func (d *DirProvider) Plugins() []PluginSpec {
 		out = append(out, PluginSpec{
 			ID:                  m.Metadata.ID,
 			GrantedCapabilities: m.Spec.Capabilities,
-			// Data-only grant (Arc O / O1): strip management scopes so a backend service
+			// Data-only grant: strip management scopes (members:manage, org:manage,
+			// actions:execute) so a backend service
 			// token can never carry control-plane administration (mirror of dirsource).
 			GrantedScopes: perm.DataPermsOnly(m.Spec.Permissions),
 			Backend: executors.Backend{

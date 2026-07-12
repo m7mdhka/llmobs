@@ -2,17 +2,17 @@ package query
 
 import "encoding/json"
 
-// Payload fields projected out for metadata-scoped callers (DSL §10). These are
+// Payload fields projected out for metadata-scoped callers. These are
 // the prompt/completion/message-carrying fields; everything else (promoted
 // dimensions, status, usage/cost, top-level llmobs.dq.* signals) is metadata and
 // survives. `attributes` is stripped wholesale because flattened prompt arrays
 // (gen_ai.prompt.N.*) live there — the conservative contract. Kernel-owned
 // llmobs.* metadata that lives *inside* attributes (llmobs.raw.*, llmobs.dq.*) is
-// stripped with it; the interesting-edge note is in the PR report.
+// stripped with it as an accepted consequence of stripping attributes wholesale.
 var payloadFields = []string{"input", "output", "events", "attributes", "model_parameters"}
 
 // scoreMetadataStrip: a metadata-scoped caller does not receive a score's freeform
-// comment (04-score.md; DSL §10 "score metadata/comment").
+// comment (the score's payload-granularity field).
 var scorePayloadFields = []string{"comment"}
 
 // stripPayloadFields removes the given keys from a JSON doc, returning the

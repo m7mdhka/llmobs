@@ -8,18 +8,19 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
-// Shared authorization seams (Arc O / O3). These are the ONE place each authority question
-// is answered, so every caller inherits the invariant by construction (invariant #11) — a
+// Shared authorization seams. These are the ONE place each authority question
+// is answered, so every caller inherits the rule by construction — a
 // new handler asks the seam, it does not re-derive the rule. Two axes:
 //
 //   - writeAuthorityInProject: per-PROJECT configuration authority, resolved against the
-//     user's role in THAT project's org (the O2 lesson: authority is checked against the
-//     tenant the action targets, never an ambient default-org role).
+//     user's role in THAT project's org — authority is always checked against the
+//     tenant the action targets, never an ambient default-org role.
 //   - instanceAdmin: instance-LEVEL authority (an owner of the default org). Used only for
 //     actions that are genuinely instance-wide — creating an org (no target org exists yet)
 //     and editing the global price table (one table shared by every tenant). Naming this
-//     axis explicitly is how O3 resolves the O2 pricing residual: a per-org role governs
-//     per-org actions; only the default-org owner governs instance-wide ones.
+//     axis explicitly keeps global actions off a per-org role wearing global clothes: a
+//     per-org role governs per-org actions; only the default-org owner governs
+//     instance-wide ones.
 //
 // Both take the SERVER-DERIVED session actor (SessionFrom) — never a client-supplied actor
 // id or role — and fail closed on any resolution error. The underlying resolver is

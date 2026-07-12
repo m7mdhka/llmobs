@@ -1,4 +1,4 @@
-// Package supervisor is the plugin lifecycle state machine (ADR-0006, ADR-0023).
+// Package supervisor is the plugin lifecycle state machine.
 // It reconciles each installed backend plugin toward running: handshake -> issue
 // service token -> probe two-signal health (ready + functional watermark). A
 // plugin that faults (unreachable, failed handshake, unhealthy, stale watermark)
@@ -30,7 +30,7 @@ import (
 
 // Provisioner provisions a plugin's store collections during the starting phase.
 // Implementations MUST be idempotent (re-runnable) so a migration interrupted by a
-// kernel restart recovers on re-handshake without faulting (ADR-0023).
+// kernel restart recovers on re-handshake without faulting.
 type Provisioner interface {
 	Provision(ctx context.Context, pluginID string, collections []plugindata.CollectionSpec) error
 }
@@ -116,7 +116,7 @@ type Supervisor struct {
 
 	provisioner Provisioner // provisions store collections in the starting phase (nil => none)
 
-	// Token revocation hooks (Arc O / O4, #63). revokeTokens denies a plugin's already-issued
+	// Token revocation hooks. revokeTokens denies a plugin's already-issued
 	// kernel-signed service token immediately when the plugin is disabled — clearing the local
 	// copy (rt.token) is NOT enough, the issued token verifies until TTL otherwise. reinstate
 	// clears the plugin's revocation on re-enable so freshly minted tokens are unaffected. Both
@@ -129,11 +129,11 @@ type Supervisor struct {
 	disabled map[string]string // operator-disabled id -> reason (persists across reconcile)
 }
 
-// SetProvisioner attaches the store-collection provisioner (H5). Migration failure
+// SetProvisioner attaches the store-collection provisioner. Migration failure
 // becomes a health signal: the plugin degrades rather than reaching running.
 func (s *Supervisor) SetProvisioner(p Provisioner) { s.provisioner = p }
 
-// SetTokenRevoker wires immediate plugin-token revocation (Arc O / O4). revoke is called when
+// SetTokenRevoker wires immediate plugin-token revocation. revoke is called when
 // a plugin is disabled (its issued service token is denied at the next verify, not at TTL);
 // reinstate is called on re-enable. main.go backs these with controlplane.RevokePluginTokens
 // / Unrevoke over the pool.
@@ -176,7 +176,7 @@ func (s *Supervisor) Reconcile(ctx context.Context) {
 		}
 		s.reconcileOne(ctx, rt)
 	}
-	// Uninstall (O4/#63): a plugin removed from the provider drops out of the loop above, so
+	// Uninstall: a plugin removed from the provider drops out of the loop above, so
 	// its lingering runtime — and its already-issued service token — would otherwise never be
 	// revoked and live to TTL. Revoke and forget any runtime no longer present.
 	for id, rt := range s.plugins {
@@ -206,7 +206,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, rt *pluginRuntime) {
 	// Ensure a valid service token. Absence is a re-handshake TRIGGER, not a fault:
 	// after a kernel restart the in-memory signing key rotates and all live tokens
 	// (and our in-memory state) are gone, so a routine restart must re-handshake
-	// every healthy plugin WITHOUT marching it toward auto-disable (ADR-0023).
+	// every healthy plugin WITHOUT marching it toward auto-disable.
 	if rt.token == "" || now.Unix() >= rt.exp {
 		rt.state = StateStarting
 		info, err := s.exec.Handshake(ctx, rt.spec.Backend)
@@ -225,7 +225,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, rt *pluginRuntime) {
 		}
 		rt.token, rt.exp = tok, claims.Exp
 
-		// Deliver the token to the plugin (kernel-initiated push, H7c). This is part
+		// Deliver the token to the plugin (kernel-initiated push). This is part
 		// of READINESS, not a side channel: a plugin that cannot receive its token
 		// faults to degraded and never reaches running.
 		if err := s.exec.DeliverToken(ctx, rt.spec.Backend, tok, claims.Exp); err != nil {
@@ -233,11 +233,11 @@ func (s *Supervisor) reconcileOne(ctx context.Context, rt *pluginRuntime) {
 			return
 		}
 
-		// Provision the plugin's store collections as part of starting (H5). This is
+		// Provision the plugin's store collections as part of starting. This is
 		// a HEALTH SIGNAL: a slow/failed collection migration faults the plugin to
 		// degraded — it never reaches running. Provisioning is idempotent, so a
 		// migration interrupted by a kernel restart re-runs cleanly on the next
-		// re-handshake and does NOT count as a fresh fault (ADR-0023).
+		// re-handshake and does NOT count as a fresh fault.
 		if s.provisioner != nil && len(rt.spec.Collections) > 0 {
 			if err := s.provisioner.Provision(ctx, rt.spec.ID, rt.spec.Collections); err != nil {
 				s.fault(rt, "collection migration: "+err.Error())
@@ -291,9 +291,10 @@ func (s *Supervisor) fault(rt *pluginRuntime, reason string) {
 	rt.lastError = reason
 	if rt.faults >= s.cfg.MaxFaults {
 		// Route auto-disable through the SAME seam as operator-disable (toDisabled) so the
-		// plugin's already-issued service token is revoked here too (O4/#63) — clearing
+		// plugin's already-issued service token is revoked here too — clearing
 		// rt.token alone would leave a compromised plugin's token valid for its full TTL after
-		// the operator sees "disabled". One disable seam, one revoke (invariant #11).
+		// the operator sees "disabled". One disable seam, one revoke, so every disable path
+		// inherits the revoke instead of re-checking it.
 		reason = "auto-disabled after " + itoa(rt.faults) + " consecutive faults: " + reason
 		s.log.Warn("plugin auto-disabled", "plugin_id", rt.spec.ID, "reason", reason)
 		s.toDisabled(rt, reason)
@@ -317,11 +318,11 @@ func (s *Supervisor) markRunning(rt *pluginRuntime) {
 // toDisabled is THE ONE seam every disable path funnels through — operator Disable, the
 // Reconcile disabled-branch, and fault() auto-disable. It transitions the plugin to disabled,
 // drops the local token copy, and — on the TRANSITION into disabled — revokes the plugin's
-// already-issued kernel-signed tokens (O4/#63). Dropping rt.token only stops us re-handing it
+// already-issued kernel-signed tokens. Dropping rt.token only stops us re-handing it
 // out; the token already in the plugin's hands verifies until TTL unless we record the
 // revocation here. Gating the revoke on the transition avoids a redundant DB write on every
 // reconcile tick for an already-disabled plugin. A future disable path inherits the revoke by
-// calling this (invariant #11).
+// calling this one seam.
 func (s *Supervisor) toDisabled(rt *pluginRuntime, reason string) {
 	transition := rt.state != StateDisabled
 	rt.state = StateDisabled
@@ -349,8 +350,9 @@ func (s *Supervisor) backoffFor(faults int) time.Duration {
 
 // scopesFor is the plugin's approved token scopes: capability MARKERS (cap:<name>,
 // which primitive it may call) plus its fine-grained data permissions (canonical
-// nouns). The two axes are prefix-separated so H3's intersection compares data
-// permissions while capabilities gate the endpoint (ADR-0023/R3).
+// nouns). The two axes are prefix-separated so the double-token intersection compares data
+// permissions (role-scopes ∩ plugin-grant ∩ project) while capability markers gate which
+// endpoint/primitive the plugin may reach.
 func (s *Supervisor) scopesFor(spec PluginSpec) []string {
 	seen := map[string]struct{}{}
 	var out []string
@@ -434,7 +436,7 @@ func (s *Supervisor) Enable(id string) {
 		rt.nextAttempt = time.Time{}
 		rt.token, rt.exp = "", 0
 	}
-	// Clear the plugin's revocation (O4) so the freshly minted tokens after re-enable are not
+	// Clear the plugin's revocation so the freshly minted tokens after re-enable are not
 	// caught by the stale epoch. (Not required for correctness — a new token's issued-at is
 	// after the old revoked_at — but keeps the store clean and removes any boundary doubt.)
 	if s.reinstateTokens != nil {
@@ -443,7 +445,7 @@ func (s *Supervisor) Enable(id string) {
 }
 
 // ServiceTokenFor returns the current service token for a running plugin (used by
-// the gateway proxy in H5+ to authenticate the plugin on its return path). Empty
+// the gateway proxy to authenticate the plugin on its return path). Empty
 // when the plugin is not running.
 func (s *Supervisor) ServiceTokenFor(id string) string {
 	s.mu.Lock()

@@ -71,10 +71,10 @@ These four apply to code that ships today. Recommended order:
 
 | ID | Entry | Type | Blocking | Effort | Sources | Issue |
 |---|---|---|---|---|---|---|
-| C1 | Permission intersection covers name/slug resolution, not just id | verify-now | live tenant-isolation | S | round-03 §2 (#7019); ADR-0025 R6; CLAUDE.md inv-11 | #70 |
-| C3 | `fields.json` field rejected-at-validate if a path can't evaluate it | add-fixture | live DSL correctness | M | round-01 §9 (#6344); DSL §9.1; `08-data-quality.md` | #71 |
-| A8 | Null usage-detail objects normalize as absent, never error | add-fixture | live ingest robustness | S | round-02 §4 (#3397); issue-13 §3a; DSL §9.1 | #71 |
-| D1 | Compose creds fail-loud (`${VAR:?err}` + e2e env-file) | hardening | prod copy-paste safety | M | round-01 §10 (#5596); deploy.md | #69 |
+| C1 | Permission intersection covers name/slug resolution, not just id | verify-now | live tenant-isolation | S | Opik mine (#7019); ADR-0025 R6; CLAUDE.md inv-11 | #70 |
+| C3 | `fields.json` field rejected-at-validate if a path can't evaluate it | add-fixture | live DSL correctness | M | Opik mine (#6344); DSL §9.1; `08-data-quality.md` | #71 |
+| A8 | Null usage-detail objects normalize as absent, never error | add-fixture | live ingest robustness | S | Opik mine (#3397); canonical model spec §7; DSL §9.1 | #71 |
+| D1 | Compose creds fail-loud (`${VAR:?err}` + e2e env-file) | hardening | prod copy-paste safety | M | Opik mine (#5596); deploy.md | #69 |
 
 ---
 
@@ -84,13 +84,13 @@ These four apply to code that ships today. Recommended order:
 
 | ID | Entry | Type | Effort | Sources |
 |---|---|---|---|---|
-| A1 | Aggregate spans MUST NOT double-count leaf usage (+ dual-incumbent fixture #4695) | enforce-pinned-rule + add-fixture | M | `06` §7.1; ADR-0025 R1(a); issue-13 §1/§2; round-01 CONFIRMS |
+| A1 | Aggregate spans MUST NOT double-count leaf usage (+ dual-incumbent fixture #4695) | enforce-pinned-rule + add-fixture | M | `06` §7.1; ADR-0025 R1(a); canonical model spec §7; Opik mine (CONFIRMS Langfuse) |
 | A2 | Synthesized `total` = input+output only; cache/reasoning never re-summed | enforce-pinned-rule | S | `06` §7.2; ADR-0025 R1(b) |
-| A3 | `model` without usage MUST NOT fabricate cost (+ fixture #4508) | enforce-pinned-rule + add-fixture | S | `06` §7.3; ADR-0025 R1(c); issue-13 §2 |
-| A4 | Every detail key priced at its own rate off the price entry; data-driven, no allow-list (+ cache/audio fixtures) | enforce-pinned-rule + add-fixture | M | `06` §7.4; issue-13 §1/§3a; round-01 (#5618/#6976), round-02 (#7137) |
-| A5 | Tiered/threshold pricing applied; snapshot captures tier schedule (+ fixture #6982) | enforce-pinned-rule + add-fixture | M | `06` §7.5; issue-13 §2 |
-| A6 | Symmetric model-key normalization + single provider-canon table (+ fixtures #5621/#6928) | enforce-pinned-rule + add-fixture | M | `06` §7.6; issue-13 §2 |
-| A7 | `pricing_snapshot_ref` recorded on every derived cost; re-price backfill via jobs primitive | feature | L | `06` §5; issue-13 §1 |
+| A3 | `model` without usage MUST NOT fabricate cost (+ fixture #4508) | enforce-pinned-rule + add-fixture | S | `06` §7.3; ADR-0025 R1(c); canonical model spec §7 |
+| A4 | Every detail key priced at its own rate off the price entry; data-driven, no allow-list (+ cache/audio fixtures) | enforce-pinned-rule + add-fixture | M | `06` §7.4; canonical model spec §7; Opik mine (#5618/#6976), Opik mine (#7137) |
+| A5 | Tiered/threshold pricing applied; snapshot captures tier schedule (+ fixture #6982) | enforce-pinned-rule + add-fixture | M | `06` §7.5; canonical model spec §7 |
+| A6 | Symmetric model-key normalization + single provider-canon table (+ fixtures #5621/#6928) | enforce-pinned-rule + add-fixture | M | `06` §7.6; canonical model spec §7 |
+| A7 | `pricing_snapshot_ref` recorded on every derived cost; re-price backfill via jobs primitive | feature | L | `06` §5; canonical model spec §7 |
 
 *Dependency: A1–A7 all depend on the enrich stage existing. The complete ordered
 rule+fixture set for that arc is in [§ Enrich-stage build spec](#enrich-stage-build-spec).*
@@ -106,21 +106,21 @@ SCIM (B4), agent-token identity tools (B8), MCP OAuth DCR (B9), token refresh-at
 
 | ID | Entry | Type | Effort | Sources | Issue |
 |---|---|---|---|---|---|
-| ~~B1~~ | ~~Real `resource:verb` RBAC + static role map~~ **RESOLVED — Arc O / O1+O2 (PR #123, #124).** `perm.RoleScopes` is a real per-role map; per-project-per-org resolution at the ONE `query.auth` intersection seam. ADR-0031/0032. | feature | L | issue-21 notes §6 | #21 ✅ |
-| ~~B2~~ | ~~OIDC login minting the standard session~~ **RESOLVED — Arc O / O5 (PR #131).** Auth-code flow, verify-before-trust (sig/iss/aud/exp/nonce/state), group→role fail-closed, JIT through the O3 discipline. ADR-0034. (SAML deferred — a named follow-on.) | feature | L | issue-21 notes §6 | #21 ✅ |
-| ~~B3~~ | ~~SSO/domain data model (client secret separate, never-exported)~~ **RESOLVED — Arc O / O5 (PR #131).** Per-org `sso_providers`; client secret secretbox-sealed, never returned; single-login-org + identity-ownership guards. | feature | M | issue-21 notes §6 (#14713) | #21 ✅ |
-| B4 | SCIM under the one-shared-guard rule (authz at handler entry before any I/O) — **tracked follow-on** (provisioning gates + the shared-guard rule are in place from O3). | feature | M | issue-21 notes (#14448) | #21 |
-| ~~B5~~ | ~~Server-resolved subject == client-supplied identity (audit integrity)~~ **RESOLVED — Arc O / O3 (PR #125).** Every provisioning + auth path resolves the actor from the server session/assertion, never a client-supplied id. | enforce-pinned-rule | S | issue-21 notes (#14790) | #21 ✅ |
+| ~~B1~~ | ~~Real `resource:verb` RBAC + static role map~~ **RESOLVED — Arc O / O1+O2 (PR #123, #124).** `perm.RoleScopes` is a real per-role map; per-project-per-org resolution at the ONE `query.auth` intersection seam. ADR-0031/0032. | feature | L | Langfuse mine (auth harvest) | #21 ✅ |
+| ~~B2~~ | ~~OIDC login minting the standard session~~ **RESOLVED — Arc O / O5 (PR #131).** Auth-code flow, verify-before-trust (sig/iss/aud/exp/nonce/state), group→role fail-closed, JIT through the O3 discipline. ADR-0034. (SAML deferred — a named follow-on.) | feature | L | Langfuse mine (auth harvest) | #21 ✅ |
+| ~~B3~~ | ~~SSO/domain data model (client secret separate, never-exported)~~ **RESOLVED — Arc O / O5 (PR #131).** Per-org `sso_providers`; client secret secretbox-sealed, never returned; single-login-org + identity-ownership guards. | feature | M | Langfuse mine (auth harvest) (#14713) | #21 ✅ |
+| B4 | SCIM under the one-shared-guard rule (authz at handler entry before any I/O) — **tracked follow-on** (provisioning gates + the shared-guard rule are in place from O3). | feature | M | Langfuse mine (#14448) | #21 |
+| ~~B5~~ | ~~Server-resolved subject == client-supplied identity (audit integrity)~~ **RESOLVED — Arc O / O3 (PR #125).** Every provisioning + auth path resolves the actor from the server session/assertion, never a client-supplied id. | enforce-pinned-rule | S | Langfuse mine (#14790) | #21 ✅ |
 | ~~B6~~ | ~~**Plugin-token revocation seam** (per-plugin/`jti` denylist in verify path) — LIVE CODE gap, gates pilot→prod~~ **RESOLVED — Arc O / O4, PR #128 (`6b0b631`).** Revocation epoch store checked inside `plugintoken.Signer.Verify*` (the one chokepoint); per-user/plugin/`jti` denial with `revoked_at >= issued_at` (still-within-TTL denied); `RevokeUser` cascade; one supervisor disable seam. ADR-0033. | feature | M | ADR-0025 R3; ADR-0033; **#63** | #63 ✅ |
 | B8 | Agent-callable identity tools privileged + scope-gated; H3 intersection on agent tokens | enforce-pinned-rule | S | ADR-0025 R5 | #21 |
-| B9 | MCP OAuth dynamic client registration (RFC 7591) for agent/plugin surfaces | feature | M | round-02 §5 (#7093); issue-21 §7 | #21 |
-| ~~B10~~ | ~~Group-mappable workspace + per-user project/dataset isolation~~ **PARTLY RESOLVED — Arc O / O6 (PR #132).** Per-user state isolation shipped: the `kv` primitive gains a user scope keyed on the O1-resolved identity (one user's per-user state is unreadable/unwritable by another); ADR-0035. Group→role mapping shipped in O5 (SSO). The broader group-mappable multi-workspace model remains a follow-on. (This is the "per-user state" the Arc-N audit tracked as #69 — an audit label, not GH issue #69, which is the unrelated D1 compose-creds item.) | feature | M | round-02 §5 (#3327); issue-21 §7 | #21 ◑ |
+| B9 | MCP OAuth dynamic client registration (RFC 7591) for agent/plugin surfaces | feature | M | Opik mine (#7093); ADR-0031–0035 | #21 |
+| ~~B10~~ | ~~Group-mappable workspace + per-user project/dataset isolation~~ **PARTLY RESOLVED — Arc O / O6 (PR #132).** Per-user state isolation shipped: the `kv` primitive gains a user scope keyed on the O1-resolved identity (one user's per-user state is unreadable/unwritable by another); ADR-0035. Group→role mapping shipped in O5 (SSO). The broader group-mappable multi-workspace model remains a follow-on. (This is the "per-user state" the Arc-N audit tracked as #69 — an audit label, not GH issue #69, which is the unrelated D1 compose-creds item.) | feature | M | Opik mine (#3327); ADR-0031–0035 | #21 ◑ |
 
 ### Cluster C — Live-surface verify (the non-P0 remainder)
 
 | ID | Entry | Type | Effort | Sources | Issue |
 |---|---|---|---|---|---|
-| C4 | Partial-object update can't drop an unspecified sibling field (V17 vector — "prove it") | add-fixture | S | issue-13 §4 (#6761); `05-update-semantics.md` §3 | #71 |
+| C4 | Partial-object update can't drop an unspecified sibling field (V17 vector — "prove it") | add-fixture | S | canonical model spec §7 (#6761); `05-update-semantics.md` §3 | #71 |
 
 ### Cluster D — Ingest / WAL / event-bus durability (scale arc → issues #14/#16)
 
@@ -141,18 +141,19 @@ SCIM (B4), agent-token identity tools (B8), MCP OAuth DCR (B9), token refresh-at
 
 | ID | Entry | Type | Effort | Sources | Issue |
 |---|---|---|---|---|---|
-| C2 | Force UTC on pg + CH connections; cross-TZ conformance assertion (non-UTC host ≡ UTC host) | hardening | S | round-02 §7 (#7205) | #71 |
-| F1 | Airgap: bundle every image by digest; survive a vanished/relicensed upstream image | hardening | M | deploy.md; round-02 (#3172/#3305), round-03 (#2764 Bitnami) | #74 |
-| F2 | Helm-values coverage: sub-path ingress, custom/duplicate labels, ExternalSecrets store name, **TLS `secretName`** | hardening | M | deploy.md; round-02 (#3291/#3783/#3089/#4033), round-03 (#2366) | #74 |
-| F3 | Image hygiene: no unused interpreters/toolchains in `kernel.Dockerfile` | hardening | S | deploy.md; round-02 (#7107) | #74 |
+| C2 | Force UTC on pg + CH connections; cross-TZ conformance assertion (non-UTC host ≡ UTC host) | hardening | S | Opik mine (#7205) | #71 |
+| F1 | Airgap: bundle every image by digest; survive a vanished/relicensed upstream image | hardening | M | deploy.md; Opik mine (#3172/#3305), Opik mine (#2764 Bitnami) | #74 |
+| F2 | Helm-values coverage: sub-path ingress, custom/duplicate labels, ExternalSecrets store name, **TLS `secretName`** | hardening | M | deploy.md; Opik mine (#3291/#3783/#3089/#4033), Opik mine (#2366) | #74 |
+| F3 | Image hygiene: no unused interpreters/toolchains in `kernel.Dockerfile` | hardening | S | deploy.md; Opik mine (#7107) | #74 |
 | D7 | WAL group-commit fsync batching (throughput; correctness unaffected) | hardening | M | ADR-0027 Deferred | #72 |
 | D8 | TTL reap of records stuck on a permanent non-decode failure | hardening | S | ADR-0027 Deferred | #72 |
 | D9 | Redis Streams `MAXLEN` trim to ~backlogCap + DLQ policy | hardening | S | ADR-0028 Deferred | #72 |
 | R4 | Any future distributed limiter: availability→fail-open, resource-protection→fail-closed (keep the distinction) | design-note | S | ADR-0025 R4 | — |
-| B7 | SDK plugin-token refresh-at-ratio (0.8 of TTL) + notify-on-rotation | hardening | S | issue-21 notes §4 | #21 |
-| POS1 | Positioning proof: trace-as-derived makes the span/trace publish race structurally impossible | positioning-proof | S | positioning.md; round-02 (#2782) | — |
-| POS2 | Positioning proof: 503-backpressure convergence (G2) | positioning-proof | S | positioning.md; round-02 (#7091) | — |
-| G2 | Session/thread grouping fixtures (explicit `thread_id` survives; large-output threads) | add-fixture | S | round-02 (#3441), round-03 (#2724/#2287) | #71 |
+| B7 | SDK plugin-token refresh-at-ratio (0.8 of TTL) + notify-on-rotation | hardening | S | ADR-0031–0035 (Arc O); credential-refresh harvest | #21 |
+| POS1 | Positioning proof: trace-as-derived makes the span/trace publish race structurally impossible | positioning-proof | S | positioning.md; Opik mine (#2782) | — |
+| POS2 | Positioning proof: 503-backpressure convergence (G2) | positioning-proof | S | positioning.md; Opik mine (#7091) | — |
+| G2 | Session/thread grouping fixtures (explicit `thread_id` survives; large-output threads) | add-fixture | S | Opik mine (#3441, #2724/#2287) | #71 |
+| G3 | Concurrent same-`(project_id,id)` write batches are absorbed by the idempotent merge — no error, no lost field. Prove the fold's convergence under a racing duplicate batch. | add-fixture | S | Opik mine (#2515) | #71 |
 
 ---
 
@@ -171,8 +172,11 @@ SCIM (B4), agent-token identity tools (B8), MCP OAuth DCR (B9), token refresh-at
 ## Per-cluster build spec — the enrich / cost-derivation stage (issue #13)
 
 When the enrich arc is built, honor this complete ruled set **in dependency order**.
-Everything below is already normative in `06-usage-cost.md` §7 + ADR-0025 R1; the
-fixtures are enumerated in `issue-13-cost-derivation-design-notes.md`.
+Everything below is already normative in the canonical model spec
+(`api/model/v1alpha1/README.md` §7, Usage and cost) + ADR-0025 R1, and the fixtures are
+enumerated inline below. The `#NNNN` references are public `comet-ml/opik` issues
+(`https://github.com/comet-ml/opik/issues/<n>`) — the second-incumbent bug each rule
+immunizes us against.
 
 **Order:**
 1. **Resolution scaffold** — resolve `(provider, model)` to a price entry; write
@@ -195,14 +199,17 @@ fixtures are enumerated in `issue-13-cost-derivation-design-notes.md`.
 **Meta-rule (governs all of the above):** price detail keys by **iterating the price
 entry's rate fields**, never a hand-maintained case list — the recurring incumbent bug
 (Langfuse + Opik alike) is an un-enumerated provider/bucket falling through to the flat
-rate (`06` §7.4 meta-lesson; empirically confirmed by Opik's one-provider-at-a-time
-patch history, round-03 §3).
+rate (canonical model spec §7.4 meta-lesson). Empirically confirmed by Opik's
+one-provider-at-a-time patch history: six separate patches (#7016 Claude/Vertex, #6980
+Gemini, #6971 OpenAI Responses, #6978 Mistral, #7023 the >200k tier, #7037 price
+overrides), each a special case our general-form rule already subsumes.
 
 ---
 
 ## Per-cluster build spec — the auth / RBAC arc (issue #21)
 
-Build order from `issue-21-auth-rbac-design-notes.md` §6, with the harvest additions:
+Build order harvested from the Langfuse merged-PR mine + the Opik cross-over mine (both
+incumbents independently confirm each rule; public issue numbers cited inline):
 1. **`resource:verb` scope model + static role map (B1)** — turns `perm.RoleScopes`
    from 2 scopes into real RBAC; makes `query/server.go`'s fixed-admin grant a true
    intersection.
@@ -260,11 +267,17 @@ amendment, trigger = first untrusted third-party frontend) and a **`blobs` primi
 
 ## Gaps found during consolidation (need a human ruling — NOT resolved here)
 
-1. **Round-3 Opik dispositions are unruled.** Rounds 1–2 were ruled and banked; the
-   Round-3 report (`round-03-findings.md`) is report-only. Backlog entries sourced from
-   Round 3 — **C1 (#7019 P0 verify)**, F1/F2 additions (#2764 Bitnami, #2366 TLS
-   secretName) — are marked provisional. C1 is filed as a tracking issue regardless
-   (it is a *verify*, prudent to track), but its priority should be confirmed.
+1. ~~**Round-3 Opik dispositions are unruled.**~~ **RULED + BANKED (2026-07-13).** The
+   Round-3 findings are dispositioned and the mine is closed out: F1/F2 (#2764 Bitnami
+   relicense, #2366 Ingress TLS `secretName`) banked into `.claude/rules/deploy.md` and
+   issue **#74**; the #2515 concurrent-duplicate-batch fixture banked as **G3** (#71);
+   #6930 is a confirmation of keyset pagination + payload projection (no code owed).
+   **C1 (#7019) is no longer provisional, and no longer urgent**: an audit found the
+   kernel exposes *no* name/slug lookup surface — every Query API and control-plane path
+   resolves by id — so the by-name-skips-the-check class is structurally absent today.
+   C1 survives as a **standing invariant** (#70): *if* a name/slug/external-ref lookup is
+   ever added, it MUST funnel through the same `auth()` intersection seam as the id path
+   (invariant 11 — a new caller inherits the check by construction, never by remembering).
 2. **Pipeline stage status vs. issues.** Ground-truth says the `redact` stage is
    **built** (real), while `sample` (#12) and `enrich` (#13) are no-ops. If redaction
    is done, issue **#11** may be closeable — needs a maintainer confirmation, not
@@ -273,9 +286,14 @@ amendment, trigger = first untrusted third-party frontend) and a **`blobs` primi
    **frontend-direct plugin identity / origin isolation** boundary is deferred
    (ADR-0004 amendment / ADR-0023). These gate several plugin UX stories (wave3
    B2/B4/B9) but have no dedicated tracking issue — should they get one, or ride #25?
-4. **`docs/research/langfuse-study/` teardown book is uncommitted** (ADR-0026 Deferred,
-   "lives in conversation history"). A provenance gap, not an implementation item —
-   flag for reconstruct-and-commit or explicit drop.
+4. ~~**`docs/research/langfuse-study/` teardown book is uncommitted**~~ **RESOLVED by
+   explicit drop (2026-07-13).** The competitive-research tree (`docs/research/`) is
+   retired: every ruled decision it carried is now normative in-tree (canonical model spec
+   §7, ADR-0025/0026/0027/0029/0031–0035, `.claude/rules/deploy.md`, this backlog), and the
+   *evidence* behind the positioning claims — the queries, ranked tables, and maintainer
+   quotes — is preserved in `docs/positioning.md`'s Evidence appendix, cited to public
+   primary URLs so every figure is reproducible without the raw dumps. The raw mined
+   datasets are regenerable from the recorded queries; the teardown book stays dropped.
 5. **Demand issues #35–#42** (n8n, webhooks, full-text search, multimodal, alerts,
    deploy stacks, RBAC, LangChain/LlamaIndex normalizers) are product features tracked
    separately; they are cross-referenced here (E1↔#36/#39, B1↔#41, H1/H2↔#42) but their

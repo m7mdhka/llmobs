@@ -17,12 +17,12 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/platform/secretbox"
 )
 
-// OIDC/SSO (Arc O / O5, #21) — the FIRST external trust boundary. An IdP-asserted identity is a
+// OIDC/SSO — the FIRST external trust boundary. An IdP-asserted identity is a
 // CLIENT-SUPPLIED claim until fully verified; the entire security of this file is the ordering:
 // signature (against the IdP JWKS) + issuer + audience + expiry (via go-oidc's verifier) AND the
 // browser state (CSRF) AND the nonce (replay) are ALL checked BEFORE any claim field (email,
 // groups) is read. A role/identity from an unverified assertion never grants access. NO plan
-// gating — SSO ships in the OSS core (the fully-OSS-auth wedge).
+// gating — SSO ships in the OSS core.
 
 const ssoStateCookie = "llmobs_sso"
 
@@ -39,7 +39,7 @@ type SSOHandler struct {
 	// session carrying the user's default-org authority (a cross-org escalation the boundary
 	// review caught). Injectable for tests; defaults to controlplane.DefaultOrgID. The provider
 	// config table is per-org and multi-org-ready; per-org SSO LOGIN awaits per-org session
-	// authority (a future arc).
+	// authority (future work).
 	loginOrg func(context.Context) (string, error)
 }
 
@@ -67,9 +67,9 @@ func (s *SSOHandler) isLoginOrg(ctx context.Context, org string) bool {
 }
 
 // config handles GET/PUT /v1alpha1/sso/{org}. Gated on org:manage in the TARGET org (configuring
-// external identity is an owner-level, per-org action — resolved against the org it targets, O2).
-// PUT caps every group→role entry strictly-below the configurer's own role (the O3 escalation cap
-// on this fourth provisioning path — so SSO can never be configured to grant owner) and refuses
+// external identity is an owner-level, per-org action — resolved against the org it targets).
+// PUT caps every group→role entry strictly-below the configurer's own role (the escalation cap
+// on this JIT-provisioning path — so SSO can never be configured to grant owner) and refuses
 // to disable local passwords if it would leave the org with no local-password owner (break-glass).
 func (s *SSOHandler) config(w http.ResponseWriter, r *http.Request) {
 	if s.box == nil {
@@ -91,7 +91,7 @@ func (s *SSOHandler) config(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "forbidden", "configuring SSO requires org:manage (owner) in this org")
 		return
 	}
-	// O5 ships single-login-org SSO: SSO authenticates only into the login org, so configuring
+	// Single-login-org SSO: SSO authenticates only into the login org, so configuring
 	// it for any other org would be dead config that could never mint a coherent session.
 	if !s.isLoginOrg(r.Context(), org) {
 		writeErr(w, http.StatusConflict, "sso_not_login_org", "SSO login is only supported for the instance's login org in this version")
@@ -408,13 +408,13 @@ func (s *SSOHandler) callback(w http.ResponseWriter, r *http.Request, org string
 		writeErr(w, http.StatusForbidden, "sso_no_role", "your account is not in a group mapped to a role")
 		return
 	}
-	// 8. A revoked user (O4) cannot re-enter via SSO either.
+	// 8. A revoked user cannot re-enter via SSO either.
 	if revoked, rerr := controlplane.UserRevoked(r.Context(), s.h.pool, email); rerr != nil || revoked {
 		writeErr(w, http.StatusForbidden, "revoked", "this account has been revoked")
 		return
 	}
-	// 9. JIT-provision through the O3 discipline: into THIS org only, at the capped mapped role,
-	//    never granting or downgrading an owner.
+	// 9. JIT-provision through the same provisioning discipline: into THIS org only, at the
+	//    capped mapped role, never granting or downgrading an owner.
 	uid, err := controlplane.JITProvisionSSOUser(r.Context(), s.h.pool, org, email, role)
 	if err == controlplane.ErrLocalAccountExists {
 		writeErr(w, http.StatusForbidden, "sso_local_account", "an account with this email uses local login; sign in with your password")
@@ -439,7 +439,7 @@ func (s *SSOHandler) callback(w http.ResponseWriter, r *http.Request, org string
 // CLOSED on a present-but-not-affirmatively-true claim (a bool false, the string "false", or any
 // non-true value — some IdPs emit email_verified as a STRING, which a naive bool assertion would
 // miss and wrongly trust). An ABSENT claim is accepted: an enterprise IdP's directory is
-// authoritative for its emails and often omits it (a documented trust assumption — see ADR-0034).
+// authoritative for its emails and often omits it (a deliberate, documented trust assumption).
 func emailVerifiedOK(claims map[string]any) bool {
 	v, present := claims["email_verified"]
 	if !present {

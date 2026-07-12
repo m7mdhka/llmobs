@@ -1,6 +1,6 @@
 // Package redact scrubs PII/secret patterns from payload fields BEFORE they are
 // persisted — the invariant that makes exports and compliance safe by
-// construction (issue #11, first half). It is pattern-based and conservative;
+// construction. It is pattern-based and conservative;
 // the advanced NER/processor-injection path for custom models remains tracked.
 //
 // Redaction is observable: silent scrubbing is how trust dies. Every scrub is
@@ -87,7 +87,7 @@ func (r *Redactor) RedactString(s string) (string, map[string]int) {
 
 // RedactValue walks any JSON value and scrubs string leaves in place, returning
 // the scrubbed value and aggregated counts. Non-string leaves are untouched;
-// object KEYS are never touched (02-span.md: keys are structure, not payload).
+// object KEYS are never touched (keys are structure, not payload).
 func (r *Redactor) RedactValue(v any) (any, map[string]int) {
 	total := map[string]int{}
 	var walk func(any) any

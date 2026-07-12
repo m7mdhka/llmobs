@@ -13,7 +13,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/pkg/pluginproto"
 )
 
-// ExternalURL is the external-URL executor (R2): it reaches a plugin backend the
+// ExternalURL is the external-URL executor: it reaches a plugin backend the
 // operator runs, over plain HTTP GET, and never starts or stops a process.
 type ExternalURL struct {
 	client *http.Client
@@ -55,7 +55,7 @@ func (e *ExternalURL) Health(ctx context.Context, b Backend) (pluginproto.Health
 	return h, nil
 }
 
-// DeliverToken POSTs the service token to {url}/plugin/v1/token (H7c). This is the
+// DeliverToken POSTs the service token to {url}/plugin/v1/token. This is the
 // only token path — kernel-initiated push to the plugin's own registered URL.
 func (e *ExternalURL) DeliverToken(ctx context.Context, b Backend, token string, expiresUnix int64) error {
 	body, err := json.Marshal(pluginproto.TokenDelivery{ServiceToken: token, ExpiresUnix: expiresUnix})

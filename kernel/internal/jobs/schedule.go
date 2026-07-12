@@ -1,4 +1,4 @@
-// Package jobs is the plugin job scheduler (H6): cron + @every + on-demand, with
+// Package jobs is the plugin job scheduler: cron + @every + on-demand, with
 // retries, long-running-job awareness, and audit-distinguishable system identity.
 // Postgres-backed, advisory-lock leader-elected — zero new infrastructure.
 package jobs

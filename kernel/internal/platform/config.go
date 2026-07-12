@@ -13,99 +13,99 @@ import (
 
 // Config is the kernel daemon configuration. 12-factor: defaults, then an
 // optional JSON file (LLMOBS_CONFIG_FILE), then environment overrides. Every env
-// var is LLMOBS_-prefixed via the brand constant (D15).
+// var is LLMOBS_-prefixed via the brand constant.
 type Config struct {
-	DatabaseURL        string `json:"database_url"`
-	OTLPHTTPAddr       string `json:"otlp_http_addr"`
-	OTLPGRPCAddr       string `json:"otlp_grpc_addr"`
-	APIAddr            string `json:"api_addr"`
-	LogLevel           string `json:"log_level"`
-	LogFormat          string `json:"log_format"`
-	MigrateOnBoot      bool   `json:"migrate_on_boot"`
-	BootstrapProject   string `json:"bootstrap_project"`
-	BootstrapAPIKey    string `json:"bootstrap_api_key"`
-	BootstrapAdminEml  string `json:"bootstrap_admin_email"`
-	BootstrapAdminPwd  string `json:"bootstrap_admin_password"`
-	QueryMaxWindow     string `json:"query_max_window"`     // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
-	QueryStmtTimeout   string `json:"query_stmt_timeout"`   // server-side statement_timeout for DSL reads; e.g. "30s"
-	// QueryMaxResponseBytes caps the SERIALIZED size of a single query/trace-tree response
-	// (#83). Row count is already bounded, but a page of wide-payload rows is not — without
+	DatabaseURL       string `json:"database_url"`
+	OTLPHTTPAddr      string `json:"otlp_http_addr"`
+	OTLPGRPCAddr      string `json:"otlp_grpc_addr"`
+	APIAddr           string `json:"api_addr"`
+	LogLevel          string `json:"log_level"`
+	LogFormat         string `json:"log_format"`
+	MigrateOnBoot     bool   `json:"migrate_on_boot"`
+	BootstrapProject  string `json:"bootstrap_project"`
+	BootstrapAPIKey   string `json:"bootstrap_api_key"`
+	BootstrapAdminEml string `json:"bootstrap_admin_email"`
+	BootstrapAdminPwd string `json:"bootstrap_admin_password"`
+	QueryMaxWindow    string `json:"query_max_window"`   // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
+	QueryStmtTimeout  string `json:"query_stmt_timeout"` // server-side statement_timeout for DSL reads; e.g. "30s"
+	// QueryMaxResponseBytes caps the SERIALIZED size of a single query/trace-tree response.
+	// Row count is already bounded, but a page of wide-payload rows is not — without
 	// this the kernel buffers an unbounded response and OOMs (a BOTH-profile DoS). Exceeding
 	// it returns a typed response_too_large 413. LLMOBS_QUERY_MAX_RESPONSE_BYTES; 0 => the
 	// built-in 32 MiB default (query.DefaultMaxResponseBytes).
-	QueryMaxResponseBytes int64 `json:"query_max_response_bytes"`
-	CookieSecure       bool   `json:"cookie_secure"`        // set Secure on session cookies
-	PublicURL          string `json:"public_url"`           // external origin for OIDC redirect_uri (O5); empty => derive from request Host
-	SecretboxKey       string `json:"secretbox_key"`        // base64 32-byte key sealing SSO client secrets (O5); empty => ephemeral (config lost on restart)
-	WebUIDir           string `json:"webui_dir"`            // dir of the built shell; empty => placeholder
-	PluginDir          string `json:"plugin_dir"`           // dir of dev-mode plugins; empty => none
-	DevPluginRemotes   string `json:"dev_plugin_remotes"`   // J3 `make dev`: "id=url,id=url" — advertise live dev-server remoteEntry URLs; empty in prod
-	MetricsAddr        string `json:"metrics_addr"`         // Prometheus /metrics bind; empty => mounted on API server
-	ClockSkewThreshold string `json:"clock_skew_threshold"` // e.g. "5m"; drift beyond stamps dq
-	ServeShell         bool   `json:"serve_shell"`          // serve the web shell at /; false => headless (API only)
-	RedactPresets      string `json:"redact_presets"`       // CSV of preset detectors; "none" disables; default the standard set
-	RedactCustomJSON   string `json:"redact_custom"`        // JSON array of {name,pattern,token} custom rules
-	IngestQueueSize    int    `json:"ingest_queue_size"`    // in-process ingest queue capacity (async-ack buffer)
-	// IngestSpoolDir, when set, selects the durable WAL ingest spool (ADR-0027,
-	// scale profile): the ack becomes durable when bytes hit this local WAL, and
+	QueryMaxResponseBytes int64  `json:"query_max_response_bytes"`
+	CookieSecure          bool   `json:"cookie_secure"`        // set Secure on session cookies
+	PublicURL             string `json:"public_url"`           // external origin for OIDC redirect_uri; empty => derive from request Host
+	SecretboxKey          string `json:"secretbox_key"`        // base64 32-byte key sealing SSO client secrets; empty => ephemeral (config lost on restart)
+	WebUIDir              string `json:"webui_dir"`            // dir of the built shell; empty => placeholder
+	PluginDir             string `json:"plugin_dir"`           // dir of dev-mode plugins; empty => none
+	DevPluginRemotes      string `json:"dev_plugin_remotes"`   // `make dev`: "id=url,id=url" — advertise live dev-server remoteEntry URLs; empty in prod
+	MetricsAddr           string `json:"metrics_addr"`         // Prometheus /metrics bind; empty => mounted on API server
+	ClockSkewThreshold    string `json:"clock_skew_threshold"` // e.g. "5m"; drift beyond stamps dq
+	ServeShell            bool   `json:"serve_shell"`          // serve the web shell at /; false => headless (API only)
+	RedactPresets         string `json:"redact_presets"`       // CSV of preset detectors; "none" disables; default the standard set
+	RedactCustomJSON      string `json:"redact_custom"`        // JSON array of {name,pattern,token} custom rules
+	IngestQueueSize       int    `json:"ingest_queue_size"`    // in-process ingest queue capacity (async-ack buffer)
+	// IngestSpoolDir, when set, selects the durable WAL ingest spool (scale
+	// profile): the ack becomes durable when bytes hit this local WAL, and
 	// undrained records replay on boot. Empty => the in-memory spool (lite).
 	IngestSpoolDir string `json:"ingest_spool_dir"`
 	// ShutdownDrainTimeout bounds how long shutdown waits for the ingest queue to
-	// persist before giving up (G1). It MUST be shorter than the orchestrator's
+	// persist before giving up. It MUST be shorter than the orchestrator's
 	// terminationGracePeriodSeconds (default 30s in K8s) so the drain completes
 	// before SIGKILL — leave headroom for the ~5s server shutdown too.
 	ShutdownDrainTimeout string `json:"shutdown_drain_timeout"` // e.g. "20s"
 	// PersistUnhealthyThreshold: consecutive persist failures before /readyz goes
-	// not-ready and the receivers shed with 503 (G2). >1 avoids flapping on a
+	// not-ready and the receivers shed with 503. >1 avoids flapping on a
 	// single transient error; recovery is immediate on the first success.
 	PersistUnhealthyThreshold int `json:"persist_unhealthy_threshold"`
 	// ErasureSuppressionTTL: how long a GDPR-erasure tombstone blocks re-delivery
-	// of an erased span (G3). Need only outlast plausible redelivery, not forever.
+	// of an erased span. Need only outlast plausible redelivery, not forever.
 	ErasureSuppressionTTL string `json:"erasure_suppression_ttl"` // e.g. "720h"
 	// PluginReconcileInterval: how often the plugin supervisor reconciles backend
 	// plugins toward running (handshake + health probe). Only the leader replica
 	// supervises (pg advisory lock).
 	PluginReconcileInterval string `json:"plugin_reconcile_interval"` // e.g. "15s"
 	// EventBacklogCap: max unacked events a plugin subscriber may fall behind on a
-	// (project, topic) before the overflow is dead-lettered (H6) — bounds a dead
+	// (project, topic) before the overflow is dead-lettered — bounds a dead
 	// subscriber so it cannot pin the event log.
 	EventBacklogCap int `json:"event_backlog_cap"`
-	// Scale event bus (ADR-0028): when EventRedisURL or EventRedisSentinelAddrs is
+	// Scale event bus: when EventRedisURL or EventRedisSentinelAddrs is
 	// set, the event bus uses the Redis/Valkey Streams backend instead of Postgres.
-	// Sentinel (MasterName + SentinelAddrs) gives HA failover (R-EV1); empty => lite.
+	// Sentinel (MasterName + SentinelAddrs) gives HA failover; empty => lite.
 	EventRedisURL              string   `json:"event_redis_url"`
 	EventRedisMasterName       string   `json:"event_redis_master_name"`
 	EventRedisSentinelAddrs    []string `json:"event_redis_sentinel_addrs"`
 	EventRedisPassword         string   `json:"event_redis_password"`
 	EventRedisSentinelPassword string   `json:"event_redis_sentinel_password"`
-	// Managed-cloud Redis auth (#126). EventRedisUsername is the ACL/IAM user (AWS
+	// Managed-cloud Redis auth. EventRedisUsername is the ACL/IAM user (AWS
 	// ElastiCache IAM user, GCP Memorystore ACL user). EventRedisPasswordFile, when set,
 	// is re-read on every (re)connect for the CURRENT rotating token, so an external
 	// sidecar can refresh short-lived credentials without a kernel restart; it takes
 	// precedence over the static EventRedisPassword.
 	EventRedisUsername     string `json:"event_redis_username"`
 	EventRedisPasswordFile string `json:"event_redis_password_file"`
-	// Scale dual-read (ADR-0026 RULING-MIG6): when ClickHouseURL is set, the kernel
+	// Scale dual-read: when ClickHouseURL is set, the kernel
 	// runs the PERMANENT dual-read layer — every read unifies Postgres-lite
 	// (historical) and ClickHouse-scale (new), and writes go to scale with
 	// seed-on-migrate. This is how a self-hoster crosses the lite→scale boundary
 	// without a migration cliff: no read window where data is missing. Empty => lite.
 	ClickHouseURL string `json:"clickhouse_url"`
 	// CHCluster is the ClickHouse cluster name for ON CLUSTER DDL on boot-migrate
-	// (empty => standalone/Replicated-database; "default" is refused, R-CH1).
+	// (empty => standalone/Replicated-database; "default" is refused).
 	CHCluster string `json:"ch_cluster"`
-	// ClickHouse per-query resource caps (RULING-CH9). The scale adapter fails closed
+	// ClickHouse per-query resource caps. The scale adapter fails closed
 	// unless all four are set; these defaults are generous for interactive reads.
 	CHMaxExecutionTime string `json:"ch_max_execution_time"` // e.g. "30s"
 	CHMaxMemoryBytes   int64  `json:"ch_max_memory_bytes"`
 	CHMaxRowsToRead    int64  `json:"ch_max_rows_to_read"`
 	CHMaxBytesToRead   int64  `json:"ch_max_bytes_to_read"`
-	// CHReadYourWrites (#109) opts a MULTI-REPLICA ClickHouse behind a distributing LB
+	// CHReadYourWrites opts a MULTI-REPLICA ClickHouse behind a distributing LB
 	// into read-after-write consistency (insert_quorum + select_sequential_consistency),
 	// at the cost of quorum write latency. OFF by default: single-node / sticky-endpoint
 	// deployments already have RYW for free. LLMOBS_CH_READ_YOUR_WRITES.
 	CHReadYourWrites bool `json:"ch_read_your_writes"`
-	// Lite→scale backfill (L5, RULING-MIG6). OPTIONAL and convenience-only — dual-read
+	// Lite→scale backfill. OPTIONAL and convenience-only — dual-read
 	// already makes lite data readable, so this just moves cold rows onto scale in the
 	// background. Decoupled from boot readiness; resumable across restarts. Only runs
 	// when dual-read (ClickHouseURL) is enabled.

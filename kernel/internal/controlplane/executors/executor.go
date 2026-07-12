@@ -1,8 +1,8 @@
 // Package executors implements supervisor executors — the mechanism by which the
-// kernel reaches and probes a plugin backend. Arc H ships the external-URL
-// executor only (ADR-0023/R2): the operator runs the plugin service however they
+// kernel reaches and probes a plugin backend. Only the external-URL
+// executor exists today: the operator runs the plugin service however they
 // like and registers it by URL; the executor drives the handshake and health
-// probes over HTTP. Compose/operator/GitOps executors are deferred (issues). The
+// probes over HTTP. Compose/operator/GitOps executors are deferred. The
 // kernel never touches the Docker/K8s socket — the deployability invariant.
 //
 // Executors are about *reaching* a plugin (reachability + reported state); token
@@ -24,7 +24,7 @@ type Backend struct {
 }
 
 // Executor reaches a plugin backend to handshake, probe health, and deliver the
-// service token (kernel-initiated push, H7c).
+// service token (kernel-initiated push).
 type Executor interface {
 	Name() string
 	Handshake(ctx context.Context, b Backend) (pluginproto.Info, error)

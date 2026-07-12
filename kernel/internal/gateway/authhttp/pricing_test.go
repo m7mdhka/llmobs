@@ -50,7 +50,7 @@ func (f *fakeReprice) StartReprice(snapshotRefID, projectID string) (string, boo
 }
 
 func withRole(r *http.Request, role, csrf string) *http.Request {
-	// User.ID is set to the role so the injected authority seams (O3) can key the decision
+	// User.ID is set to the role so the injected authority seams can key the decision
 	// on it without a DB — the fast authz-matrix path. In production these seams resolve the
 	// role from org_memberships against the target org (see authority.go).
 	sess := controlplane.Session{CSRFToken: csrf, User: controlplane.User{ID: role, Email: "a@b.c", Role: role}}
@@ -79,7 +79,7 @@ func TestPricingWriteAuthz(t *testing.T) {
 	store := &fakePriceOps{}
 	mux := http.NewServeMux()
 	h.RegisterPricing(mux, store, &fakeReprice{})
-	grantInstanceAdminTo(h, "owner") // global price edits require instance-admin (O3)
+	grantInstanceAdminTo(h, "owner") // global price edits require instance-admin
 
 	body := `{"provider":"openai","model":"gpt-4o","effective_from":"2026-01-01T00:00:00Z","rates":{"input":{"per_token":0.0000025}}}`
 	post := func(mod func(*http.Request) *http.Request) *httptest.ResponseRecorder {
@@ -130,7 +130,7 @@ func TestPricingWriteAuthz(t *testing.T) {
 	}
 }
 
-// TestRepriceTriggerAuthz proves the M4 re-price trigger inherits the same admin gate as
+// TestRepriceTriggerAuthz proves the re-price trigger inherits the same admin gate as
 // a price edit — it MUTATES money across history, so a viewer (or anonymous, or
 // CSRF-less) caller must never launch it, and the canonicalized superseded ref id reaches
 // the launcher only on an authorized request.
@@ -140,7 +140,7 @@ func TestRepriceTriggerAuthz(t *testing.T) {
 	rp := &fakeReprice{}
 	mux := http.NewServeMux()
 	h.RegisterPricing(mux, store, rp)
-	grantInstanceAdminTo(h, "owner") // price-scope reprice requires instance-admin (O3)
+	grantInstanceAdminTo(h, "owner") // price-scope reprice requires instance-admin
 
 	body := `{"scope":"price","provider":"Google","model":"gemini-1.5-pro","version":1}`
 	post := func(mod func(*http.Request) *http.Request) *httptest.ResponseRecorder {

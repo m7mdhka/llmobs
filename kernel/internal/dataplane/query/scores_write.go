@@ -8,8 +8,8 @@ import (
 )
 
 // subjectTypeRe accepts a bare kernel subject type or a plugin-namespaced one
-// (ns/name). Registration ceremony is deferred (audit ruling); round-tripping is
-// not — the format is validated from day one (LM-8).
+// (ns/name). Registration ceremony (a subject-type registry) is deferred;
+// round-tripping is not — the format is validated from day one.
 var subjectTypeRe = regexp.MustCompile(`^[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)?$`)
 
 var kernelSubjectTypes = map[string]bool{"span": true, "trace": true, "session": true}
@@ -18,8 +18,8 @@ var validScoreSources = map[string]bool{
 	"annotation": true, "eval": true, "heuristic": true, "plugin": true,
 }
 
-// validateScore enforces LM-3 (value union, no coercion) and LM-8 (subject
-// format) on one score object. project_id is set by the caller from identity.
+// validateScore enforces the measurement-only value union (no coercion) and the
+// subject-type format on one score object. project_id is set by the caller from identity.
 // Returns a coded error (schema_invalid 400 for structure, score_type_mismatch
 // 422 for value/type union violations) — never coerces.
 func validateScore(s map[string]any) *CompileError {
@@ -89,7 +89,7 @@ func validateScore(s map[string]any) *CompileError {
 }
 
 // scoreEvent builds the merge event for a validated score. The score's timestamp
-// is the identity/merge anchor (04 §5); event id is the score id.
+// is the identity/merge anchor; event id is the score id.
 func scoreEvent(s map[string]any) storage.Event {
 	ts, _ := parseTime(s["timestamp"])
 	id, _ := s["id"].(string)

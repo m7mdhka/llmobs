@@ -14,7 +14,7 @@ const settingsKey = "__settings__"
 // KV is the storage surface (interface-at-consumer): the plugin kv store scoped to
 // (plugin_id, project_id, user_id). Settings are PROJECT-shared plugin config, so this store
 // always passes the project-scope sentinel (user_id "") — a plugin's settings are the same for
-// every user of the project (per-user state uses the kv primitive's user scope, O6).
+// every user of the project (per-user state uses the kv primitive's user scope).
 type KV interface {
 	Get(ctx context.Context, pluginID, projectID, userID, key string) (json.RawMessage, bool, error)
 	Set(ctx context.Context, pluginID, projectID, userID, key string, value json.RawMessage) error
@@ -64,11 +64,12 @@ func (s *Store) Get(ctx context.Context, m *Model, pluginID, projectID string) (
 	}
 	v := View{Values: map[string]json.RawMessage{}, Secrets: map[string]bool{}}
 	if m.Custom {
-		// Custom mode (N2): non-secret values are opaque, so return ALL of them EXCEPT any
-		// key that is currently a declared secret. Skipping declared-secret keys makes H4
-		// hold BY CONSTRUCTION (invariant #11): even if a field was reclassified from
-		// opaque to writeOnly and a stale plaintext value lingers under that name, it is
-		// never served — mirroring the schema-mode Get's guarantee. A secret's ciphertext
+		// Custom mode: non-secret values are opaque, so return ALL of them EXCEPT any
+		// key that is currently a declared secret. Skipping declared-secret keys makes the
+		// encrypt-and-never-return guarantee hold BY CONSTRUCTION — enforced once at this read
+		// seam, never re-checked per caller: even if a field was reclassified from opaque to
+		// writeOnly and a stale plaintext value lingers under that name, it is never served —
+		// mirroring the schema-mode Get's guarantee. A secret's ciphertext
 		// lives in doc.Secrets and is NEVER decrypted; only its set/not-set is reported.
 		secret := map[string]bool{}
 		for _, f := range m.Fields {
@@ -140,7 +141,7 @@ func (s *Store) Set(ctx context.Context, m *Model, pluginID, projectID string, i
 		return nil
 	}
 	if m.Custom {
-		// Custom mode (N2): a declared secret is encrypted (preserve on empty) exactly as
+		// Custom mode: a declared secret is encrypted (preserve on empty) exactly as
 		// in schema mode; every OTHER incoming key is stored as opaque JSON. A secret name
 		// is NEVER written to the plaintext Values map — so it can never be read back.
 		secret := map[string]bool{}

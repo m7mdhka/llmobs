@@ -1,4 +1,4 @@
-// Package brand is the ONE place the product name lives in Go (D15). Never
+// Package brand is the ONE place the product name lives in Go. Never
 // hardcode the product name, env prefix, or table/namespace prefixes elsewhere —
 // derive them from here. A rename changes this package (and its TS twin,
 // packages/brand) and nothing else.

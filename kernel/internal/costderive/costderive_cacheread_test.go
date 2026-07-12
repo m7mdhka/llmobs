@@ -7,8 +7,8 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/pricing"
 )
 
-// TestDeriveSpanCostCacheReadPricedAtCacheRateNotInput is the #146 END-TO-END prove-the-negative
-// (same class as #79): a prompt-cached OpenAI span reports its cached tokens under the NESTED
+// TestDeriveSpanCostCacheReadPricedAtCacheRateNotInput is the END-TO-END prove-the-negative
+// for cache pricing: a prompt-cached OpenAI span reports its cached tokens under the NESTED
 // spelling prompt_tokens_details.cached_tokens (Responses API: input_tokens_details.cached_tokens),
 // which the normalizer now maps to the cache_read bucket. Cost derivation must price those cached
 // tokens at the CHEAPER cache rate and bill the input base only on the residual — never leaving
@@ -24,7 +24,7 @@ func TestDeriveSpanCostCacheReadPricedAtCacheRateNotInput(t *testing.T) {
 			"cache_read": int64(800),
 		},
 	}
-	// Data-driven price entry (§7.7): input/output text rates + a SEPARATE cache_read rate that
+	// Data-driven price entry: input/output text rates + a SEPARATE cache_read rate that
 	// REDUCES the input base. OpenAI prices cached input at ~0.25× the input rate (a DISCOUNT).
 	entry := &pricing.Entry{
 		Provider: "openai", Model: "gpt-4o", Version: 1, ID: "openai/gpt-4o#1",

@@ -43,7 +43,7 @@ func newProxy(url string, running bool) (*Proxy, *plugintoken.Signer) {
 	return p, signer
 }
 
-// TestProxyStripsCookieInjectsAssertion is the ADR-0023 §5 proof: the plugin never
+// TestProxyStripsCookieInjectsAssertion proves: the plugin never
 // sees the session cookie, and it receives a verifiable, audience-bound identity
 // assertion for the acting user.
 func TestProxyStripsCookieInjectsAssertion(t *testing.T) {

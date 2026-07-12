@@ -13,9 +13,9 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/plugindata"
 )
 
-// PluginStore is the lite-profile PluginStore adapter (R1): plugin-namespaced
+// PluginStore is the lite-profile PluginStore adapter: plugin-namespaced
 // Postgres schemas in the shared database. It provisions a schema + table +
-// indexes per collection, and serves tenant-scoped CRUD + the R4 query surface.
+// indexes per collection, and serves tenant-scoped CRUD + the query surface.
 type PluginStore struct {
 	pool *pgxpool.Pool
 

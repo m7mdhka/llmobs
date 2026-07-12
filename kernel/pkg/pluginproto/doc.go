@@ -1,6 +1,6 @@
 // Package pluginproto is the public, plugin-facing contract library for the
-// Tier-3 plugin protocol (api/plugin/v1alpha1, ADR-0023). A plugin backend — and
-// every first-party plugin, per the dogfood rule (ADR-0002) — imports THIS and
+// plugin protocol (api/plugin/v1alpha1). A plugin backend — and
+// every first-party plugin, per the dogfood rule — imports THIS and
 // only this from the kernel: the handshake/health types, the service-token and
 // identity-assertion claim types, and the stdlib-only Sign/Verify helpers.
 //
@@ -8,11 +8,11 @@
 // standard library (Ed25519 for signatures — no JWT dependency on the hot path,
 // go-style). The kernel mints tokens with these helpers; a plugin verifies a
 // kernel-minted identity assertion with the same helpers and the kernel's public
-// key (delivered out of band for v1alpha1; JWKS/rotation deferred, ADR-0023).
+// key (delivered out of band for v1alpha1; JWKS/rotation deferred).
 //
 // The JSON Schemas in api/plugin/v1alpha1 are the contract; the types here are
 // kept in sync as DX. Runtime wiring (supervisor, executor, proxy, intersection)
-// lands in later Arc-H PRs; this package is types + crypto helpers only.
+// lands in later PRs; this package is types + crypto helpers only.
 package pluginproto
 
 // Protocol identity constants shared by both sides of the handshake.
@@ -30,18 +30,18 @@ const (
 	// gateway injects on proxied calls to a plugin backend.
 	IdentityAssertionHeader = "X-LLMObs-Identity-Assertion"
 
-	// FrontendTokenHeader carries a J1 plugin frontend token (a purpose-marked,
+	// FrontendTokenHeader carries a plugin frontend token (a purpose-marked,
 	// pre-intersected identity assertion) on a plugin frontend's Query API calls.
 	FrontendTokenHeader = "X-LLMObs-Frontend-Token"
 
 	// PluginFrontendHeader marks a Query API request as originating from a plugin
-	// frontend (G1). The SDK sets it on EVERY plugin-context call. When present the
+	// frontend. The SDK sets it on EVERY plugin-context call. When present the
 	// kernel REQUIRES a valid frontend token and confines the caller to the token's
 	// intersected scopes — it never falls back to the ambient session cookie's full
-	// user scope. This is what makes J1 least-privilege actually enforced for a
+	// user scope. This is what makes least-privilege actually enforced for a
 	// cooperating frontend (a token that is missing/expired fails closed instead of
 	// silently escalating). A hostile same-origin frontend that omits BOTH this marker
-	// and the token is the deferred origin-isolation boundary (ADR-0004 amendment).
+	// and the token is the deferred origin-isolation boundary.
 	PluginFrontendHeader = "X-LLMObs-Plugin-Frontend"
 
 	// DefaultInfoPath / DefaultHealthPath are the well-known plugin endpoints the
@@ -49,7 +49,7 @@ const (
 	DefaultInfoPath   = "/plugin/v1/info"
 	DefaultHealthPath = "/plugin/v1/health"
 	// DefaultTokenPath is the well-known endpoint the kernel PUSHES the plugin's
-	// service token to at handshake completion + on refresh (H7c). Delivery is
+	// service token to at handshake completion + on refresh. Delivery is
 	// kernel-initiated to the plugin's own registered URL — there is no plugin-pull
 	// path, so "obtain another plugin's token" is not an expressible operation.
 	DefaultTokenPath = "/plugin/v1/token"

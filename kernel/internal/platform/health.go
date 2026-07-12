@@ -11,7 +11,7 @@ import (
 )
 
 // Health serves liveness (/healthz) and readiness (/readyz). Readiness reports
-// ready only when the replica can actually serve: persistence is healthy (G2) AND
+// ready only when the replica can actually serve: persistence is healthy AND
 // the database is reachable. When persistence is failing, readiness goes
 // not-ready so the orchestrator stops routing new traffic here — in multi-replica
 // a healthy peer absorbs it; single-replica, this is correct backpressure (clients

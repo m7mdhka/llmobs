@@ -6,9 +6,12 @@
 - **Relates to:** the canonical usage/cost model (`api/model/v1alpha1/06-usage-cost.md`
   §4–§5, §7 R1–R8), ADR-0026 (control-plane stays Postgres in both profiles),
   ADR-0013/H6 (`jobs` primitive — the re-pricing backfill target). Evidence: the
-  Langfuse + Opik cost mines (`docs/research/issue-13-cost-derivation-design-notes.md`)
-  — the price-table treadmill was Langfuse's #1 self-host pain, and both incumbents
-  shipped cost bugs from enumerating special cases instead of driving from price data.
+  Langfuse + Opik cost mines — the price-table treadmill was Langfuse's #1 self-host pain
+  (issues #2785, #1874, #2734), and both incumbents shipped cost bugs from enumerating
+  special cases instead of driving from price data (Opik #5618, #6976, #6982, #5621,
+  #7137). Each is a public issue in its own tracker; the rules they produced are normative
+  in the canonical model spec §7.1–7.7, and the mining method is recorded in
+  `docs/positioning.md` (Evidence appendix).
 
 ## Context
 

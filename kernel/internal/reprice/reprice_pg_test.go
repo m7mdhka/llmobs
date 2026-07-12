@@ -16,9 +16,9 @@ import (
 )
 
 // These integration proofs run against a real Postgres (the money mutation path must be
-// proven on the real fold + real SQL, not a fake). They exercise the M4 acceptance bar:
+// proven on the real fold + real SQL, not a fake). They exercise the acceptance bar:
 // a price correction re-prices spans deterministically to the new version + a fresh
-// snapshot ref; provided-cost spans (R1) are never touched; a second identical run is a
+// snapshot ref; provided-cost spans are never touched; a second identical run is a
 // no-op (idempotent); and a project-scoped (discount) re-price provably cannot cross a
 // tenant boundary.
 
@@ -103,7 +103,7 @@ func seedDerivedSpan(t *testing.T, st *postgres.Store, ps *postgres.PriceStore, 
 	}
 }
 
-// seedProvidedSpan ingests a span whose cost was PROVIDED (R1). It carries no
+// seedProvidedSpan ingests a span whose cost was PROVIDED. It carries no
 // pricing_snapshot_ref, so re-pricing must never touch it.
 func seedProvidedSpan(t *testing.T, st *postgres.Store, project, id string) {
 	t.Helper()

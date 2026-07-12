@@ -1,8 +1,9 @@
 // Package query compiles the typed DSL (api/query/v1alpha1) into parameterized
-// SQL per storage adapter (D9 — the ClickHouse compiler is a future sibling behind
-// the same interface). v1alpha1/B1 implements the `spans` target: filters
-// (simple, attr_map, reference classes), an OR group, mandatory timeRange,
-// keyset pagination, and the contract ceilings + 422 taxonomy.
+// SQL per storage adapter — the DSL is the only read path over the canonical
+// model, with no raw-SQL escape hatch, and each adapter (Postgres, ClickHouse)
+// is a sibling behind the same Dialect interface. The compiler implements the
+// `spans` target: filters (simple, attr_map, reference classes), an OR group,
+// mandatory timeRange, keyset pagination, and the contract ceilings + 422 taxonomy.
 package query
 
 import (
@@ -16,7 +17,9 @@ import (
 	"time"
 )
 
-// Ceilings (00-dsl-spec.md §12).
+// Contract ceilings, enforced before execution (versioned DSL constants):
+// max total conditions per query, max/default row-query page size, and max
+// elements in an in/not_in list.
 const (
 	maxConditions = 32
 	maxLimit      = 1000
@@ -45,7 +48,7 @@ type Compiled struct {
 	Limit int
 	// Fingerprint binds a keyset cursor to the query shape (filters, timeRange,
 	// orderBy). The next page's cursor must carry it; a cursor from a different
-	// query shape is rejected (DSL §7).
+	// query shape is rejected.
 	Fingerprint string
 	// OrderKeys is the LOGICAL order (field names + direction) the Order SQL encodes,
 	// dialect-neutral. The dual-read merge sorts the lite∪scale union by these keys —
@@ -103,7 +106,7 @@ var spanFields = queryFields{
 		"start_time":            {"start_time", classTimestamp},
 		"end_time":              {"end_time", classTimestamp},
 		"completion_start_time": {"completion_start_time", classTimestamp},
-		// Computed numeric fields (DSL §4.2): resolved per-dialect to a
+		// Computed numeric fields: resolved per-dialect to a
 		// time-difference expression in fractional seconds (resolveCol /
 		// Dialect.computedCol). NULL when an endpoint is null (open span / no TTFT).
 		"duration":             {"duration", classNumeric},
@@ -136,9 +139,12 @@ var spanFields = queryFields{
 }
 
 // traceFields is the queryable surface of the derived `traces` target. Columns
-// reference the synthesized trace projection (see postgres.QueryTraces): the
-// values are per DSL §4.1. `tags` (string_array) is in fields.json but the
-// compiler has no string_array support yet, so filtering on it is deferred.
+// reference the synthesized trace projection (see postgres.QueryTraces): each
+// value is derived from the trace's spans (start_time = the minimum span
+// start_time, end_time = the maximum span end_time, the dimensional fields taken
+// from the root span, status = error if any span errored). `tags` (string_array)
+// is in fields.json but the compiler has no string_array support yet, so
+// filtering on it is deferred.
 var traceFields = queryFields{
 	fields: map[string]fieldDef{
 		"id":          {"id", classString},
@@ -152,11 +158,11 @@ var traceFields = queryFields{
 		"session_id":  {"session_id", classString},
 		"user_id":     {"user_id", classString},
 		"attributes":  {"attributes", classAttrMap},
-		// Activity anchor + incompleteness (F1): "active runs regardless of age".
+		// Activity anchor + incompleteness: "active runs regardless of age".
 		"last_activity":    {"last_activity", classTimestamp},
 		"is_open":          {"is_open", classBoolean},
 		"incomplete_trace": {"incomplete_trace", classBoolean},
-		// Derived trace-level cost: SUM of non-aggregate spans' total_cost (§7.1, M3).
+		// Derived trace-level cost: SUM of non-aggregate spans' total_cost.
 		"total_cost": {"total_cost", classNumeric},
 	},
 	orderable: map[string]bool{
@@ -170,8 +176,8 @@ var traceFields = queryFields{
 	timeAnchor: "start_time",
 }
 
-// scoreFields is the queryable surface of the `scores` target (04-score.md,
-// fields.json). Time anchor is `timestamp`.
+// scoreFields is the queryable surface of the `scores` target (per fields.json).
+// Time anchor is `timestamp`.
 var scoreFields = queryFields{
 	fields: map[string]fieldDef{
 		"id":            {"id", classString},
@@ -218,7 +224,7 @@ func resolveCol(d Dialect, f fieldDef) string {
 	return f.col
 }
 
-// allowedTopKeys is the closed set of top-level query keys (DSL §1). Unknown
+// allowedTopKeys is the closed set of top-level query keys. Unknown
 // keys are rejected (schema_invalid) so typos never silently no-op.
 var allowedTopKeys = map[string]bool{
 	"version": true, "target": true, "timeRange": true, "filters": true,
@@ -245,7 +251,7 @@ func CompileSpansForDialect(doc map[string]any, projectID string, maxWindow time
 	if t, _ := doc["target"].(string); t != "spans" {
 		return nil, errf("schema_invalid", 400, "target must be 'spans'")
 	}
-	// scoreConditions only apply to the traces target (DSL §8).
+	// scoreConditions only apply to the traces target.
 	if _, hasScores := doc["scores"]; hasScores {
 		return nil, errf("schema_invalid", 400, "scores are only valid on the traces target")
 	}
@@ -253,8 +259,8 @@ func CompileSpansForDialect(doc map[string]any, projectID string, maxWindow time
 }
 
 // CompileTraces compiles a traces query (Postgres dialect). Trace fields are
-// derived from spans (DSL §4.1); the compiled predicate runs against the
-// synthesized trace projection. The `scores` semi-join (§8) is supported.
+// derived from spans; the compiled predicate runs against the synthesized trace
+// projection. The `scores` semi-join is supported.
 func CompileTraces(doc map[string]any, projectID string, maxWindow time.Duration) (*Compiled, error) {
 	return CompileTracesForDialect(doc, projectID, maxWindow, PostgresDialect)
 }
@@ -267,8 +273,8 @@ func CompileTracesForDialect(doc map[string]any, projectID string, maxWindow tim
 	return compileTarget(doc, projectID, maxWindow, traceFields, d)
 }
 
-// CompileScores compiles a scores query (Postgres dialect). Score fields per
-// 04-score.md; the time anchor is `timestamp`.
+// CompileScores compiles a scores query (Postgres dialect). The time anchor is
+// `timestamp`.
 func CompileScores(doc map[string]any, projectID string, maxWindow time.Duration) (*Compiled, error) {
 	return CompileScoresForDialect(doc, projectID, maxWindow, PostgresDialect)
 }
@@ -297,7 +303,7 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 	// project scoping is always first.
 	preds := []string{"project_id = " + b.ph(projectID)}
 
-	// timeRange (mandatory, QD-5)
+	// timeRange (mandatory)
 	tr, ok := doc["timeRange"].(map[string]any)
 	if !ok {
 		return nil, errf("schema_invalid", 400, "timeRange is required")
@@ -329,7 +335,7 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 				for _, c := range anyList {
 					cm, _ := c.(map[string]any)
 					// MAX_NESTING_DEPTH = 2 (an AND of ORs): an OR member must be a
-					// leaf condition, never another group (DSL §2.4).
+					// leaf condition, never another group.
 					if _, nested := cm["any"]; nested {
 						return nil, errf("schema_invalid", 400, "nesting exceeds MAX_NESTING_DEPTH (2)")
 					}
@@ -357,7 +363,7 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 		return nil, errf("condition_limit_exceeded", 422, "more than %d conditions", maxConditions)
 	}
 
-	// scores semi-join (QD-9, §8) — only reaches here on target=traces (spans and
+	// scores semi-join — only reaches here on target=traces (spans and
 	// scores reject a scores block earlier). Each entry is ANDed at the trace
 	// level: for each, the trace must have ≥1 matching score.
 	if raw, ok := doc["scores"].([]any); ok {
@@ -387,7 +393,7 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 		limit = lv
 	}
 
-	// keyset cursor (default order only in B1). The cursor is bound to the query
+	// keyset cursor (default order only). The cursor is bound to the query
 	// shape so paging with a mutated query is rejected rather than silently wrong.
 	fp := queryFingerprint(doc)
 	if cur, ok := doc["cursor"].(string); ok && cur != "" {
@@ -404,10 +410,10 @@ func compileTarget(doc map[string]any, projectID string, maxWindow time.Duration
 	return &Compiled{Where: strings.Join(preds, " AND "), Args: b.args, Order: order, Limit: limit, Fingerprint: fp, OrderKeys: orderKeys}, nil
 }
 
-// compileScoreCondition builds one QD-9 EXISTS predicate: the trace has ≥1 score
+// compileScoreCondition builds one EXISTS predicate: the trace has ≥1 score
 // (subject_type='trace', subject_id=trace_proj.id) matching the condition.
 // data_type fully determines the operator set, matched column, and value JSON
-// type — no inference, no coercion (04-score.md §2, DSL §8).
+// type — no inference, no coercion.
 func compileScoreCondition(b *builder, projectID string, c map[string]any) (string, error) {
 	name, _ := c["name"].(string)
 	if name == "" {
@@ -572,7 +578,7 @@ func compileSimpleCond(b *builder, f fieldDef, c map[string]any, op string) (str
 			vals[i] = coerce(f, v)
 		}
 		if op == "not_in" {
-			// Uniform NULL policy (DSL §2.2): negations match unset rows.
+			// Uniform NULL policy: negations match unset rows.
 			return b.d.notInArray(col, b.ph(vals), f.class), nil
 		}
 		return b.d.inArray(col, b.ph(vals)), nil
@@ -612,7 +618,7 @@ func compileMapCond(b *builder, col string, c map[string]any, numeric bool) (str
 		return b.d.mapExtractText(col, b.ph(key)) + " = " + b.ph(asString(c["value"])), nil
 	case "neq":
 		if numeric {
-			// Negation: unset/non-number values match (DSL §2.2, §9.1).
+			// Negation: unset/non-number values match.
 			return numGuard(b, col, key, b.d.numGuardNeqOp(), c["value"], true), nil
 		}
 		// The map key extraction is compared NULL-safely so unset keys match.
@@ -635,7 +641,7 @@ func compileMapCond(b *builder, col string, c map[string]any, numeric bool) (str
 
 // numGuard compiles a numeric comparison against a map value, guarding the
 // ::numeric cast behind a jsonb_typeof check so non-numeric or missing values
-// never raise a cast error (DSL §9.1, Decision 3). CASE guarantees the cast is
+// never raise a cast error (bad data never fails a valid query). CASE guarantees the cast is
 // evaluated only when the value is a JSON number — a bare `guard AND cast`
 // would let Postgres attempt the cast on other rows. unsetMatches is the ELSE
 // result: true for negations (unset/non-number rows match), false otherwise.
@@ -775,7 +781,7 @@ func toInt(v any) (int, bool) {
 }
 
 // Cursor: base64 of "<fingerprint>|<rfc3339nano>|<id>". The fingerprint binds
-// the cursor to the query shape (DSL §7).
+// the cursor to the query shape.
 func EncodeCursor(fingerprint string, startTime time.Time, id string) string {
 	return base64.StdEncoding.EncodeToString(
 		[]byte(fingerprint + "|" + startTime.UTC().Format(time.RFC3339Nano) + "|" + id))

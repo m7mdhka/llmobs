@@ -1,5 +1,5 @@
 // Package perm is the canonical permission vocabulary the double-token
-// intersection operates in (ADR-0023/R3). Two scope vocabularies exist in the
+// intersection operates in. Two scope vocabularies exist in the
 // system — coarse api-key/session verbs (query, query:payloads, scores:write,
 // delete, ingest) and fine-grained manifest-permission nouns (traces:read.
 // metadata, traces:read.payloads, …). They cannot intersect directly, so ONE must
@@ -31,26 +31,26 @@ const (
 	ScoresWrite        = "scores:write"
 )
 
-// MANAGEMENT permissions (Arc O / O1) gate control-plane administration — provisioning
+// MANAGEMENT permissions gate control-plane administration — provisioning
 // members, org-level actions. They are RBAC-ONLY: a plugin token never carries one, so
 // they never enter the data intersection (a plugin can't administer the org). They gate
-// provisioning handlers directly (O3). Kept in the same scope set as data perms because a
+// provisioning handlers directly. Kept in the same scope set as data perms because a
 // role is one scope list; the two axes never collide because no data op requires a
 // management perm and — ENFORCED, not merely asserted — no plugin grant contains one
 // (IsManagementPerm rejects it at plugin-grant admission, and DataPermsOnly strips it from
 // any role scopes handed toward a plugin).
 const (
-	MembersManage  = "members:manage"  // invite / set-role / remove members (O3)
+	MembersManage  = "members:manage"  // invite / set-role / remove members
 	OrgManage      = "org:manage"      // owner-only org-level actions (delete org, transfer)
-	ActionsExecute = "actions:execute" // run action-type ops (jobs/evals) — reserved, gates future ops (#14540)
+	ActionsExecute = "actions:execute" // run action-type ops (jobs/evals) — reserved, gates future ops
 )
 
 var managementScopes = map[string]bool{MembersManage: true, OrgManage: true, ActionsExecute: true}
 
 // IsManagementPerm reports whether a scope is a management (RBAC-only) permission. A
 // plugin grant MUST NOT contain one — the plugin-grant admission seam rejects it, so the
-// "a plugin never holds a management scope" invariant is enforced by construction (O1
-// added these scopes to owner/admin, so the guard must exist wherever a manifest grant is
+// "a plugin never holds a management scope" invariant is enforced by construction (owner
+// and admin roles hold these scopes, so the guard must exist wherever a manifest grant is
 // loaded or role scopes are handed toward a plugin).
 func IsManagementPerm(s string) bool { return managementScopes[s] }
 
@@ -95,8 +95,8 @@ var coarseExpand = map[string][]string{
 // permission that coarse scope expands to. A machine key must never carry authority its
 // minter lacks: a member (no traces:write / traces:delete) cannot mint an `ingest` or
 // `delete` key, exactly as the frontend token is DataPermsOnly-capped to the session's role.
-// This is the O3 fix for the key-mint amplification both reviews caught — enforced at the one
-// CreateAPIKey seam so every mint path inherits it (invariant #11). Unknown coarse scopes are
+// This is the fix for key-mint amplification — enforced at the one
+// CreateAPIKey seam so every mint path inherits it. Unknown coarse scopes are
 // not grantable.
 func KeyScopeGrantedBy(roleScopes []string, keyScope string) bool {
 	backing, ok := coarseExpand[keyScope]
@@ -140,7 +140,7 @@ var opRequires = map[string]string{
 // RequiredPermForOp returns the canonical permission an operation requires.
 func RequiredPermForOp(op string) string { return opRequires[op] }
 
-// Roles (Arc O / O1). A user's authority in an org is one of these; the resolved role
+// Roles. A user's authority in an org is one of these; the resolved role
 // (from org_memberships, server-derived) maps to a canonical scope set via RoleScopes.
 // The ladder is strict: viewer ⊂ member ⊂ admin ⊂ owner (each holds a superset).
 const (
@@ -150,7 +150,7 @@ const (
 	RoleViewer = "viewer" // read metadata + read scores; no payloads, no write, no administration
 )
 
-// roleScopes is the static Role → Scope[] map (the banked #21 design). It is the ONE
+// roleScopes is the static Role → Scope[] map. It is the ONE
 // place a role becomes permissions; there are no bare `role == "admin"` checks anywhere
 // else. A role absent from this map resolves to NO scopes — FAIL CLOSED: an unknown or
 // empty role (e.g. a user with no membership in the requested org) can do nothing, never
@@ -177,7 +177,7 @@ func RoleScopes(role string) []string {
 	return append([]string(nil), s...)
 }
 
-// ValidRole reports whether role is one of the defined roles. Provisioning (O3) rejects
+// ValidRole reports whether role is one of the defined roles. Provisioning rejects
 // any role not in this set; it is the allow-list for an assignable role.
 func ValidRole(role string) bool {
 	_, ok := roleScopes[role]
@@ -189,7 +189,7 @@ func ValidRole(role string) bool {
 func Roles() []string { return []string{RoleOwner, RoleAdmin, RoleMember, RoleViewer} }
 
 // roleRank orders roles by privilege for the "cannot assign a role above your own"
-// provisioning rule (O3). Higher = more privileged. An unknown role ranks -1 (below all).
+// provisioning rule. Higher = more privileged. An unknown role ranks -1 (below all).
 var roleRank = map[string]int{RoleViewer: 0, RoleMember: 1, RoleAdmin: 2, RoleOwner: 3}
 
 // RoleAtLeast reports whether role a is at least as privileged as role b (a ⊇ b in the
@@ -201,7 +201,7 @@ func RoleAtLeast(a, b string) bool {
 }
 
 // RoleAbove reports whether role a is STRICTLY more privileged than role b. This is the
-// crown-jewel provisioning rule (Arc O / O3): a principal may assign a role only STRICTLY
+// crown-jewel provisioning rule: a principal may assign a role only STRICTLY
 // BELOW their own, and may modify/remove only members STRICTLY BELOW their own — never at
 // or above it. That is what turns a provisioning handler from an account-takeover vector
 // into a safe one: an admin cannot mint another admin (a lateral clone) or an owner, and
@@ -215,8 +215,8 @@ func RoleAbove(a, b string) bool {
 
 // HasWriteAuthority reports whether a permission set carries ANY write scope —
 // the coarse "may this role mutate, not just read?" question. Used to gate
-// configuration writes (plugin settings, J2) the same way the supervisor gates
-// enable/disable: admins today, refined by the #21 RBAC seam. Derived from the
+// configuration writes (plugin settings) the same way the supervisor gates
+// enable/disable: admins today, refined by a future finer-grained RBAC seam. Derived from the
 // scopes, never a hardcoded role string.
 func HasWriteAuthority(scopes []string) bool {
 	return Has(scopes, TracesWrite) || Has(scopes, ScoresWrite) || Has(scopes, TracesDelete)

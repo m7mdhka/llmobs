@@ -19,7 +19,7 @@ type Ingester interface {
 	RunPreauth(ctx context.Context, ing *pipeline.Ingestion) error
 }
 
-// Ingest serves the `ingest` capability (H7): a compat plugin pushes OTLP-format
+// Ingest serves the `ingest` capability: a compat plugin pushes OTLP-format
 // spans through its OWN endpoint, and the kernel runs them through the SAME
 // pipeline as native OTLP — normalize/redact/validate/merge/dq — with two
 // kernel-enforced guarantees a plugin cannot subvert:
@@ -53,14 +53,14 @@ func (h *Ingest) traces(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// Cold-path ingest is plugin-initiated (no user) — service-token-only (H7 #3).
+	// Cold-path ingest is plugin-initiated (no user) — service-token-only.
 	pluginID, status, err := h.authz.RequirePluginToken(r, "ingest")
 	if err != nil {
 		writeJSON(w, status, map[string]any{"error": err.Error()})
 		return
 	}
 	// Read one byte past the cap so an over-cap body is REJECTED (413), never silently
-	// truncated then partially accepted (#97) — a compat plugin pushing a big batch must get
+	// truncated then partially accepted — a compat plugin pushing a big batch must get
 	// an honest "too large", not a partial ingest that looks like success.
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxIngestBytes+1))
 	if err != nil {

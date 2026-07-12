@@ -132,7 +132,7 @@ func TestStaleWatermarkDegrades(t *testing.T) {
 	}
 }
 
-// TestKernelRestartReHandshakeIsNotAFault is the ruled property (ADR-0023): a
+// TestKernelRestartReHandshakeIsNotAFault is the ruled property: a
 // kernel restart rotates the in-memory signing key and drops in-memory state, so
 // the fresh supervisor must re-handshake every healthy plugin and return it to
 // running WITHOUT counting a fault toward auto-disable.

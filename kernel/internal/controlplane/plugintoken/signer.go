@@ -1,13 +1,13 @@
 // Package plugintoken holds the kernel's Ed25519 signing key and wraps
 // pkg/pluginproto with the kernel's clock + jti generation. The supervisor uses
-// it to issue plugin service tokens at handshake (H2); H3 extends it with
-// identity-assertion minting and exposes the public key at the gateway so plugins
-// can verify kernel-signed assertions.
+// it to issue plugin service tokens at handshake, plus identity-assertion minting,
+// and exposes the public key at the gateway so plugins can verify kernel-signed
+// assertions (Ed25519 is asymmetric, so a plugin verifies without a shared secret).
 //
 // Lite-profile property: the key is generated in memory at boot and is NOT
 // persisted. A kernel restart therefore rotates the key and invalidates every
 // live service token — by design harmless, because tokens are short-TTL and the
-// supervisor re-handshakes and re-issues on the next reconcile (ADR-0023). A
+// supervisor re-handshakes and re-issues on the next reconcile. A
 // persisted/shared key (multi-replica, no-reissue-on-restart) is the deferred
 // JWKS/rotation hardening pass.
 package plugintoken
@@ -26,7 +26,7 @@ import (
 
 // ErrRevoked is returned by a Verify* method when a signature-and-TTL-valid token has been
 // revoked (its jti, plugin, or deriving user). It is a verification failure like any other —
-// callers already map a verify error to 401/403 (Arc O / O4, #63).
+// callers already map a verify error to 401/403.
 var ErrRevoked = errors.New("plugintoken: credential revoked")
 
 // RevocationCheck reports whether a stateless plugin token is still LIVE — not revoked at or
@@ -40,7 +40,7 @@ type RevocationCheck func(ctx context.Context, jti, pluginID, userEmail string, 
 type Signer struct {
 	priv   ed25519.PrivateKey
 	pub    ed25519.PublicKey
-	revoke RevocationCheck // nil in pure-crypto tests → TTL-only (pre-O4 behavior)
+	revoke RevocationCheck // nil in pure-crypto tests → TTL-only (no revocation lookup)
 }
 
 // NewSigner generates a fresh in-memory keypair.
@@ -52,7 +52,7 @@ func NewSigner() (*Signer, error) {
 	return &Signer{priv: priv, pub: pub}, nil
 }
 
-// SetRevocationChecker wires the immediate-revocation lookup (Arc O / O4). Once set, every
+// SetRevocationChecker wires the immediate-revocation lookup. Once set, every
 // Verify* additionally denies a token whose jti/plugin/user has been revoked — the OUTLIVE
 // half of the derived-credential invariant. main.go injects the pool-backed checker.
 func (s *Signer) SetRevocationChecker(fn RevocationCheck) { s.revoke = fn }
@@ -96,7 +96,7 @@ func (s *Signer) MintServiceToken(pluginID string, scopes []string, now time.Tim
 }
 
 // VerifyServiceToken verifies a service token against the current key, then denies it if the
-// plugin (or the token's jti) has been revoked (Arc O / O4). A service token has no deriving
+// plugin (or the token's jti) has been revoked. A service token has no deriving
 // user, so the user principal is empty.
 func (s *Signer) VerifyServiceToken(ctx context.Context, token string, now time.Time) (pluginproto.ServiceTokenClaims, error) {
 	c, err := pluginproto.VerifyServiceToken(s.pub, token, now)
@@ -122,7 +122,7 @@ func (s *Signer) MintIdentityAssertion(pluginID, subject, projectID, actor strin
 
 // VerifyIdentityAssertion verifies an assertion bound to expectedAud (the calling
 // plugin's `plugin:{id}` audience) against the current key, then denies it if the deriving
-// user (Sub = email), the plugin (audience), or the jti has been revoked (Arc O / O4).
+// user (Sub = email), the plugin (audience), or the jti has been revoked.
 func (s *Signer) VerifyIdentityAssertion(ctx context.Context, token, expectedAud string, now time.Time) (pluginproto.IdentityAssertionClaims, error) {
 	c, err := pluginproto.VerifyIdentityAssertion(s.pub, token, expectedAud, now)
 	if err != nil {
@@ -135,7 +135,7 @@ func (s *Signer) VerifyIdentityAssertion(ctx context.Context, token, expectedAud
 	return c, nil
 }
 
-// MintFrontendToken issues a J1 frontend token — an identity assertion whose scopes
+// MintFrontendToken issues a frontend token — an identity assertion whose scopes
 // are already the plugin-grant ∩ user ∩ project intersection, stamped with the
 // signed PurposeFrontend marker so it cannot be confused with a proxy/jobs assertion.
 func (s *Signer) MintFrontendToken(pluginID, subject, projectID, actor string, scopes []string, now time.Time, ttl time.Duration) (string, pluginproto.IdentityAssertionClaims, error) {
@@ -146,9 +146,9 @@ func (s *Signer) MintFrontendToken(pluginID, subject, projectID, actor string, s
 	return pluginproto.MintFrontendToken(s.priv, pluginID, subject, projectID, actor, scopes, now, ttl, jti)
 }
 
-// VerifyFrontendToken verifies a J1 frontend token against the current key, requiring the
+// VerifyFrontendToken verifies a frontend token against the current key, requiring the
 // signed PurposeFrontend marker (rejecting proxy/jobs assertions), then denies it if the
-// deriving user (Sub = email), the plugin (audience), or the jti has been revoked (O4). This
+// deriving user (Sub = email), the plugin (audience), or the jti has been revoked. This
 // is what stops a revoked user's browser frontend token from working out its 5-minute TTL.
 func (s *Signer) VerifyFrontendToken(ctx context.Context, token string, now time.Time) (pluginproto.IdentityAssertionClaims, error) {
 	c, err := pluginproto.VerifyFrontendToken(s.pub, token, now)

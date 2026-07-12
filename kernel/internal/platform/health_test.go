@@ -10,7 +10,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/ingesthealth"
 )
 
-// TestReadyzPersistHealthGate proves the G2 readiness gate: when the persist
+// TestReadyzPersistHealthGate proves the readiness gate: when the persist
 // signal is unhealthy, /readyz returns 503 BEFORE touching the pool (a
 // connectable-but-unwritable DB must still read not-ready). The nil pool here is
 // deliberate — the short-circuit means it is never dereferenced.

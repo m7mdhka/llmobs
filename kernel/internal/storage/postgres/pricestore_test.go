@@ -32,7 +32,7 @@ func setupPrices(t *testing.T) (*PriceStore, *pgxpool.Pool) {
 	return NewPriceStore(pool), pool
 }
 
-// TestPriceStoreAppendVersioning proves the ADR-0029 core: an edit appends a new
+// TestPriceStoreAppendVersioning proves the append-only price-table core: an edit appends a new
 // version (prior versions retained), Resolve returns the newest applicable version,
 // and GetByID resolves the exact historical entry a snapshot ref points at.
 func TestPriceStoreAppendVersioning(t *testing.T) {
@@ -84,8 +84,9 @@ func TestPriceStoreAppendVersioning(t *testing.T) {
 	}
 }
 
-// TestPriceStoreResolveSymmetricNormalization is the R6 proof against a real DB: an
-// entry seeded under a canonical key resolves from a prefixed/aliased raw lookup.
+// TestPriceStoreResolveSymmetricNormalization proves symmetric normalization against a
+// real DB: an entry seeded under a canonical key resolves from a prefixed/aliased raw
+// lookup, because the same canonicalizer runs at both write and lookup.
 func TestPriceStoreResolveSymmetricNormalization(t *testing.T) {
 	s, _ := setupPrices(t)
 	ctx := context.Background()
@@ -237,10 +238,10 @@ func TestDefaultSeedsValid(t *testing.T) {
 	}
 }
 
-// TestResolveDotDashFallback is the #106 prove-the-negative: a dotted model variant
-// ("claude-3.5-sonnet") still prices against a dashed stored entry ("claude-3-5-sonnet")
-// instead of silently deriving NO cost — while the EXACT match still wins (R6 primary path)
-// and a genuinely different model does NOT false-match.
+// TestResolveDotDashFallback is the dot/dash-fallback prove-the-negative: a dotted model
+// variant ("claude-3.5-sonnet") still prices against a dashed stored entry
+// ("claude-3-5-sonnet") instead of silently deriving NO cost — while the EXACT match still
+// wins (the primary-key path) and a genuinely different model does NOT false-match.
 func TestResolveDotDashFallback(t *testing.T) {
 	s, _ := setupPrices(t)
 	ctx := context.Background()
@@ -293,7 +294,7 @@ func mustTime(t *testing.T, s string) time.Time {
 	return tt
 }
 
-// TestResolveDateSuffixFallback is the #102 prove-the-negative: a dated model snapshot prices
+// TestResolveDateSuffixFallback is the date-suffix-fallback prove-the-negative: a dated model snapshot prices
 // against its base entry instead of silently deriving NO cost — across ISO, compact, and valid
 // MMDD forms — while a 4-digit run that is NOT a real date does NOT false-match, and the exact
 // base still resolves.
@@ -347,11 +348,11 @@ func TestStripDateSuffix(t *testing.T) {
 	}{
 		{"gpt-4o-2024-05-13", "gpt-4o", true},
 		{"claude-3-5-sonnet-20241022", "claude-3-5-sonnet", true},
-		{"gpt-4-0613", "gpt-4", true},   // valid MMDD
+		{"gpt-4-0613", "gpt-4", true}, // valid MMDD
 		{"gpt-3.5-turbo-0125", "gpt-3.5-turbo", true},
-		{"gpt-4o-1234", "gpt-4o-1234", false}, // month 12 day 34 invalid
-		{"gpt-4o-9999", "gpt-4o-9999", false}, // invalid
-		{"gpt-4o", "gpt-4o", false},           // no suffix
+		{"gpt-4o-1234", "gpt-4o-1234", false},           // month 12 day 34 invalid
+		{"gpt-4o-9999", "gpt-4o-9999", false},           // invalid
+		{"gpt-4o", "gpt-4o", false},                     // no suffix
 		{"text-embedding-3", "text-embedding-3", false}, // single digit, not a date
 	}
 	for _, c := range cases {

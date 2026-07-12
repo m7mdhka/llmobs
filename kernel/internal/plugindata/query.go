@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Op is a store filter operator (R4: comparison only — no aggregations, no joins).
+// Op is a store filter operator (comparison only — no aggregations, no joins).
 type Op string
 
 const (
@@ -35,7 +35,8 @@ type Order struct {
 	Desc  bool   `json:"desc"`
 }
 
-// Query is the store's small read surface (R4).
+// Query is the store's small read surface (filter/order/paginate on declared
+// indexed fields; no aggregations, no joins).
 type Query struct {
 	Filters []Filter `json:"filters,omitempty"`
 	Order   *Order   `json:"order,omitempty"`
@@ -77,7 +78,7 @@ func decodeCursor(s string) (cursorPos, error) {
 
 // CompileSelect builds the tenant-scoped SELECT for a collection query. It ALWAYS
 // scopes by project_id ($1) — the cross-tenant isolation invariant — and rejects
-// filters/orders on fields that are not declared indexed (R4). Returns the SQL,
+// filters/orders on fields that are not declared indexed. Returns the SQL,
 // its args, and the effective limit (callers fetch limit+1 to derive the next
 // cursor). schema/table MUST already be validated + quoted-safe identifiers.
 func CompileSelect(schema, table string, indexed map[string]FieldSpec, projectID string, q Query) (string, []any, int, error) {

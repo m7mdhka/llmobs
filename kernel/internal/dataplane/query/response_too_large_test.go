@@ -1,6 +1,6 @@
 package query
 
-// #83 prove-the-negative at the handler seam: when a DSL read refuses because the
+// Prove-the-negative at the handler seam: when a DSL read refuses because the
 // serialized result would exceed the response ceiling (storage.ErrResponseTooLarge),
 // the Query API must answer a TYPED 413 `response_too_large` that tells the caller how
 // to recover — NOT an opaque 500, and never an OOM. The adapter-level enforcement +

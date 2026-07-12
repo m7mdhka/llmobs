@@ -61,7 +61,7 @@ func TestRoleLadderStrict(t *testing.T) {
 	}
 }
 
-// TestProveNegatives is the O1 prove-the-negative matrix at the map level.
+// TestProveNegatives is the role-scope prove-the-negative matrix at the map level.
 func TestProveNegatives(t *testing.T) {
 	// A viewer cannot perform any write/admin action.
 	viewer := RoleScopes(RoleViewer)
@@ -95,7 +95,7 @@ func TestProveNegatives(t *testing.T) {
 	if s := RoleScopes(""); len(s) != 0 {
 		t.Fatalf("empty role (no membership) must grant NO scopes, got %v", s)
 	}
-	// A role can only assign a role at or below its own (no escalation, the O3 rule).
+	// A role can only assign a role at or below its own (no escalation).
 	if RoleAtLeast(RoleAdmin, RoleOwner) {
 		t.Fatal("admin must NOT be able to assign owner")
 	}
@@ -113,7 +113,7 @@ func TestProveNegatives(t *testing.T) {
 // TestDataPermsOnlyStripsManagement proves the enforced negative: no management scope
 // survives DataPermsOnly, so a plugin credential (which is always built from a
 // DataPermsOnly'd grant/role) can never carry members:manage/org:manage — even under an
-// owner session or a manifest that declares one. This is the compensating guard O1 added
+// owner session or a manifest that declares one. This is the compensating guard added
 // alongside widening the role scope set.
 func TestDataPermsOnlyStripsManagement(t *testing.T) {
 	// An owner's scopes include management perms; the plugin-facing form must not.
@@ -150,7 +150,7 @@ func set(xs []string) map[string]bool {
 	return m
 }
 
-// TestRoleAboveStrictlyBelow is the crown-jewel cap at the map level (Arc O / O3): a
+// TestRoleAboveStrictlyBelow is the crown-jewel cap at the map level: a
 // principal may act on / assign only roles STRICTLY below their own. RoleAbove is the
 // mechanism; this pins its full truth table, including the fail-closed edges ("" and
 // unknown roles, which appear for non-members).
@@ -189,7 +189,7 @@ func TestRoleAboveStrictlyBelow(t *testing.T) {
 	}
 }
 
-// TestKeyScopeGrantedBy pins the api-key mint cap (Arc O / O3): a coarse key scope is
+// TestKeyScopeGrantedBy pins the api-key mint cap: a coarse key scope is
 // grantable only if the minter's role holds EVERY canonical perm it expands to — a key never
 // carries authority its minter lacks. This is the amplification fix both reviews caught.
 func TestKeyScopeGrantedBy(t *testing.T) {

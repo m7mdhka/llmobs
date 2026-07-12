@@ -10,7 +10,7 @@ import (
 )
 
 // EraseSpans physically removes every settled span for (projectID, userID) within
-// [from, to), writes a TTL-bounded suppression tombstone per erased span (G3), and
+// [from, to), writes a TTL-bounded suppression tombstone per erased span, and
 // records an erasure-audit row. Returns the count erased and the audit id.
 //
 // GDPR erasure must remove the payload, not merely hide it, so this deletes the
@@ -22,7 +22,7 @@ import (
 // ClickHouse has no transactions, so the steps are ORDERED so the irreversible
 // physical DELETE is LAST: resolve ids → write suppression tombstones → write
 // audit → DELETE. If any pre-DELETE step fails the rows are still present and a
-// re-run re-resolves and retries; the DELETE only runs once the tombstones (G3)
+// re-run re-resolves and retries; the DELETE only runs once the tombstones
 // and audit are durable, so a matched span can never be erased-without-suppression
 // (which would let a re-delivery resurrect it).
 func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string, from, to time.Time) (int, string, error) {
@@ -67,7 +67,7 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	count := len(ids)
 
 	if count > 0 {
-		// 1) Suppression tombstones (G3) — written BEFORE the delete so redelivery
+		// 1) Suppression tombstones — written BEFORE the delete so redelivery
 		// can never resurrect an erased span even if the process dies mid-erase.
 		expires := time.Now().Add(s.suppressionTTL).UTC()
 		batch, err := s.conn.PrepareBatch(ctx,
@@ -87,7 +87,7 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	}
 
 	// 2) Irreversible physical removal — every version of each matched key.
-	// BOUNDED + CHUNKED (#111): a single DELETE with an unbounded `IN (?)` list is a
+	// BOUNDED + CHUNKED: a single DELETE with an unbounded `IN (?)` list is a
 	// long synchronous mutation that can socket-hang-up the client (and a naive retry
 	// then stacks a duplicate mutation over the still-running one). Deleting in bounded
 	// chunks — each carrying the execution-time cap — keeps every statement bounded, and
@@ -132,12 +132,12 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	return count, auditID, nil
 }
 
-// eraseDeleteChunk bounds how many ids a single erasure DELETE statement carries (#111),
+// eraseDeleteChunk bounds how many ids a single erasure DELETE statement carries,
 // so a large GDPR erasure is a sequence of bounded mutations, never one unbounded one.
 const eraseDeleteChunk = 1000
 
 // mutationSettings caps the erasure DELETE's wall-clock so a pathological mutation is
-// refused by the server rather than hanging the client socket (#111). Uses the same
+// refused by the server rather than hanging the client socket. Uses the same
 // execution-time budget as reads; empty when unset (fail-open only on the cap, never on
 // the delete itself — an unset cap is a misconfig surfaced elsewhere, not here).
 func (s *Store) mutationSettings() string {

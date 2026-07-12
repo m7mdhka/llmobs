@@ -26,9 +26,9 @@ type Caller struct {
 	PluginID  string
 	ProjectID string
 	Actor     string
-	// Subject is the O1-resolved acting USER (the verified assertion Sub — the user's email),
+	// Subject is the resolved acting USER (the verified assertion Sub — the user's email),
 	// stable across the backend (session:) and frontend (frontend:) paths for the same user.
-	// It is the ONLY basis for per-user scoping (O6): a per-user store keys on this, never on a
+	// It is the ONLY basis for per-user scoping: a per-user store keys on this, never on a
 	// client-supplied field, so one user's per-user state is unreachable by another. Empty for a
 	// user-less credential (a bare service token / system job).
 	Subject string
@@ -76,7 +76,7 @@ func (a *Authorizer) Require(r *http.Request, capability string) (Caller, int, e
 	return Caller{PluginID: stc.PluginID, ProjectID: ac.ProjectID, Actor: ac.Actor, Subject: ac.Sub}, http.StatusOK, nil
 }
 
-// RequireFrontend authorizes a plugin FRONTEND call (J2) using the J1 frontend
+// RequireFrontend authorizes a plugin FRONTEND call using the frontend
 // token — the only credential a pure-frontend plugin holds. The plugin id comes from
 // the token's audience and the project from its claims, so a frontend can only reach
 // its OWN data in its OWN tenant; the request body cannot pick either. There is no
@@ -104,7 +104,7 @@ func (a *Authorizer) RequireFrontend(r *http.Request) (Caller, int, error) {
 
 // RequirePluginToken verifies the SERVICE TOKEN ALONE (no user assertion) and the
 // capability — the auth model for PLUGIN-INITIATED operations like cold-path
-// ingest (H7 finding #3). Cold-path ingest arrives from an external source
+// ingest. Cold-path ingest arrives from an external source
 // directly at the plugin, so there is no user whose permissions to intersect; the
 // plugin's service token proves which plugin it is, and the caller scopes the
 // target project itself (the plugin's own project, never the request body).

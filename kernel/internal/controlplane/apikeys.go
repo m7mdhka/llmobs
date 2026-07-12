@@ -16,7 +16,8 @@ import (
 var ErrInvalidScope = errors.New("invalid or empty scope set")
 
 // ErrScopeExceedsMinter is returned when a requested key scope grants authority the minting
-// user does not personally hold (Arc O / O3 — no privilege amplification via key minting).
+// user does not personally hold — no privilege amplification via key minting: a derived
+// credential can never carry scopes its deriver lacks.
 var ErrScopeExceedsMinter = errors.New("requested key scope exceeds the minter's own authority")
 
 // APIKeyInfo is a key as listed to an admin — never includes the secret.
@@ -33,10 +34,10 @@ var allowedScopes = map[string]bool{
 
 // CreateAPIKey issues a new machine key for a project with the given scopes and
 // returns the plaintext secret ONCE (only its argon2id hash + selector are
-// stored). This is the fix for the "bootstrap key only" gap the audit found
-// across Stories 9, 10, 19.
+// stored). This lets any project mint its own scoped machine keys, replacing the
+// earlier state where only the single system bootstrap key existed.
 //
-// createdByUserID records the provenance of the minting session (Arc O / O3) — who created
+// createdByUserID records the provenance of the minting session — who created
 // this credential, for audit and revocation. It is stored with ON DELETE SET NULL, so
 // deleting that user never deletes their still-valid keys (breaking a tenant's ingestion),
 // only drops the provenance link. An empty string stores NULL (e.g. the bootstrap key).
@@ -44,9 +45,10 @@ var allowedScopes = map[string]bool{
 // minterScopes is the minter's OWN canonical role scopes. Every requested key scope must be
 // granted by them (perm.KeyScopeGrantedBy) — a key can never carry authority its minter
 // lacks (a member cannot mint an ingest/delete key). This cap lives at THIS one seam so
-// every mint path inherits it (invariant #11 + the parallel-credential rule the frontend
-// token already follows). A nil minterScopes means "no cap" and is reserved for the
-// system-owned bootstrap key (no session); it is never nil on a user-driven mint.
+// every mint path inherits it by construction rather than re-checking per caller — the same
+// parallel-credential discipline the frontend token already follows. A nil minterScopes means
+// "no cap" and is reserved for the system-owned bootstrap key (no session); it is never nil
+// on a user-driven mint.
 func CreateAPIKey(ctx context.Context, pool *pgxpool.Pool, projectID string, scopes []string, createdByUserID string, minterScopes []string) (secret, publicKey string, err error) {
 	for _, sc := range scopes {
 		if !allowedScopes[sc] {

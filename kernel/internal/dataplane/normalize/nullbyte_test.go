@@ -2,14 +2,14 @@ package normalize
 
 import "testing"
 
-// TestSanitizeNullBytes is the #127 proof: NUL (U+0000) is stripped from every string value —
+// TestSanitizeNullBytes proves NUL (U+0000) is stripped from every string value —
 // attribute values, nested maps/slices, and promoted fields (input/output) — so the span never
 // fails the lite Postgres text/JSONB INSERT (22P05) while landing on scale. Other control chars
 // (tab/newline) are legitimate and left intact. A dq counter records the change.
 func TestSanitizeNullBytes(t *testing.T) {
 	out := map[string]any{
 		"name":   "chat\x00with-nul",
-		"input":  "prompt\x00body",       // promoted opaque payload
+		"input":  "prompt\x00body",        // promoted opaque payload
 		"output": "ok\ttab-and-newline\n", // legitimate control chars, must survive
 		"attributes": map[string]any{
 			"k":      "val\x00ue",

@@ -14,11 +14,11 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
-// User is a resolved account. Role (Arc O / O1) is the user's server-resolved membership
+// User is a resolved account. Role is the user's server-resolved membership
 // role in the ACTIVE org — set by ResolveSession from org_memberships (default org in the
-// single-org profiles O1 ships). It is NOT the legacy flat users.role and NOT a per-
-// project authority: O2 replaces this ambient field with per-project resolution
-// (RoleInOrg(user, OrgForProject(project))) at the request seam. Do not treat it as
+// single-org profile). It is NOT the legacy flat users.role and NOT a per-
+// project authority: the request auth seam replaces this ambient field with per-project
+// resolution (RoleInOrg(user, OrgForProject(project))). Do not treat it as
 // authoritative for a project in a non-default org.
 type User struct {
 	ID    string
@@ -52,7 +52,7 @@ func BootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, email, password str
 	if ierr != nil {
 		return false, ierr
 	}
-	// The first admin is the org OWNER (Arc O / O1). Bootstrap (org/project) runs before
+	// The first admin is the org OWNER. Bootstrap (org/project) runs before
 	// this, so the default org exists. The user insert AND the owner grant are ATOMIC (one
 	// transaction): a partial failure must never leave an admin with no membership — that
 	// would resolve to zero authority (fail closed) AND never self-heal (a later boot
@@ -95,7 +95,7 @@ func VerifyPassword(ctx context.Context, pool *pgxpool.Pool, email, password str
 	// Resolve the authoritative membership role (default org), exactly as ResolveSession
 	// does — so the login response and /auth/me agree and the legacy users.role is never
 	// surfaced to a client. No membership → "" → no scopes (fail closed). The revoked flag
-	// (O4) and the default org's local-password-disabled flag (O5) are fetched in the SAME
+	// and the default org's local-password-disabled flag are fetched in the SAME
 	// query so no branch incurs an extra round-trip — the timing is identical across "wrong
 	// password", "revoked", and "SSO-only" (no account-state enumeration by timing).
 	err := pool.QueryRow(ctx,
@@ -135,7 +135,7 @@ func VerifyPassword(ctx context.Context, pool *pgxpool.Pool, email, password str
 	if revoked {
 		return User{}, ErrBadCredentials
 	}
-	// If the org has disabled local passwords (O5), only OWNERS retain local login — the
+	// If the org has disabled local passwords, only OWNERS retain local login — the
 	// break-glass path that makes last-owner lockout impossible. Everyone else must use SSO.
 	if localPwDisabled && u.Role != perm.RoleOwner {
 		return User{}, ErrBadCredentials

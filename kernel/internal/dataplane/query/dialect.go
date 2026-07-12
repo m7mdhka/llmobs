@@ -23,12 +23,13 @@ type Dialect interface {
 	boolLiteral(b bool) string
 
 	// computedCol resolves a computed field's SQL expression (duration, ttft).
-	// A logical token (§4.2) maps to the engine's time-difference expression in
+	// A logical token maps to the engine's time-difference expression in
 	// fractional seconds, NULL when an endpoint is null/open.
 	computedCol(token string) (string, bool)
 
-	// nullSafeNeq renders `col <> value` that ALSO matches unset rows (DSL §2.2):
-	// Postgres `col IS DISTINCT FROM ph`; ClickHouse depends on column nullability
+	// nullSafeNeq renders `col <> value` that ALSO matches unset rows (negations
+	// match unset/NULL rows): Postgres `col IS DISTINCT FROM ph`; ClickHouse
+	// depends on column nullability
 	// (string columns are '' not NULL, numeric/timestamp are Nullable).
 	nullSafeNeq(col, ph string, class fieldClass) string
 	// isNull renders `col IS NULL` per engine (CH: `col=''` for string classes,
@@ -41,8 +42,9 @@ type Dialect interface {
 	// Map (JSON) access on a JSON-bearing column with a BOUND key placeholder.
 	mapExtractText(col, keyPh string) string // ->>  / JSONExtractString
 	mapHasKey(col, keyPh string) string      // ?    / JSONHas
-	// mapNumGuard renders the guard-then-cast numeric comparison (§9.1): the cast
-	// runs only when the value is a JSON number, else `elseVal`. The key is bound
+	// mapNumGuard renders the guard-then-cast numeric comparison (so bad data
+	// never fails a valid query): the cast runs only when the value is a JSON
+	// number, else `elseVal`. The key is bound
 	// TWICE (keyPh1 for the type-guard, keyPh2 for the cast) because ClickHouse `?`
 	// is positional; valPh is the bound comparison value.
 	mapNumGuard(col, keyPh1, keyPh2, cmp, valPh, elseVal string) string
@@ -168,7 +170,7 @@ func (pgDialect) countExpr(col string, distinct, _ bool) string {
 // ---------------------------------------------------------------------------
 // ClickHouse dialect. JSON columns hold JSON text (String), so map access uses
 // JSON* functions; string columns are non-null '' (absent == ''), numeric/
-// timestamp columns are Nullable. See §0 N1 / the adapter for the read model.
+// timestamp columns are Nullable. See the ClickHouse adapter for the read model.
 // ---------------------------------------------------------------------------
 
 type chDialect struct{}

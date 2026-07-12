@@ -17,7 +17,7 @@ import (
 func quietLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 // fakeSource is an in-memory lite side implementing the real (ts,project,id) keyset
-// semantics, so the same-timestamp-cluster behavior (#7117) is exercised faithfully.
+// semantics, so the same-timestamp-cluster advance behavior is exercised faithfully.
 type fakeSource struct {
 	spans      []memRow
 	scores     []memRow
@@ -150,7 +150,7 @@ func (s *fakeSink) persist(ev storage.Event) error {
 func (s *fakeSink) PersistSpan(_ context.Context, ev storage.Event) error  { return s.persist(ev) }
 func (s *fakeSink) PersistScore(_ context.Context, ev storage.Event) error { return s.persist(ev) }
 
-// TestBackfillTotalOrderNoLoop is the #7117 proof: a cluster of same-timestamp rows
+// TestBackfillTotalOrderNoLoop proves the total-order advance: a cluster of same-timestamp rows
 // migrates completely and the run terminates — the (ts,project,id) tuple advance
 // never stalls on a repeated timestamp.
 func TestBackfillTotalOrderNoLoop(t *testing.T) {
@@ -252,10 +252,10 @@ func TestBackfillRetriesTransient(t *testing.T) {
 	}
 }
 
-// TestBackfillOutageStopsLoud is the M3 regression: when the scale backend is down
+// TestBackfillOutageStopsLoud guards the failure taxonomy: when the scale backend is down
 // (every write fails transiently), the run STOPS with an error and dead-letters
-// NOTHING — a transient outage must never be converted into dropped/dead-lettered rows
-// (CLAUDE.md #12). The run resumes and re-persists once the backend recovers.
+// NOTHING — a transient outage must never be converted into dropped/dead-lettered rows.
+// The run resumes and re-persists once the backend recovers.
 func TestBackfillOutageStopsLoud(t *testing.T) {
 	src := newFakeSource()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

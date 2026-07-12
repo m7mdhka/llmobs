@@ -20,7 +20,7 @@ import (
 // immediate subdirectories each hold a plugin — an `llmobs-plugin.yaml` manifest
 // and a built frontend bundle under `dist/`. The kernel serves each bundle and
 // advertises it to the shell's loader with an integrity hash. No install
-// lifecycle yet (Tier-3 arc); this makes first-party plugins loadable in lite.
+// lifecycle yet; this makes first-party plugins loadable in lite.
 type DirSource struct {
 	root    string
 	baseURL string // public path prefix the assets are served under
@@ -28,7 +28,7 @@ type DirSource struct {
 	plugins []Plugin
 	// dist roots keyed by the URL segment used in the asset path.
 	assetRoots map[string]string
-	// devRemotes maps plugin id -> a live dev-server remoteEntry URL (J3). When set
+	// devRemotes maps plugin id -> a live dev-server remoteEntry URL. When set
 	// for a plugin, the registry advertises that URL instead of the built dist and
 	// drops the integrity hash — so `make dev` hot-reloads the plugin's frontend from
 	// its own rspack dev server. Empty in production.
@@ -38,7 +38,7 @@ type DirSource struct {
 // DirOption configures a DirSource before its initial scan.
 type DirOption func(*DirSource)
 
-// WithDevRemotes overrides plugin remoteEntry URLs with live dev-server URLs (J3),
+// WithDevRemotes overrides plugin remoteEntry URLs with live dev-server URLs,
 // keyed by plugin id. Used only by `make dev`; never in production.
 func WithDevRemotes(m map[string]string) DirOption {
 	return func(ds *DirSource) { ds.devRemotes = m }
@@ -67,10 +67,10 @@ type manifestDoc struct {
 			} `yaml:"nav"`
 		} `yaml:"frontend"`
 		// SettingsSchema is a path (relative to the plugin dir) to the JSON Schema for
-		// the plugin's settings (J2). Loaded at scan time so the kernel knows the
+		// the plugin's settings. Loaded at scan time so the kernel knows the
 		// secret (writeOnly) fields and can validate a settings write.
 		SettingsSchema string `yaml:"settingsSchema"`
-		// SettingsView selects how settings are edited/stored (N2): "schema" (default,
+		// SettingsView selects how settings are edited/stored: "schema" (default,
 		// SchemaForm + flat-subset validation) or "custom" (the plugin mounts its own
 		// view; non-secret values are stored opaque; declared writeOnly fields stay
 		// encrypted + never returned).
@@ -149,13 +149,13 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 		ExposedModule: m.Spec.Frontend.ExposedModule,
 		Nav:           nav,
 		Capabilities:  m.Spec.Capabilities,
-		// A plugin grant is DATA-ONLY by construction (Arc O / O1): strip any management
+		// A plugin grant is DATA-ONLY by construction: strip any management
 		// scope (members:manage/org:manage/actions:execute) a manifest declares, so a
 		// plugin can never be granted control-plane administration via its manifest — the
 		// enforced form of the "no plugin holds a management scope" invariant.
 		Permissions: perm.DataPermsOnly(m.Spec.Permissions),
 	}
-	// Dev hot-reload (J3): when a live dev-server remoteEntry is configured for this
+	// Dev hot-reload: when a live dev-server remoteEntry is configured for this
 	// plugin, advertise it directly and DON'T read the built dist (it may not exist —
 	// the frontend is served by its own rspack dev server). Integrity is dropped (the
 	// dev bundle changes every save). Production leaves devRemotes empty and takes the
@@ -172,7 +172,7 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 		p.RemoteEntry = ds.baseURL + "/" + key + "/assets/" + m.Spec.Frontend.Entry
 		p.Integrity = integrity
 	}
-	// Load the settings JSON Schema (J2) if declared. The path is manifest-relative
+	// Load the settings JSON Schema if declared. The path is manifest-relative
 	// and must stay inside the plugin dir (no traversal). A missing/invalid schema
 	// fails the plugin load — a declared-but-unreadable schema is a manifest error.
 	if sp := m.Spec.SettingsSchema; sp != "" {
@@ -189,7 +189,7 @@ func (ds *DirSource) loadPlugin(dir, dirName string) (Plugin, string, error) {
 		}
 		p.SettingsSchema = json.RawMessage(schemaRaw)
 	}
-	// settingsView (N2): "custom" stores non-secret values opaquely (a plugin-mounted
+	// settingsView: "custom" stores non-secret values opaquely (a plugin-mounted
 	// view) while a declared writeOnly field stays a secret. A custom plugin need not
 	// declare a settingsSchema at all (it has no secrets); "schema" (or empty) is the
 	// default SchemaForm path. Any other value is a manifest error.

@@ -61,10 +61,11 @@ func ResolveSession(ctx context.Context, pool *pgxpool.Pool, token string) (Sess
 	// The session's role is the user's SERVER-RESOLVED membership role in the active org
 	// (the default org's, in the lite single-org profile) — NOT the legacy flat
 	// users.role, and never a client-supplied claim. A user with no membership resolves to
-	// role "" → perm.RoleScopes returns no scopes (fail closed). O2 wires per-project-org
-	// resolution; O1 resolves the default org here (OrgForProject/RoleInOrg exist for it).
+	// role "" → perm.RoleScopes returns no scopes (fail closed). Per-project-org resolution
+	// happens at the query auth seam; this resolves the default org (OrgForProject/RoleInOrg
+	// exist for it).
 	//
-	// COUPLING (O5): the org this resolves authority from (the earliest project's org) MUST stay
+	// COUPLING: the org this resolves authority from (the earliest project's org) MUST stay
 	// equal to controlplane.DefaultOrgID — SSO's single-login-org guard (authhttp isLoginOrg)
 	// relies on it, so an SSO login can only provision into the org whose authority a session
 	// resolves here. If this ever becomes org-scoped (multi-org login), revisit the SSO guard in

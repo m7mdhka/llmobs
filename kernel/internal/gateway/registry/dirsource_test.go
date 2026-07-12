@@ -69,7 +69,7 @@ func TestDirSourceScanAndServe(t *testing.T) {
 	if len(p.Nav) != 1 || p.Nav[0].Path != "/demo" {
 		t.Fatalf("nav not parsed: %+v", p.Nav)
 	}
-	// The manifest grant (J1) is populated so the frontend-token mint can look it up.
+	// The manifest grant is populated so the frontend-token mint can look it up.
 	if len(p.Capabilities) != 1 || p.Capabilities[0] != "query" {
 		t.Fatalf("capabilities not parsed: %+v", p.Capabilities)
 	}
@@ -83,7 +83,7 @@ func TestDirSourceScanAndServe(t *testing.T) {
 	if _, _, ok := GrantFor(ds, "acme/nope"); ok {
 		t.Fatal("GrantFor must report false for an unknown plugin")
 	}
-	// The settings schema (J2) is loaded from the manifest-relative path and served
+	// The settings schema is loaded from the manifest-relative path and served
 	// by SchemaFor for the settings store.
 	schema, _, ok := SchemaFor(ds, "acme/demo")
 	if !ok || !strings.Contains(string(schema), "writeOnly") {
@@ -107,7 +107,7 @@ func TestDirSourceScanAndServe(t *testing.T) {
 	}
 }
 
-// TestDirSourceDevRemotes: with a dev-remote override (J3 `make dev`), the plugin's
+// TestDirSourceDevRemotes: with a dev-remote override (`make dev`), the plugin's
 // remoteEntry is the live dev-server URL and the integrity hash is dropped (the dev
 // bundle changes every save). Plugins without an override are untouched.
 func TestDirSourceDevRemotes(t *testing.T) {

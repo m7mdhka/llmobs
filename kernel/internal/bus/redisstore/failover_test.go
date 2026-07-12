@@ -12,7 +12,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/bus/redisstore"
 )
 
-// TestSentinelFailoverSelfHeals is the R-EV1 proof: a Sentinel-backed client keeps
+// TestSentinelFailoverSelfHeals is the proof: a Sentinel-backed client keeps
 // working across a master failover WITHOUT a process restart — it re-resolves the
 // promoted master through Sentinel, carries its auth, and retries. The test writes
 // an event, forces a real Sentinel failover (promoting the replica), and asserts a

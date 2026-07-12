@@ -38,7 +38,7 @@ func (s *Server) GetTraceTree(w http.ResponseWriter, r *http.Request, traceID st
 	ordered := treeOrder(spans)
 	trace := synthesizeTrace(ident.ProjectID, traceID, ordered)
 
-	// Field-level redaction (DSL §10): a metadata-scoped caller never receives span
+	// Field-level redaction: a metadata-scoped caller never receives span
 	// payloads in the tree — the exact "an assistant never ingests PII" guarantee.
 	if !ident.HasScope(perm.TracesReadPayloads) {
 		for _, sp := range ordered {

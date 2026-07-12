@@ -25,7 +25,7 @@ const settingsSchemaJSON = `{
   }
 }`
 
-// customSecretSchemaJSON is a CUSTOM-mode plugin's schema (N2): it declares only its
+// customSecretSchemaJSON is a CUSTOM-mode plugin's schema: it declares only its
 // secret (writeOnly) field. Everything else the plugin's own view stores is opaque JSON
 // the kernel never subset-validates — but the secret is still encrypted + never returned.
 const customSecretSchemaJSON = `{
@@ -86,8 +86,8 @@ func callSettings(h *Settings, op, frontendToken, body string) *httptest.Respons
 }
 
 // TestSettingsFrontendRoundTripStripsSecret: a frontend token authorizes set/get,
-// and the secret written is reported set but never returned (the J2 negative, at the
-// HTTP boundary).
+// and the secret written is reported set but never returned (the settings negative,
+// at the HTTP boundary).
 func TestSettingsFrontendRoundTripStripsSecret(t *testing.T) {
 	h, signer := settingsSetup(t)
 	tok := frontendTok(t, signer, "acme/dash", "projA")
@@ -123,9 +123,9 @@ func TestSettingsFrontendRoundTripStripsSecret(t *testing.T) {
 	}
 }
 
-// TestSettingsCustomModeOpaqueAndSecret is the N2 proof: a CUSTOM-mode plugin persists
+// TestSettingsCustomModeOpaqueAndSecret proves: a CUSTOM-mode plugin persists
 // arbitrary NESTED (non-subset) settings the flat schema-form could never express, and its
-// declared secret is still encrypted + never returned (H4 holds in custom mode).
+// declared secret is still encrypted + never returned (the secret rule holds in custom mode).
 func TestSettingsCustomModeOpaqueAndSecret(t *testing.T) {
 	h, signer := settingsSetup(t)
 	tok := frontendTok(t, signer, "acme/custom", "projA")
@@ -146,7 +146,7 @@ func TestSettingsCustomModeOpaqueAndSecret(t *testing.T) {
 		t.Fatalf("custom get: %d %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	// H4: the secret must NEVER appear in any GET response.
+	// The secret must NEVER appear in any GET response.
 	if strings.Contains(body, "sk-custom-9999") {
 		t.Fatalf("secret leaked in custom-mode GET: %s", body)
 	}
@@ -173,7 +173,7 @@ func TestSettingsCustomModeOpaqueAndSecret(t *testing.T) {
 	}
 }
 
-// TestSettingsWriteAuthorityIsPerTokenProject is the O2 prove-the-negative for the
+// TestSettingsWriteAuthorityIsPerTokenProject is the prove-the-negative for the
 // cross-org settings-write escalation: the write-authority gate is evaluated against the
 // TOKEN's project (c.ProjectID), so authority is resolved in that project's org — a user
 // who lacks write authority in the token's project's org is denied, even if they hold it

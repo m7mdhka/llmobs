@@ -27,7 +27,7 @@ func compile(t *testing.T, doc map[string]any) *Compiled {
 	return c
 }
 
-// Decision 2: not_in negations must match unset (NULL) rows.
+// not_in negations must match unset (NULL) rows.
 func TestNotInMatchesNull(t *testing.T) {
 	c := compile(t, baseDoc(map[string]any{
 		"field": "environment", "op": "not_in", "value": []any{"prod", "staging"},
@@ -40,7 +40,7 @@ func TestNotInMatchesNull(t *testing.T) {
 	}
 }
 
-// Decision 3: numeric map casts are guarded so non-numeric/missing values never
+// Numeric map casts are guarded so non-numeric/missing values never
 // raise a cast error — they simply don't match (CASE guarantees the cast is
 // only evaluated on JSON numbers, not a bare guard AND cast).
 func TestNumericMapCastIsGuarded(t *testing.T) {
@@ -57,7 +57,7 @@ func TestNumericMapCastIsGuarded(t *testing.T) {
 	}
 }
 
-// Decision 3 + Decision 2: numeric map neq is a negation — unset/non-number rows match.
+// Numeric map neq is a negation — unset/non-number rows match.
 func TestNumericMapNeqMatchesUnset(t *testing.T) {
 	c := compile(t, baseDoc(map[string]any{
 		"field": "usage_details", "key": "input_tokens", "op": "neq", "value": 100,
@@ -71,7 +71,7 @@ func TestNumericMapNeqMatchesUnset(t *testing.T) {
 }
 
 // A wrong-typed value on a valid query is not a 422: it compiles and simply
-// won't match (DSL §9.1 — bad data never fails a valid query).
+// won't match (bad data never fails a valid query).
 func TestWrongTypedNumericValueCompiles(t *testing.T) {
 	_, err := CompileSpans(baseDoc(map[string]any{
 		"field": "usage_details", "key": "input_tokens", "op": "gt", "value": "not-a-number",

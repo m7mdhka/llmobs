@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 )
 
-// Store is the PluginStore boundary (R1): a plugin's own structured collections,
+// Store is the PluginStore boundary: a plugin's own structured collections,
 // kernel-owned and tenant-scoped. The lite adapter is Postgres (plugin-namespaced
 // schemas in the shared DB); a dedicated-database backend slots in for scale
 // behind this same interface — mirroring the telemetry storage-adapter seam. The
@@ -20,7 +20,7 @@ type Store interface {
 	Put(ctx context.Context, pluginID, projectID, collection, id string, record json.RawMessage) error
 	// Get returns a record by id, or (nil, false).
 	Get(ctx context.Context, pluginID, projectID, collection, id string) (json.RawMessage, bool, error)
-	// Query runs the R4 read surface (filter/order/paginate on indexed fields),
+	// Query runs the read surface (filter/order/paginate on indexed fields),
 	// returning the page and a next-page cursor ("" when exhausted).
 	Query(ctx context.Context, pluginID, projectID, collection string, q Query) (rows []json.RawMessage, next string, err error)
 	// Delete removes a record by id.

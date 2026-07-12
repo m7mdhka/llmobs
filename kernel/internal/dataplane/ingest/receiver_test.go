@@ -11,7 +11,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/pipeline"
 )
 
-// TestHotPathDoesNotTouchStorage is the structural ack-path proof (D13): the OTLP
+// TestHotPathDoesNotTouchStorage is the structural ack-path proof: the OTLP
 // HTTP handler must accept, enqueue, and return WITHOUT any synchronous database
 // access. The pipeline here is built with a nil store/pool and the worker pool is
 // NOT started — so if the hot path did a synchronous DB write it would nil-deref

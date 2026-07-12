@@ -7,8 +7,8 @@ import (
 	"strconv"
 )
 
-// BuildDSN assembles a clickhouse-go DSN with URL-safe-encoded credentials
-// (R-CH7). Passwords routinely contain `@`, `/`, `:`, `#` — pasted verbatim into
+// BuildDSN assembles a clickhouse-go DSN with URL-safe-encoded credentials.
+// Passwords routinely contain `@`, `/`, `:`, `#` — pasted verbatim into
 // a DSN they corrupt the authority and the connection fails with a misleading
 // parse error. Every component is percent-encoded here so any credential is
 // carried losslessly. Callers who already hold a fully-formed, correctly-encoded
@@ -31,7 +31,7 @@ func BuildDSN(host string, port int, database, user, password string, secure boo
 }
 
 // requiredGrants is the exact privilege set the migration + write path needs.
-// Documented here and preflight-checked (R-CH8) so a missing grant fails early,
+// Documented here and preflight-checked so a missing grant fails early,
 // naming what to grant, instead of surfacing as an opaque mid-migration error.
 var requiredGrants = []string{
 	"CREATE TABLE",

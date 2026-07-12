@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// duration/ttft compile to guarded epoch expressions and are orderable (§4.2).
+// duration/ttft compile to guarded epoch expressions and are orderable.
 func TestComputedTemporalFields(t *testing.T) {
 	c := compile(t, baseDoc(map[string]any{"field": "duration", "op": "gt", "value": 5}))
 	if !strings.Contains(c.Where, "EXTRACT(EPOCH FROM (end_time - start_time)) >") {

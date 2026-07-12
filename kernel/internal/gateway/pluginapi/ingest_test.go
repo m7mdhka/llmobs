@@ -128,7 +128,7 @@ func TestIngestRequiresServiceToken(t *testing.T) {
 	}
 }
 
-// TestIngestOverCapRejected413 is the #97 fix on the compat-plugin ingest path: an over-cap
+// TestIngestOverCapRejected413 covers the compat-plugin ingest path: an over-cap
 // body is rejected 413, never silently truncated then partially accepted.
 func TestIngestOverCapRejected413(t *testing.T) {
 	h, _, signer := ingestSetup(t)

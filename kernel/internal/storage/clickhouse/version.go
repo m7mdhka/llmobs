@@ -13,7 +13,7 @@ import (
 // guarantee this adapter depends on is reliable: lightweight DELETE is GA and
 // `apply_deleted_mask` (the read-time setting that EXCLUDES lightweight-deleted rows
 // from every SELECT) is honored. Below this, a GDPR-erased span could be read back —
-// so the adapter refuses to start rather than silently serve erased data (#88). 23.8 is
+// so the adapter refuses to start rather than silently serve erased data. 23.8 is
 // the first LTS where lightweight deletes + the deleted-mask read semantics are stable.
 const (
 	minServerMajor = 23
@@ -31,7 +31,7 @@ type ServerInfo struct {
 	HasLazyMaterialization bool   // whether query_plan_optimize_lazy_materialization exists
 }
 
-// ProbeServer reads version(), enforces the erasure version floor (FAIL LOUD, #88), and
+// ProbeServer reads version(), enforces the erasure version floor (FAIL LOUD), and
 // feature-detects the lazy-materialization setting. A self-hoster on a ClickHouse too
 // old to honor the deleted mask must not boot, because reads there could resurrect
 // GDPR-erased spans. Feature-detecting the lazy-materialization setting (via
@@ -57,7 +57,7 @@ func ProbeServer(ctx context.Context, c versionProbe) (ServerInfo, error) {
 	return info, nil
 }
 
-// checkVersionFloor is the pure fail-loud guard (#88): a ClickHouse below the erasure
+// checkVersionFloor is the pure fail-loud guard: a ClickHouse below the erasure
 // floor is refused with an actionable message. Split from the I/O so the load-bearing
 // comparison is hermetically tested.
 func checkVersionFloor(version string) error {

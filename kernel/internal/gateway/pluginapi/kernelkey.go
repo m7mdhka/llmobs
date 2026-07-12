@@ -8,12 +8,12 @@ import (
 )
 
 // KernelKey publishes the kernel's Ed25519 PUBLIC key so a plugin backend — in any
-// language — can verify kernel-signed identity assertions (H7 finding #2). The
-// handshake goes kernel→plugin, so the plugin has no other way to obtain the key;
-// a Go plugin hid this by receiving the key in-process, but a cross-language
-// backend needs it published. This is the minimal single-key form; a JWKS endpoint
-// with key rotation is the deferred hardening pass (ADR-0023). The public key is
-// public — this endpoint is unauthenticated by design.
+// language — can verify kernel-signed identity assertions. The handshake goes
+// kernel→plugin, so the plugin has no other way to obtain the key; a Go plugin hid
+// this by receiving the key in-process, but a cross-language backend needs it
+// published. This is the minimal single-key form; a JWKS endpoint with key rotation
+// is a deferred hardening pass. The public key is public — this endpoint is
+// unauthenticated by design.
 type KernelKey struct {
 	pub ed25519.PublicKey
 }

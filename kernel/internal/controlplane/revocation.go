@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Immediate credential revocation (Arc O / O4, #63). The invariant: a derived credential must
+// Immediate credential revocation. The invariant: a derived credential must
 // never OUTLIVE its deriver — revoking a principal denies every credential in its derivation
 // subtree on the VERY NEXT request, before TTL.
 //
@@ -46,8 +46,9 @@ func Revoke(ctx context.Context, pool *pgxpool.Pool, kind, id, reason string) er
 	return err
 }
 
-// Unrevoke removes a revocation (reinstates a principal). Not wired to an endpoint in O4, but
-// the epoch model supports it: a token minted AFTER the row is gone verifies normally.
+// Unrevoke removes a revocation (reinstates a principal). Not wired to a user-facing endpoint
+// (only the supervisor re-enable path uses it), but the epoch model supports it: a token
+// minted AFTER the row is gone verifies normally.
 func Unrevoke(ctx context.Context, pool *pgxpool.Pool, kind, id string) error {
 	if kind == RevokeKindUser {
 		id = strings.ToLower(strings.TrimSpace(id))
@@ -61,7 +62,8 @@ func Unrevoke(ctx context.Context, pool *pgxpool.Pool, kind, id string) error {
 // issued. This is the OUTLIVE half of the derived-credential invariant, checked at every
 // signed-token verify. Any of the three principals revoked with revoked_at >= issuedAt →
 // not live → deny on the next request (the token was issued before the revoke instant, so a
-// still-within-TTL but revoked credential is denied — the #63 crown case).
+// still-within-TTL but revoked credential is denied — the crown case immediate revocation
+// exists to close).
 //
 // userEmail is "" for a service token (no deriving user — its deriver is the plugin). Empty
 // jti/pluginID/email simply match nothing. The caller (plugintoken.Signer) FAILS CLOSED on a
@@ -102,16 +104,16 @@ func UserRevoked(ctx context.Context, pool *pgxpool.Pool, email string) (bool, e
 	return true, nil
 }
 
-// RevokeUser is the CASCADE — the load-bearing correctness of #63. Revoking a user denies
-// EVERY credential in their derivation subtree, immediately and atomically:
+// RevokeUser is the CASCADE — the load-bearing correctness of immediate revocation. Revoking
+// a user denies EVERY credential in their derivation subtree, immediately and atomically:
 //   - sessions: DELETE → the cookie is dead next request (ResolveSession re-queries).
-//   - API keys they minted (created_by_user_id, O3): DELETE → the bearer fails next lookup.
+//   - API keys they minted (created_by_user_id): DELETE → the bearer fails next lookup.
 //   - a user-epoch revocation: their still-live frontend tokens AND identity assertions
 //     (which carry their email) are denied at the signed-token verify (TokenLive).
 //   - login: blocked while the revocation row exists (UserRevoked), so the tree can't restart.
 //
 // One transaction: a partial cascade (e.g. sessions gone but keys or the epoch left) would be
-// exactly the #63 gap — a surviving derived credential — so all four commit together.
+// exactly the gap this closes — a surviving derived credential — so all four commit together.
 func RevokeUser(ctx context.Context, pool *pgxpool.Pool, userID, reason string) error {
 	var email string
 	if err := pool.QueryRow(ctx, `SELECT email FROM users WHERE id=$1`, userID).Scan(&email); err != nil {

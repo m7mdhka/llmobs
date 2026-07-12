@@ -11,7 +11,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
-// ReadLimits are the mandatory per-query ClickHouse resource caps (RULING-CH9).
+// ReadLimits are the mandatory per-query ClickHouse resource caps.
 // Every DSL read carries all four; the adapter refuses to emit a read until they
 // are set to fully-valid values — fail-closed, so a pathological query is capped,
 // never able to take the cluster down.
@@ -44,10 +44,10 @@ var errReadLimitsUnset = fmt.Errorf(
 // the SINGLE seam through which every DSL read (queryDocs, getDoc, GetTraceSpans,
 // QueryTraces, QueryAggregation) and the erasure id-resolver obtain their settings, so
 // the erasure read-back guarantees below apply to EVERY read by construction — a new
-// read path inherits them by calling readGuard, not by remembering to add settings
-// (invariant 11).
+// read path inherits them by calling readGuard, not by remembering to add settings —
+// the invariant is enforced at the one convergence seam, not re-checked per caller.
 //
-// #88 (GDPR erasure read-back): apply_deleted_mask=1 is pinned on every read so a
+// GDPR erasure read-back: apply_deleted_mask=1 is pinned on every read so a
 // lightweight-deleted (erased) row is NEVER returned, regardless of the server default
 // — the version floor (probeServer) guarantees the server honors it. When the server
 // has the lazy-materialization optimization, it is disabled on reads too, since a plan
@@ -73,7 +73,7 @@ func dedupInner(table string) string {
 }
 
 // spansSuppressionExclusion excludes any span whose (project_id, id) carries an
-// UNEXPIRED erasure-suppression tombstone (#77). The deleted mask (apply_deleted_mask)
+// UNEXPIRED erasure-suppression tombstone. The deleted mask (apply_deleted_mask)
 // hides a lightweight-deleted row, but PersistSpan's suppression check is not atomic
 // with its insert — a concurrent write (e.g. a backfill copying an erased id) can insert
 // a FRESH, non-lightweight-deleted row for an erased id AFTER the erase deleted, which
@@ -230,8 +230,8 @@ func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([
 	return out, rows.Err()
 }
 
-// chTraceProjection synthesizes one row per trace from its settled spans (DSL
-// §4.1), mirroring the lite adapter's projection with ClickHouse idioms:
+// chTraceProjection synthesizes one row per trace from its settled spans,
+// mirroring the lite adapter's projection with ClickHouse idioms:
 //   - DISTINCT ON (trace_id) → ORDER BY … LIMIT 1 BY trace_id
 //   - bool_or → max() over the UInt8 predicate
 //   - the orphan-with-parent-ref incomplete_trace, without a correlated subquery:
@@ -394,7 +394,7 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	case "spans", "scores":
 		sql = "SELECT " + sel + " FROM " + dedupInner(target) + " WHERE is_deleted = 0"
 		if target == "spans" {
-			// #77: the aggregation spans target is a spans read too — it must carry the
+			// The aggregation spans target is a spans read too — it must carry the
 			// suppression exclusion, or a resurrected erased span would still be counted/
 			// summed/grouped (an aggregate-level erasure leak).
 			sql += spansSuppressionExclusion
@@ -413,7 +413,7 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	if groupBy != "" {
 		sql += " GROUP BY " + groupBy
 	}
-	// Over-fetch one past the cap so truncation is DETECTABLE and flagged, never silent (#108).
+	// Over-fetch one past the cap so truncation is DETECTABLE and flagged, never silent.
 	sql += " LIMIT " + storage.AggOverfetchLimitSQL() + settings
 
 	rows, err := s.conn.Query(ctx, sql, bind...)

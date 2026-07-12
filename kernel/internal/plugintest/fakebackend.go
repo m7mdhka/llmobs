@@ -27,7 +27,7 @@ type FakeBackend struct {
 	jobCalls     int    // count of /job invocations
 	lastJobAsr   string // the identity assertion the last /job call carried
 	tokenFail    bool   // when true, /plugin/v1/token returns 500 (delivery failure)
-	deliveredTok string // the last service token delivered by the kernel (H7c)
+	deliveredTok string // the last service token delivered by the kernel
 }
 
 // NewFakeBackend starts a healthy fake backend advertising info.
@@ -121,7 +121,7 @@ func (f *FakeBackend) SetTokenFail(fail bool) {
 	f.mu.Unlock()
 }
 
-// DeliveredToken returns the last service token the kernel delivered (H7c).
+// DeliveredToken returns the last service token the kernel delivered.
 func (f *FakeBackend) DeliveredToken() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -24,7 +24,7 @@ import (
 )
 
 // Server implements the generated Query API ServerInterface for the lite adapter.
-// B1 implements POST /v1alpha1/query (spans target) and GET /spans/{id}; the rest
+// It implements POST /v1alpha1/query (spans target) and GET /spans/{id}; the rest
 // return an honest 501 (documented as v-next in the OpenAPI).
 type Server struct {
 	store     storage.TelemetryStore
@@ -32,17 +32,17 @@ type Server struct {
 	log       *slog.Logger
 	maxWindow time.Duration
 	metrics   *metrics.Registry
-	signer    *plugintoken.Signer // verifies plugin service tokens + user assertions (H3)
+	signer    *plugintoken.Signer // verifies plugin service tokens + user assertions
 	dialect   Dialect             // SQL dialect the compiler emits for this store
-	dual      *dualstore.Store    // when set, reads unify lite∪scale (RULING-MIG6); nil = single store
-	// maxResponseBytes caps the SERIALIZED size of a single query/tree response (#83).
+	dual      *dualstore.Store    // when set, reads unify lite∪scale; nil = single store
+	// maxResponseBytes caps the SERIALIZED size of a single query/tree response.
 	// Row count is already bounded by the DSL limit, but a page of wide-payload rows is
 	// not — without this the kernel buffers an unbounded response and OOMs (a BOTH-profile
 	// DoS). Enforced in the adapter scan loops via storage.ResponseBudget; exceeding it
 	// yields a typed response_too_large 413, never a 500. 0 = unbounded (not recommended).
 	maxResponseBytes int64
 	// role resolves a session user's membership role in the org that owns a project
-	// (Arc O / O2) — the per-request-per-project authority the session (Case 2) auth path
+	// — the per-request-per-project authority the session (Case 2) auth path
 	// intersects. Defaults to controlplane.RoleForProject over the pool; injectable so the
 	// seam is testable without a DB.
 	role func(ctx context.Context, userID, projectID string) (string, error)
@@ -56,13 +56,13 @@ func (s *Server) SetRoleResolver(fn func(ctx context.Context, userID, projectID 
 }
 
 // SetDualStore enables permanent dual-read: every read unifies the historical
-// (lite) and new (scale) backends at the Query API (RULING-MIG6). Get*/Erase/score-
+// (lite) and new (scale) backends at the Query API. Get*/Erase/score-
 // ingest route through the dual decorator; the compiled-SQL list/aggregation paths
 // compile per-dialect and merge. The write path (pipeline) must use the same dual
 // store so a span is immediately readable across the boundary.
 func (s *Server) SetDualStore(d *dualstore.Store) { s.dual = d }
 
-// DefaultMaxResponseBytes is the default serialized-response ceiling (#83): 32 MiB,
+// DefaultMaxResponseBytes is the default serialized-response ceiling: 32 MiB,
 // comfortably above any legitimate 1000-row page yet far below what OOMs the kernel.
 const DefaultMaxResponseBytes int64 = 32 << 20
 
@@ -87,7 +87,7 @@ type pointReads interface {
 
 // reads returns the effective store for the non-SQL paths: the dual decorator when
 // dual-read is enabled (so Get/Erase/score-ingest unify lite∪scale), else the single
-// store. This is the convergence seam for those paths (R-MIG4).
+// store. This is the convergence seam for those paths.
 func (s *Server) reads() pointReads {
 	if s.dual != nil {
 		return s.dual
@@ -118,8 +118,8 @@ func (s *Server) Handler() http.Handler { return queryapi.Handler(s) }
 
 var _ queryapi.ServerInterface = (*Server)(nil)
 
-// auth resolves the caller and enforces the computed double-token intersection
-// (ADR-0023/R3). The returned Identity.Scopes are the caller's EFFECTIVE canonical
+// auth resolves the caller and enforces the computed double-token intersection.
+// The returned Identity.Scopes are the caller's EFFECTIVE canonical
 // permissions (perm.*), so downstream payload-scope checks intersect losslessly.
 // `op` is the historical coarse operation name at the call site; it is translated
 // to the required canonical permission here.
@@ -141,14 +141,14 @@ func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *Compi
 		return s.authPlugin(r, op, reqPerm, svcTok, assertion)
 	}
 
-	// Case 1b — a plugin FRONTEND request (J1/G1). A kernel-minted frontend token whose
+	// Case 1b — a plugin FRONTEND request. A kernel-minted frontend token whose
 	// scopes are ALREADY the plugin-grant ∩ user-session ∩ project intersection, used
 	// directly. Two guards keep it from being widened: a distinct header, AND a signed
 	// PurposeFrontend marker (verified in authFrontend) that ONLY the frontend mint sets
 	// — so a proxy/jobs-minted identity assertion (un-intersected full-role scopes)
 	// cannot be replayed here for more than it was granted.
 	//
-	// G1 — FAIL CLOSED on the frontend path. A request is plugin-originated if it
+	// FAIL CLOSED on the frontend path. A request is plugin-originated if it
 	// carries EITHER the frontend token OR the plugin-frontend marker (the SDK sends the
 	// marker on every plugin call). Such a request MUST resolve through the intersected
 	// frontend token and MUST NOT fall through to the session-cookie full-scope path
@@ -159,7 +159,7 @@ func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *Compi
 	// SECURITY NOTE — least-privilege-by-default, NOT a boundary. A HOSTILE same-origin
 	// frontend can still omit BOTH the marker and the token and call with the ambient
 	// session cookie (Case 2); containing that is origin isolation, the deferred future
-	// boundary (ADR-0004 amendment). This case confines a cooperating SDK-using frontend.
+	// boundary. This case confines a cooperating SDK-using frontend.
 	ft := r.Header.Get(pluginproto.FrontendTokenHeader)
 	if svcTok == "" && (ft != "" || r.Header.Get(pluginproto.PluginFrontendHeader) != "") {
 		if ft == "" {
@@ -171,7 +171,7 @@ func (s *Server) auth(r *http.Request, op string) (controlplane.Identity, *Compi
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 
 	// Case 2 — a browser session (shell). Effective = the user's role permissions ∩
-	// project, where the role is resolved PER-PROJECT-PER-ORG (Arc O / O2): the user's
+	// project, where the role is resolved PER-PROJECT-PER-ORG: the user's
 	// membership role in the org that owns the requested project — NOT the ambient
 	// default-org role on the session. A user who is owner in org A and viewer in org B
 	// gets viewer scope when acting on org B's project; a non-member (or unknown project)
@@ -243,7 +243,7 @@ func (s *Server) authPlugin(r *http.Request, op, reqPerm, svcTok, assertion stri
 	return controlplane.Identity{ProjectID: ac.ProjectID, Scopes: effective}, nil
 }
 
-// authFrontend resolves a plugin frontend-token call (J1). The token is a
+// authFrontend resolves a plugin frontend-token call. The token is a
 // kernel-minted frontend token whose scopes were computed at mint as plugin-grant ∩
 // user-session ∩ project, so no further intersection is needed — the token IS the
 // intersection. VerifyFrontendToken enforces the signed PurposeFrontend marker, so
@@ -260,8 +260,9 @@ func (s *Server) authFrontend(ctx context.Context, op, reqPerm, token string) (c
 	if err != nil {
 		return controlplane.Identity{}, errf("unauthorized", 403, "invalid frontend token")
 	}
-	// Capability gate — mirror authPlugin (server.go authPlugin), enforced at THIS seam
-	// (invariant #11). An op with no plugin capability (CapForOp == "") is forbidden to
+	// Capability gate — mirror authPlugin, enforced at THIS seam (the single
+	// convergence seam every plugin-auth path funnels through, never re-checked
+	// per caller). An op with no plugin capability (CapForOp == "") is forbidden to
 	// ALL plugins, backend and frontend alike — today GDPR erasure ("delete"). Without
 	// this, a plugin whose manifest declared traces:delete would, under an admin session,
 	// mint a frontend token carrying that data perm and perform erasure — making the
@@ -349,7 +350,7 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Field-level redaction (DSL §10): project payloads out unless the caller holds
+	// Field-level redaction: project payloads out unless the caller holds
 	// the payload scope. Cursor keying happened above from promoted anchors, so it
 	// never leaks payloads and paging is unaffected.
 	strip := payloadFields
@@ -379,7 +380,7 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	s.writeData(w, resp)
 }
 
-// runAggregation handles an aggregation query (QD-4). Group rows carry only
+// runAggregation handles an aggregation query. Group rows carry only
 // promoted/aggregated values — never payloads — so payload scope does not apply.
 func (s *Server) runAggregation(w http.ResponseWriter, r *http.Request, doc map[string]any, target string, id controlplane.Identity) {
 	if target != "spans" && target != "traces" && target != "scores" {
@@ -517,8 +518,8 @@ func (s *Server) GetScore(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 // WriteScore: POST /v1alpha1/scores. Accepts one score object or an array. Writes
-// are synchronous (not async-ack): 04-score.md §7 requires validation to be
-// observable to the caller — an async ack would swallow the 400/422. Batch is
+// are synchronous (not async-ack): validation must be observable to the caller
+// — an async ack would swallow the 400/422. Batch is
 // all-or-nothing: any invalid score rejects the whole request before persisting.
 func (s *Server) WriteScore(w http.ResponseWriter, r *http.Request) {
 	ident, aerr := s.auth(r, "scores:write")
@@ -592,8 +593,8 @@ func cursorFromDoc(doc json.RawMessage, anchorField string) (time.Time, string, 
 }
 
 // writeData is the SINGLE serialization seam for query-API data responses and the
-// AUTHORITATIVE #83 response-size guard (invariant 11: enforce at the ONE convergence
-// seam, not per-caller). Because the byte check and the write are the SAME call, a
+// AUTHORITATIVE response-size guard, enforced at the ONE convergence seam rather
+// than per-caller. Because the byte check and the write are the SAME call, a
 // handler cannot emit a data response without the ceiling being applied — a new
 // read/aggregation handler inherits the guard by calling writeData, not by remembering
 // a separate check. The adapter scan-loop budget bounds memory DURING accumulation (the
@@ -614,7 +615,7 @@ func (s *Server) writeData(w http.ResponseWriter, v any) {
 	_, _ = w.Write(b)
 }
 
-// errResponseTooLarge is the typed 413 for #83: a valid query whose serialized result
+// errResponseTooLarge is the typed 413: a valid query whose serialized result
 // would exceed the response ceiling. The message tells the caller how to recover
 // (narrow or paginate) rather than dumping an opaque 500.
 func (s *Server) errResponseTooLarge() *CompileError {

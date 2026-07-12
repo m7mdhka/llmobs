@@ -9,9 +9,10 @@ import (
 	"testing"
 )
 
-// TestCredentialsProviderRotates proves the #126 refreshing-credential path: the provider
+// TestCredentialsProviderRotates proves the refreshing-credential path: the provider
 // re-reads the password file on EVERY call (each go-redis (re)connect), so a rotated
-// managed-cloud token is honored without a restart. It also trims whitespace/newlines a
+// managed-cloud token — e.g. an AWS ElastiCache IAM token or a GCP Memorystore rotating
+// AUTH — is honored WITHOUT a kernel restart. It also trims the whitespace/newline a
 // sidecar commonly writes, and passes the ACL/IAM username through.
 func TestCredentialsProviderRotates(t *testing.T) {
 	dir := t.TempDir()
@@ -45,7 +46,7 @@ func TestCredentialsProviderRotates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if pass2 != "token-v2" {
-		t.Fatalf("after rotation password = %q, want token-v2 — a stale token means a restart is needed (the #126 bug)", pass2)
+		t.Fatalf("after rotation password = %q, want token-v2 — a stale token would force a kernel restart to pick up a rotated credential", pass2)
 	}
 }
 
@@ -80,8 +81,10 @@ func TestCredentialsProviderEmptyFileErrors(t *testing.T) {
 	}
 }
 
-// TestClassifyAuth is the failure-taxonomy proof (#12): a credential rejection is
-// PERMANENT (retrying cannot fix it), every other error stays transient/retriable.
+// TestClassifyAuth is the failure-taxonomy proof: a credential rejection is PERMANENT
+// (retrying cannot fix bad creds), while every other error (network, timeout, MOVED) stays
+// transient/retriable — so the caller doesn't loop forever hammering a doomed AUTH, nor
+// give up on a recoverable blip.
 func TestClassifyAuth(t *testing.T) {
 	permanent := []error{
 		errors.New("WRONGPASS invalid username-password pair or user is disabled"),

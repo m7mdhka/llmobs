@@ -10,7 +10,7 @@ import (
 )
 
 // fixtureDir holds recorded (synthetic) OTLP traffic replayed through the
-// normalizer and asserted against the expected canonical output (D3).
+// normalizer and asserted against the expected canonical output.
 const fixtureDir = "../../../testdata/fixtures/otel-genai"
 
 // TestSemConvFixture replays EVERY `<case>.otlp.json` under the fixture dir through

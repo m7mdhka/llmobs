@@ -92,7 +92,7 @@ func TestLongRunningNotRetriggered(t *testing.T) {
 	}
 }
 
-// TestSystemAssertionBoundedToGrant is H6b's prove-the-negative: the system
+// TestSystemAssertionBoundedToGrant is the prove-the-negative: the system
 // assertion the runner presents is scoped to the plugin's OWN permissions on its
 // project, with a system actor — never god-mode. A job CANNOT exceed the plugin's
 // grant or reach another project through it.

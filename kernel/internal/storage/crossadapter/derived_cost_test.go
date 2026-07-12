@@ -10,10 +10,10 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
-// TestCrossAdapterDerivedCostParity is the M2 money-path cross-adapter proof: a span
+// TestCrossAdapterDerivedCostParity is the money-path cross-adapter proof: a span
 // carrying a HIGH-PRECISION derived cost (computed once in Go at enrich, stored
 // verbatim) reads back IDENTICALLY from Postgres and ClickHouse. Cost is a fixed-scale
-// decimal (§1, Decimal64(12) on ClickHouse); the documented bound is equality to 12
+// decimal (Decimal64(12) on ClickHouse); the documented bound is equality to 12
 // fractional digits. Derivation runs once at ingest — both adapters persist the same
 // float64 — so any divergence here is a storage-representation bug, not arithmetic.
 func TestCrossAdapterDerivedCostParity(t *testing.T) {

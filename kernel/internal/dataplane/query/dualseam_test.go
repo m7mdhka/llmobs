@@ -1,9 +1,9 @@
 package query
 
-// R-MIG4 prove-the-negative: when dual-read is enabled, EVERY read path through the
-// Query API resolves against the unified lite∪scale view — nothing reads a single
-// adapter directly. This is the Langfuse #14827 trap (a forgotten hasAnyTrace()
-// existence check queried the OLD table, so a migrating user saw an empty product).
+// Prove-the-negative for the single dual-read seam: when dual-read is enabled, EVERY
+// read path through the Query API resolves against the unified lite∪scale view —
+// nothing reads a single adapter directly. This is the classic migration trap (a
+// forgotten existence check queried the OLD table, so a migrating user saw an empty product).
 //
 // The proof is behavioral, not a grep: the Server's own s.store is a trapStore that
 // FAILS the test the instant any of its methods is touched. The dual store wraps two
@@ -12,7 +12,7 @@ package query
 // bypassed the seam to hit a single adapter — and (b) BOTH backends were consulted,
 // so the unified view is genuinely the union. A new read handler that forgets the
 // seam and calls s.store.* directly trips the trap and fails this test by
-// construction (invariant #11: the ONE convergence seam).
+// construction (the ONE convergence seam every read funnels through).
 
 import (
 	"bytes"
@@ -205,7 +205,7 @@ func newSeamHarness(t *testing.T, signer *plugintoken.Signer) (*Server, *recordS
 	return s, lite, scale
 }
 
-// TestDualSeamCoversEveryReadPath is the R-MIG4 prove-the-negative.
+// TestDualSeamCoversEveryReadPath is the single-seam prove-the-negative.
 func TestDualSeamCoversEveryReadPath(t *testing.T) {
 	signer, err := plugintoken.NewSigner()
 	if err != nil {

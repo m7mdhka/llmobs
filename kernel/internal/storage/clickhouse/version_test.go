@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// TestCheckVersionFloor is the hermetic proof of the #88 fail-loud guard: a ClickHouse
+// TestCheckVersionFloor is the hermetic proof of the erasure-floor fail-loud guard: a ClickHouse
 // below the erasure floor must be refused (booting on it could read GDPR-erased spans
 // back), and a version at/above the floor must pass. The comparison is the load-bearing
 // safety decision, so it is tested away from any live server.
@@ -71,7 +71,7 @@ func TestParseVersion(t *testing.T) {
 }
 
 // TestReadGuardPinsDeletedMask proves — hermetically, by construction — that EVERY read
-// carries apply_deleted_mask=1 (#88): readGuard is the single seam all reads obtain
+// carries apply_deleted_mask=1: readGuard is the single seam all reads obtain
 // settings from, so a settings string without the mask would mean some read could
 // return an erased row. The lazy-materialization guard appears only when feature-detected.
 func TestReadGuardPinsDeletedMask(t *testing.T) {
@@ -118,7 +118,7 @@ func TestReadGuardPinsDeletedMask(t *testing.T) {
 	})
 }
 
-// TestMutationSettingsBoundsDelete proves the #111 erasure DELETE carries an
+// TestMutationSettingsBoundsDelete proves the erasure DELETE carries an
 // execution-time cap when configured (so a large delete can't hang unbounded), and is
 // empty when unset.
 func TestMutationSettingsBoundsDelete(t *testing.T) {

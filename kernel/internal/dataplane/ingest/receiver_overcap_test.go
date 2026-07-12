@@ -11,7 +11,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/dataplane/pipeline"
 )
 
-// TestOverCapBodyRejected413 is the #97 fix: an over-cap OTLP body must be REJECTED (413),
+// TestOverCapBodyRejected413: an over-cap OTLP body must be REJECTED (413),
 // never silently truncated and acked (which loses the tail of the batch while telling the
 // client it all landed). An at-cap body still passes.
 func TestOverCapBodyRejected413(t *testing.T) {

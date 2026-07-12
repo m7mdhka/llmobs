@@ -91,7 +91,7 @@ func TestIdentityAssertionAudienceConfusion(t *testing.T) {
 	}
 }
 
-// TestFrontendTokenClassSeparation proves the J1 token-class marker: a frontend
+// TestFrontendTokenClassSeparation proves the token-class marker: a frontend
 // token verifies only via VerifyFrontendToken, and the two verifiers reject each
 // other's class — so a proxy/jobs-minted identity assertion (no purpose) cannot be
 // replayed on the frontend seam, and a frontend token cannot be replayed on the

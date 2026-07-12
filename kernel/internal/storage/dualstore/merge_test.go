@@ -24,7 +24,7 @@ func order(rows []json.RawMessage) []string {
 	return out
 }
 
-// H1 regression: ordering by the COMPUTED field `duration` must sort by the actual
+// Computed-field ordering regression: ordering by the COMPUTED field `duration` must sort by the actual
 // end-start interval (recomputed from doc timestamps), not collapse to id-only. Before
 // the fix, docLess parsed the dialect SQL expression as a doc field name → nil → the
 // merge silently sorted by id ASC, returning the wrong order (and, after trim, the
@@ -65,7 +65,7 @@ func TestMergeOrderByDurationNullSortsLastBothDirs(t *testing.T) {
 	}
 }
 
-// M1/M2 regression: aggregation merge must classify columns by their compiled OP, not
+// Regression: aggregation merge must classify columns by their compiled OP, not
 // a name prefix. count_distinct must NOT be summed across a straddle (it is not
 // additive), and a caller-controlled alias that looks like a group column ("g0") or a
 // mergeable op ("count_x") must not be misclassified.
@@ -114,8 +114,10 @@ func TestMergeAggregationAliasCollisionSafe(t *testing.T) {
 
 // TestSynthesizeTraceCostExcludesAggregates proves the dual-read split-trace
 // re-synthesis (Go) sums total_cost with the SAME aggregate-kind exclusion as the SQL
-// projections (§7.1) — so a trace whose spans straddle lite∪scale gets the identical
-// trace-level cost as a single-store one.
+// projections — trace-level cost sums only non-aggregate spans, since an aggregate
+// span (agent_step/invoke_agent) duplicates its child model-call span's usage — so a
+// trace whose spans straddle lite∪scale gets the identical trace-level cost as a
+// single-store one.
 func TestSynthesizeTraceCostExcludesAggregates(t *testing.T) {
 	span := func(id, parent, kind string, cost float64, hasCost bool) json.RawMessage {
 		m := map[string]any{

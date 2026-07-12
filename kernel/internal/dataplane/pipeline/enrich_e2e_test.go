@@ -15,7 +15,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 )
 
-// TestEnrichEndToEndCostQueryable is the M2 ACCEPTANCE bar (the capability gap closed):
+// TestEnrichEndToEndCostQueryable is the ACCEPTANCE bar (the capability gap closed):
 // an instrumented OTLP trace, ingested through the FULL pipeline (decode → normalize →
 // enrich → persist) against a real Postgres with a seeded price table, has total_cost
 // PRESENT and CORRECT when read back through the storage/Query path — cost is derived

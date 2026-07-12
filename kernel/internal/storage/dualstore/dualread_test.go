@@ -1,5 +1,6 @@
 // Package dualstore's load-bearing proof: the read-after-write-across-boundary
-// invariant (RULING-MIG6 / R-MIG5). A span written to the scale adapter is
+// invariant — read-after-write consistency must hold across the lite↔scale
+// boundary as a tested guarantee. A span written to the scale adapter is
 // IMMEDIATELY readable through the unified dual-read Query API with NO window where
 // it is missing because a read resolved against lite — and a historical span in
 // lite is always readable too. Proven in BOTH directions AND under concurrent load.

@@ -40,7 +40,7 @@ func traceCost(t *testing.T, rows []json.RawMessage, id string) (float64, bool) 
 	return 0, false
 }
 
-// TestTraceCostNoDoubleCount is the M3 load-bearing proof (§7.1): trace-level total_cost
+// TestTraceCostNoDoubleCount is the load-bearing trace-cost proof: trace-level total_cost
 // over an ARBITRARY tree sums each token's cost exactly once — a parent agent_step whose
 // cost duplicates its descendants is NEVER summed with them — and the roll-up is IDENTICAL
 // on Postgres and ClickHouse (the money path + cross-adapter, the two bug-hiding categories).
@@ -141,7 +141,7 @@ func TestTraceCostNullWhenNoLeafCost(t *testing.T) {
 	}
 }
 
-// TestTraceCostNullKindIncluded is the #3 regression: a cost-bearing span with NO kind
+// TestTraceCostNullKindIncluded is the null-kind regression: a cost-bearing span with NO kind
 // (NULL in Postgres, ” in ClickHouse) must be treated as NON-aggregate and INCLUDED in
 // the roll-up on BOTH engines — the PG COALESCE(kind,”) bridges the NULL-vs-” sentinel
 // so a null-kind span isn't silently dropped from PG's sum while summed by CH.

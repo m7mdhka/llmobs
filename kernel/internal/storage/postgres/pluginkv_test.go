@@ -28,9 +28,9 @@ func setupKV(t *testing.T) (*PluginKV, *pgxpool.Pool) {
 	return NewPluginKV(pool), pool
 }
 
-// TestPluginKVUserScopeIsolation is the O6 store-level proof (real Postgres PK): within the same
+// TestPluginKVUserScopeIsolation is the per-user-scope store-level proof (real Postgres PK): within the same
 // (plugin, project), the user_id dimension isolates per-user rows from each other AND from the
-// project-scope row (user_id=''). One user's value is never returned to another.
+// project-scope row (user_id=”). One user's value is never returned to another.
 func TestPluginKVUserScopeIsolation(t *testing.T) {
 	kv, _ := setupKV(t)
 	ctx := context.Background()

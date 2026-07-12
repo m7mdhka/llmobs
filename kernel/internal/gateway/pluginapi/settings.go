@@ -22,18 +22,18 @@ type SettingsStore interface {
 // schema presence.
 type SchemaSource func(pluginID string) (schema json.RawMessage, custom, ok bool)
 
-// Settings serves the plugin settings endpoints (J2). Unlike kv/secrets/store, these
-// authorize the J1 FRONTEND token (a pure-frontend plugin's only credential); the
+// Settings serves the plugin settings endpoints. Unlike kv/secrets/store, these
+// authorize the FRONTEND token (a pure-frontend plugin's only credential); the
 // plugin id + project come from the token, never the body. Settings is `kv` made
-// frontend-reachable and schema-aware (ADR-0024).
+// frontend-reachable and schema-aware.
 type Settings struct {
 	authz  *pluginauth.Authorizer
 	store  SettingsStore
 	schema SchemaSource
 	// canWrite reports whether the session user may administer settings IN THE PROJECT the
-	// write targets (Arc O / O2). It takes the token-resolved projectID so authority is
-	// checked against the user's role in THAT project's org — never an ambient default-org
-	// role. The tenant of the write and the authority for it must be the same org.
+	// write targets. It takes the token-resolved projectID so authority is checked against
+	// the user's role in THAT project's org — never an ambient default-org role. The tenant
+	// of the write and the authority for it must be the same org.
 	canWrite func(r *http.Request, projectID string) bool
 }
 
@@ -41,7 +41,7 @@ type Settings struct {
 // caller's CONFIGURATION authority (settings are project-shared plugin config, so a
 // write must not be allowed to a read-only viewer): the frontend token proves which
 // plugin/tenant, and canWrite (session role) proves the caller may administer it —
-// the same split the supervisor uses (admins today, #21 RBAC seam). Reads are open
+// the same split the supervisor uses (admins today, the RBAC seam). Reads are open
 // to any valid frontend token for the plugin. A nil canWrite denies all writes.
 func NewSettings(authz *pluginauth.Authorizer, store SettingsStore, schema SchemaSource, canWrite func(r *http.Request, projectID string) bool) *Settings {
 	if canWrite == nil {
@@ -103,7 +103,7 @@ func (h *Settings) set(w http.ResponseWriter, r *http.Request, c pluginauth.Call
 	// authority IN THIS PROJECT'S ORG — a viewer (in this project's org) must not overwrite
 	// it even if they are an admin elsewhere. The project comes from the token (c.ProjectID)
 	// and the authority is resolved against THAT project's org, so tenant and authority
-	// match (O2 — no ambient default-org role gates a cross-org write).
+	// match — no ambient default-org role gates a cross-org write.
 	if !h.canWrite(r, c.ProjectID) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "settings write requires configuration authority"})
 		return

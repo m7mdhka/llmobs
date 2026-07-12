@@ -4,24 +4,25 @@ import "sort"
 
 // Derive computes cost_details (per-usage-key USD) and the scalar total for a span's
 // RESOLVED usage against a price entry, applying the project discount. It is the money
-// path — pure, data-driven, and the single place the §7 rules become arithmetic:
+// path — pure, data-driven, and the single place pricing rules become arithmetic:
 //
-//   - R2/R4 (§7.4): DATA-DRIVEN. A usage key is billed only if the entry carries a rate
-//     for it; the rate is read off the entry, never a provider/bucket case list. Adding
-//     a provider or a new detail key is price data, never code here.
-//   - R3 residual + §7.7.1 REDUCE FIRST: a base (input/output) is billed on its RESIDUAL
+//   - DATA-DRIVEN: a usage key is billed only if the entry carries a rate for it; the
+//     rate is read off the entry, never a provider/bucket case list. Adding a provider
+//     or a new detail key is price data, never code here.
+//   - REDUCE FIRST: a base (input/output) is billed on its RESIDUAL
 //     = base − Σ(bucket counts whose rate declares Reduces==base); each such bucket is
 //     ALSO billed at its own rate. So input residual bills at the input rate while
 //     cache_read/audio_input bill at their own rates — never double-charged, never folded
 //     into input at the input rate.
-//   - R7 + §7.7.2 GRADUATED tier: the base's tier breakpoint is applied to the RESIDUAL
-//     (not the raw base — §7.7.1), tax-bracket style (tokens up to the threshold at the
-//     base rate, tokens above at the tier rate), never a cliff. Single-breakpoint per key
-//     in M2 (§7.7.3; graduated multi-breakpoint is issue #104).
-//   - Discount (ADR-0029 D6): a factor in (0,1] multiplies every cost line.
+//   - THEN TIER THE RESIDUAL: the base's tier breakpoint is applied to the RESIDUAL
+//     (not the raw base — counting the specially-priced buckets toward the threshold
+//     would double-count them), tax-bracket style (tokens up to the threshold at the
+//     base rate, tokens above at the tier rate), never a cliff. One breakpoint per key
+//     for now; graduated multi-breakpoint is a shape-ready follow-on.
+//   - Discount: a factor in (0,1] multiplies every cost line.
 //
 // Returns an empty map + 0 when the entry is nil or usage is empty (the caller leaves
-// cost null — §4 step 3, never a fabricated zero). Costs are float64 (the model's
+// cost null, never a fabricated zero). Costs are float64 (the model's
 // cost_details type); the ClickHouse adapter stores Decimal64(12), so the documented
 // cross-adapter bound is equality to 12 fractional digits.
 func Derive(usage map[string]int64, e *Entry, discount float64) (map[string]float64, float64) {
@@ -30,7 +31,7 @@ func Derive(usage map[string]int64, e *Entry, discount float64) (map[string]floa
 	}
 	cost := map[string]float64{}
 
-	// 1. Base residuals (input, output): reduce first, then tier the residual (§7.7.1).
+	// 1. Base residuals (input, output): reduce first, then tier the residual.
 	for _, base := range baseKeys {
 		rate, ok := e.Rates[base]
 		if !ok {
@@ -89,7 +90,7 @@ var baseKeys = []string{"input", "output"}
 
 // tieredCost bills `residual` tokens at `baseRate`, applying a graduated single
 // breakpoint if one is set: tokens up to the threshold at the base rate, tokens above
-// at the tier rate (§7.7.2 tax-bracket, never a cliff).
+// at the tier rate (tax-bracket, never a cliff).
 func tieredCost(residual int64, baseRate float64, tier *Tier) float64 {
 	if tier == nil || residual <= tier.ThresholdTokens {
 		return float64(residual) * baseRate
@@ -97,9 +98,9 @@ func tieredCost(residual int64, baseRate float64, tier *Tier) float64 {
 	return float64(tier.ThresholdTokens)*baseRate + float64(residual-tier.ThresholdTokens)*tier.PerToken
 }
 
-// tierFor returns the entry's tier for a usage key, or nil. M2 honors a single
-// breakpoint per key (§7.7.3); if more than one is present the first is used (graduated
-// multi-breakpoint is the shape-ready follow-on, issue #104).
+// tierFor returns the entry's tier for a usage key, or nil. Honors a single
+// breakpoint per key; if more than one is present the first is used (graduated
+// multi-breakpoint is the shape-ready follow-on).
 func tierFor(e *Entry, key string) *Tier {
 	for i := range e.Tiers {
 		if e.Tiers[i].Key == key {

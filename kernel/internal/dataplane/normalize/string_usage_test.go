@@ -2,7 +2,7 @@ package normalize
 
 import "testing"
 
-// TestStringTypedUsageCounts is the #130 regression: some exporters emit usage counts as an
+// TestStringTypedUsageCounts is the regression for: some exporters emit usage counts as an
 // OTLP StringValue ("812") rather than an IntValue. They must be parsed, not dropped —
 // dropping a bucket silently under-counts tokens AND cost. A non-numeric string is treated as
 // absent (never a silent zero).

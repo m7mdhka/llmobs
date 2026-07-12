@@ -8,10 +8,10 @@ import (
 )
 
 // TestMergeEventOrderIndependence is the adapter-level conformance for the
-// per-field provenance rework (issue #17): applying a shuffled event sequence
-// incrementally via MergeEvent (the read-modify-write the lite adapter runs) MUST
-// equal the pure Fold over the whole set. This proves out-of-order updates fold
-// identically — the meta-decision (cross-adapter identical semantics) holds.
+// per-field provenance fold: applying a shuffled event sequence incrementally via
+// MergeEvent (the read-modify-write the lite adapter runs) MUST equal the pure
+// Fold over the whole set. This proves out-of-order updates fold identically, so
+// every adapter reaches the same observable state regardless of arrival order.
 func TestMergeEventOrderIndependence(t *testing.T) {
 	ts := func(n int) time.Time { return time.Unix(int64(n), 0).UTC() }
 	up := func(n int, eid string, p map[string]any) Event {

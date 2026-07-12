@@ -5,10 +5,13 @@
 - **Deciders:** m7mdhka (Tier-3 arc, flexibility-audit Wave-3 remediation)
 - **Relates to:** ADR-0002 (dogfood rule), ADR-0004 (plugins are containers +
   manifest), ADR-0005 (double-token auth), ADR-0006 (supervisor + executors),
-  ADR-0008 (SDK primitives). Closes the Wave-3 Set-B gaps (`docs/research/
-  flexibility-audit-wave3-stories.md`): the seven primitives were enum-only, the
-  double-token intersection was named-not-computed, and there was no primitive for
-  plugin-owned structured data.
+  ADR-0008 (SDK primitives). Closes the Wave-3 Set-B gaps found by the internal
+  flexibility audit — a read-only sweep that pressed user "stories" against the plugin
+  and model walls and recorded, per story, whether the architecture actually permitted
+  it. The three walls it hit, which this ADR removes: the seven primitives were
+  **enum-only** (no way to express a plugin's own data shapes), the double-token
+  intersection was **named-but-not-computed** (the permission intersection existed in
+  prose, not in code), and there was **no primitive for plugin-owned structured data**.
 
 ## Context
 

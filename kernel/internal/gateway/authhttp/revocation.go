@@ -8,7 +8,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
 )
 
-// User revocation endpoint (Arc O / O4, #63). Revoking a user is a global account-disable —
+// User revocation endpoint. Revoking a user is a global account-disable —
 // it denies EVERY credential in the user's derivation subtree (sessions, minted API keys, and
 // still-live frontend tokens / identity assertions) immediately, and blocks re-login. It is
 // therefore gated on instance-admin (an owner of the default org), the same explicit

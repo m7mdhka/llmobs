@@ -26,7 +26,7 @@ func postTrace(r *Receiver) *httptest.ResponseRecorder {
 	return w
 }
 
-// TestBackpressureOnPersistUnhealthy is the G2 backpressure proof: while
+// TestBackpressureOnPersistUnhealthy is the backpressure proof: while
 // persistence is healthy the OTLP endpoints fast-ack (async property intact); once
 // the persist signal flips unhealthy they shed with a retryable 503 (HTTP,
 // Retry-After set) / UNAVAILABLE (gRPC) instead of acking into a queue that cannot

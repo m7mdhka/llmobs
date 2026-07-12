@@ -1,5 +1,5 @@
 // Package pluginproxy proxies user traffic to a plugin backend under the stable
-// gateway prefix /api/plugins/{id}/* (ADR-0023 §5). It is the single place a
+// gateway prefix /api/plugins/{id}/*. It is the single place a
 // browser session becomes a plugin-bound identity: the session cookie is STRIPPED
 // and a short-TTL, audience-bound identity assertion is INJECTED, so the plugin
 // never sees the cookie and can verify who the user is without trusting itself.
@@ -34,8 +34,8 @@ type Proxy struct {
 	signer   *plugintoken.Signer
 	project  func(*http.Request) (string, error)
 	// role resolves the session user's membership role in the org that owns the proxied
-	// project (Arc O / O2) — the identity assertion carries the user's role IN THAT
-	// PROJECT'S ORG, not an ambient default-org role. Injected (no pool import here).
+	// project — the identity assertion carries the user's role IN THAT PROJECT'S ORG,
+	// not an ambient default-org role. Injected (no pool import here).
 	role func(ctx context.Context, userID, projectID string) (string, error)
 	ttl  time.Duration
 	log  *slog.Logger
@@ -76,7 +76,7 @@ func (p *Proxy) Handler(prefix string) http.Handler {
 			unavailable(w, http.StatusForbidden, "no_project", id)
 			return
 		}
-		// The assertion carries the user's role IN THE PROJECT'S ORG (O2), not an ambient
+		// The assertion carries the user's role IN THE PROJECT'S ORG, not an ambient
 		// default-org role. DataPermsOnly then strips management scopes so a plugin
 		// identity assertion can never carry members:manage/org:manage even before the
 		// downstream intersection (the assertion is handed to plugin code).

@@ -55,7 +55,7 @@ func freshSchema(t *testing.T, conn driver.Conn) {
 	if err := Migrate(ctx, conn, Config{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	// R-CH2: a second Migrate over the same schema is a no-op (idempotent).
+	// A second Migrate over the same schema is a no-op (idempotent).
 	if err := Migrate(ctx, conn, Config{}); err != nil {
 		t.Fatalf("second migrate (idempotency): %v", err)
 	}
@@ -206,7 +206,7 @@ func TestIntegrationEraseSpans(t *testing.T) {
 	if remaining != 0 {
 		t.Fatalf("erased spans still present: %d rows", remaining)
 	}
-	// Suppression tombstones written for both erased ids (G3, before the delete).
+	// Suppression tombstones written for both erased ids (written before the delete).
 	var supp uint64
 	if err := conn.QueryRow(ctx, "SELECT count() FROM erasure_suppression WHERE project_id='p' AND id IN ('e1','e2')").Scan(&supp); err != nil {
 		t.Fatalf("count suppression: %v", err)
@@ -284,8 +284,8 @@ func assertNoErasedSpan(t *testing.T, label string, rows []json.RawMessage) {
 	}
 }
 
-// TestIntegrationErasedSpanNotReadableEveryPath is the #88 prove-the-negative — the
-// arc's highest-stakes proof. After a GDPR erase, a lightweight-deleted span must be
+// TestIntegrationErasedSpanNotReadableEveryPath is the erasure read-back prove-the-negative —
+// the highest-stakes proof. After a GDPR erase, a lightweight-deleted span must be
 // unreadable through EVERY read path, and — critically — WITHOUT an OPTIMIZE FINAL: the
 // deleted rows are still physically present, only masked (the lazy/unmaterialized window
 // a plan reorder could otherwise resurrect from). apply_deleted_mask=1 + the
@@ -390,7 +390,7 @@ func TestIntegrationErasedSpanNotReadableEveryPath(t *testing.T) {
 	assertUnreadable("merged")
 }
 
-// TestIntegrationDeletedMaskIsLoadBearing proves the #88 fix is load-bearing, not
+// TestIntegrationDeletedMaskIsLoadBearing proves the deleted-mask guard is load-bearing, not
 // incidental: after a lightweight-delete erase and BEFORE any merge, the erased row is
 // still PHYSICALLY present, and only the deleted mask hides it. Reading with
 // apply_deleted_mask=0 (the misconfig/bug our readGuard defends against) returns the
@@ -443,8 +443,8 @@ func itoaMask(i int) string {
 	return "1"
 }
 
-// TestIntegrationSuppressedIdNotReadableEvenIfReinserted is the DETERMINISTIC #77
-// read-side proof — it reproduces the concurrent-race OUTCOME directly, with no timing
+// TestIntegrationSuppressedIdNotReadableEvenIfReinserted is the DETERMINISTIC
+// erasure-suppression read-side proof — it reproduces the concurrent-race OUTCOME directly, with no timing
 // dependence: a normal, non-lightweight-deleted span exists for an id that carries an
 // unexpired suppression tombstone (exactly what a backfill/re-ingest that lost the write
 // race to a concurrent erase leaves behind — the row lands, then the erase's tombstone
@@ -564,7 +564,7 @@ func TestIntegrationSuppressedIdNotReadableEvenIfReinserted(t *testing.T) {
 	}
 }
 
-// TestIntegrationReadYourWritesSettingsValid is the #109 prove-the-negative achievable on
+// TestIntegrationReadYourWritesSettingsValid is the read-your-writes prove-the-negative achievable on
 // a single node: with the read-your-writes settings an operator opts into
 // (insert_quorum + select_sequential_consistency) applied to the connection, a
 // just-written span is IMMEDIATELY readable through the read paths — no transient 404.
@@ -582,7 +582,7 @@ func TestIntegrationReadYourWritesSettingsValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse dsn: %v", err)
 	}
-	ApplyReadYourWrites(opts) // the #109 operator opt-in — must not break a valid connection
+	ApplyReadYourWrites(opts) // the operator opt-in — must not break a valid connection
 	conn, err := ch.Open(opts)
 	if err != nil {
 		t.Fatalf("open with read-your-writes settings: %v", err)
@@ -603,7 +603,7 @@ func TestIntegrationReadYourWritesSettingsValid(t *testing.T) {
 	if err := s.PersistSpan(ctx, ev); err != nil {
 		t.Fatalf("persist with insert_quorum on: %v", err)
 	}
-	// IMMEDIATELY readable — the #109 no-transient-404 guarantee.
+	// IMMEDIATELY readable — the no-transient-404 guarantee.
 	doc, err := s.GetSpan(ctx, "p", "rywspan")
 	if err != nil {
 		t.Fatalf("get with select_sequential_consistency on: %v", err)
@@ -637,7 +637,7 @@ func TestIntegrationErasureSuppression(t *testing.T) {
 	s := NewStore(conn)
 
 	// Write an unexpired tombstone for (p, s2), then a re-delivery must be
-	// suppressed (G3) — not resurrected.
+	// suppressed — not resurrected.
 	if err := conn.Exec(ctx,
 		"INSERT INTO erasure_suppression (project_id, id, audit_id, expires_at, event_ts) VALUES (?, ?, ?, ?, ?)",
 		"p", "s2", "aud1", time.Now().UTC().Add(time.Hour), time.Now().UTC()); err != nil {

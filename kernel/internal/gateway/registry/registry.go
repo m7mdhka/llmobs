@@ -1,8 +1,9 @@
 // Package registry serves the plugin registry read API the shell's remote loader
 // consumes: for each installed plugin, its id, nav items, routes, MF remote URL,
-// and integrity hash. D2 ships the read endpoint with an empty source (no plugin
-// install machinery yet); D4 wires a manifest-scanning source behind the same
-// Handler. The shell hardcodes no plugins — this endpoint is its only input.
+// and integrity hash. It first shipped as the read endpoint with an empty source
+// (no plugin install machinery yet); a manifest-scanning source later plugged in
+// behind the same Handler. The shell hardcodes no plugins — this endpoint is its
+// only input.
 package registry
 
 import (
@@ -28,30 +29,30 @@ type Plugin struct {
 	Integrity     string     `json:"integrity,omitempty"`
 	Nav           []NavEntry `json:"nav"`
 	// Capabilities + Permissions are the plugin's manifest grant — the plugin half
-	// of the frontend-token intersection (J1). A frontend token minted for this
+	// of the frontend-token intersection. A frontend token minted for this
 	// plugin is scoped to Permissions ∩ the calling user's session.
 	Capabilities []string `json:"capabilities,omitempty"`
 	Permissions  []string `json:"permissions,omitempty"`
-	// SettingsSchema is the raw JSON Schema for the plugin's settings (J2), loaded
+	// SettingsSchema is the raw JSON Schema for the plugin's settings, loaded
 	// from the manifest's settingsSchema path. Present only when the plugin declares
 	// one; the shell renders it as a settings tab and the kernel validates writes
 	// against it. Served to the shell in the registry list.
 	SettingsSchema json.RawMessage `json:"settingsSchema,omitempty"`
-	// SettingsCustom is true when settingsView is "custom" (N2): the plugin mounts its
+	// SettingsCustom is true when settingsView is "custom": the plugin mounts its
 	// own settings view and non-secret values are stored as opaque JSON. A declared
-	// writeOnly field is still an encrypted, never-returned secret (H4).
+	// writeOnly field is still an encrypted, never-returned secret.
 	SettingsCustom bool `json:"settingsCustom,omitempty"`
 }
 
-// Source supplies the currently-available plugins. D4 implements a manifest
-// scanner; D2 uses the empty source.
+// Source supplies the currently-available plugins. A manifest scanner is the
+// production implementation; the empty source advertises none.
 type Source interface {
 	Plugins() []Plugin
 }
 
 // GrantFor returns a plugin's declared capabilities + permissions by id, false if
 // no such plugin. Used by the frontend-token mint to compute the plugin half of
-// the intersection (J1).
+// the intersection.
 func GrantFor(src Source, id string) (caps, perms []string, ok bool) {
 	for _, p := range src.Plugins() {
 		if p.ID == id {
@@ -62,8 +63,8 @@ func GrantFor(src Source, id string) (caps, perms []string, ok bool) {
 }
 
 // SchemaFor returns a plugin's raw settings JSON Schema by id, whether it is in custom
-// mode (N2), and whether the plugin HAS settings at all. Used by the settings store
-// (J2/N2): schema mode validates against the schema; custom mode reads the schema only
+// mode, and whether the plugin HAS settings at all. Used by the settings store:
+// schema mode validates against the schema; custom mode reads the schema only
 // for its writeOnly (secret) fields and stores the rest opaquely. A plugin has settings
 // when it declares a settingsSchema OR opts into custom mode — a custom plugin may carry
 // no schema (no secrets), so `ok` is not tied to schema presence.

@@ -20,6 +20,7 @@ KERNEL_API_PORT="${KERNEL_API_PORT:-8080}"
 PG_PORT="${LLMOBS_DEV_PG_PORT:-5432}"
 ADMIN_EMAIL="${LLMOBS_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
 ADMIN_PW="${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:-admin-dev-password}"
+DEMO_KEY="${LLMOBS_BOOTSTRAP_API_KEY:-sk-dev-demo-key}"
 COMPOSE=(docker compose -f deploy/compose/dev.yaml)
 
 pids=()
@@ -60,6 +61,8 @@ pids+=($!)
 
 echo ">> dev: starting the kernel (go run) — plugin frontend served live from :$PLUGIN_PORT"
 echo ">> dev: open http://localhost:$SHELL_PORT  (admin: $ADMIN_EMAIL / $ADMIN_PW)"
+echo ">> dev: send your FIRST TRACE (another terminal): LLMOBS_API_KEY=$DEMO_KEY go run ./examples/otel-genai-demo"
+echo ">> dev:   → prints a trace id; open http://localhost:$SHELL_PORT → Traces to see it"
 echo ">> dev: edit plugins/tracing/frontend/src/* → hot-reloads; edit kernel code → Ctrl-C + rerun"
 
 # The kernel runs in the FOREGROUND so Ctrl-C stops it and the trap tears the rest
@@ -75,5 +78,5 @@ exec env \
   LLMOBS_DEV_PLUGIN_REMOTES="llmobs/tracing=http://localhost:${PLUGIN_PORT}/remoteEntry.js" \
   LLMOBS_BOOTSTRAP_ADMIN_EMAIL="$ADMIN_EMAIL" \
   LLMOBS_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PW" \
-  LLMOBS_BOOTSTRAP_API_KEY="${LLMOBS_BOOTSTRAP_API_KEY:-sk-dev-demo-key}" \
+  LLMOBS_BOOTSTRAP_API_KEY="$DEMO_KEY" \
   go run ./cmd/llmobsd

@@ -37,9 +37,16 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	// is_deleted state. Erasure keys on (project_id, id) so ALL physical versions of
 	// a matched span are removed even if a stale version carried a different
 	// (mutable) user_id.
+	settings, err := s.readGuard()
+	if err != nil {
+		return 0, "", err
+	}
+	// apply_deleted_mask=1 (via readGuard) means the resolver already excludes
+	// previously-erased rows, so a re-run after a partial erase resolves only what
+	// remains — never re-issuing a delete for a row that is already gone.
 	rows, err := s.conn.Query(ctx,
 		`SELECT id FROM (SELECT * FROM spans WHERE project_id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id)
-		 WHERE user_id = ? AND start_time >= ? AND start_time < ?`+s.limits.settings(),
+		 WHERE user_id = ? AND start_time >= ? AND start_time < ?`+settings,
 		projectID, userID, from.UTC(), to.UTC())
 	if err != nil {
 		return 0, "", fmt.Errorf("resolve erasure ids: %w", err)
@@ -79,7 +86,33 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 		}
 	}
 
-	// 2) Audit proof row.
+	// 2) Irreversible physical removal — every version of each matched key.
+	// BOUNDED + CHUNKED (#111): a single DELETE with an unbounded `IN (?)` list is a
+	// long synchronous mutation that can socket-hang-up the client (and a naive retry
+	// then stacks a duplicate mutation over the still-running one). Deleting in bounded
+	// chunks — each carrying the execution-time cap — keeps every statement bounded, and
+	// because the resolver excludes already-erased rows a resumed run never re-deletes.
+	// lightweight_deletes_sync stays at the server default (wait) so the erasure is
+	// durable before EraseSpans returns — the GDPR guarantee is completion, not fire-and-
+	// forget. Suppression (step 1) precedes the delete so a crash mid-delete can never
+	// leave a resurrectable span; the audit (step 3) follows it so the audit attests a
+	// COMPLETED physical erasure, never one that has not yet happened (or failed).
+	for start := 0; start < count; start += eraseDeleteChunk {
+		end := start + eraseDeleteChunk
+		if end > count {
+			end = count
+		}
+		if err := s.conn.Exec(ctx,
+			`DELETE FROM spans WHERE project_id = ? AND id IN (?)`+s.mutationSettings(),
+			projectID, ids[start:end]); err != nil {
+			return 0, "", fmt.Errorf("delete erased spans [%d,%d): %w", start, end, err)
+		}
+	}
+
+	// 3) Audit proof row LAST — written only once the physical removal succeeded, so a
+	// durable audit never over-attests. A crash after the delete but before the audit
+	// leaves the rows erased + suppressed (safe); a re-run re-resolves what remains and
+	// audits that.
 	filter, _ := json.Marshal(map[string]any{
 		"user_id": userID,
 		"from":    from.UTC().Format(time.RFC3339),
@@ -96,15 +129,22 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	if err := ab.Send(); err != nil {
 		return 0, "", fmt.Errorf("send audit: %w", err)
 	}
-
-	// 3) Irreversible physical removal LAST — every version of each matched key.
-	if count > 0 {
-		if err := s.conn.Exec(ctx,
-			`DELETE FROM spans WHERE project_id = ? AND id IN (?)`, projectID, ids); err != nil {
-			return 0, "", fmt.Errorf("delete erased spans: %w", err)
-		}
-	}
 	return count, auditID, nil
+}
+
+// eraseDeleteChunk bounds how many ids a single erasure DELETE statement carries (#111),
+// so a large GDPR erasure is a sequence of bounded mutations, never one unbounded one.
+const eraseDeleteChunk = 1000
+
+// mutationSettings caps the erasure DELETE's wall-clock so a pathological mutation is
+// refused by the server rather than hanging the client socket (#111). Uses the same
+// execution-time budget as reads; empty when unset (fail-open only on the cap, never on
+// the delete itself — an unset cap is a misconfig surfaced elsewhere, not here).
+func (s *Store) mutationSettings() string {
+	if s.limits.MaxExecutionTime <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" SETTINGS max_execution_time=%d", int64(s.limits.MaxExecutionTime.Seconds()))
 }
 
 // SuppressSpans records an erasure-suppression tombstone for each explicit id without

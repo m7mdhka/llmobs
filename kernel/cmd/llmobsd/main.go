@@ -573,6 +573,15 @@ func buildScaleStore(ctx context.Context, cfg platform.Config, log *slog.Logger)
 		return nil, nil, fmt.Errorf("opening ClickHouse connection: %w", err)
 	}
 	closeFn := func() { _ = conn.Close() }
+	// FAIL LOUD before serving any read (#88): a ClickHouse too old to honor the
+	// deleted mask could read a GDPR-erased span back, so refuse to start. Also
+	// feature-detects the lazy-materialization setting so reads can disable it where it
+	// exists (a plan reorder could otherwise surface an erased row past the mask).
+	info, err := clickhouse.ProbeServer(ctx, conn)
+	if err != nil {
+		closeFn()
+		return nil, nil, fmt.Errorf("clickhouse erasure-readiness check: %w", err)
+	}
 	if cfg.MigrateOnBoot {
 		if err := clickhouse.Migrate(ctx, conn, clickhouse.Config{Cluster: cfg.CHCluster}); err != nil {
 			closeFn()
@@ -580,6 +589,7 @@ func buildScaleStore(ctx context.Context, cfg platform.Config, log *slog.Logger)
 		}
 	}
 	scale := clickhouse.NewStore(conn)
+	scale.SetLazyMaterializationGuard(info.HasLazyMaterialization)
 	execTimeout, _ := time.ParseDuration(cfg.CHMaxExecutionTime)
 	scale.SetReadLimits(clickhouse.ReadLimits{
 		MaxExecutionTime: execTimeout,

@@ -40,12 +40,27 @@ var errReadLimitsUnset = fmt.Errorf(
 	"clickhouse read refused: per-query resource limits not configured (RULING-CH9 — set all of " +
 		"max_execution_time/max_memory_usage/max_rows_to_read/max_bytes_to_read)")
 
-// readGuard returns the SETTINGS clause or the fail-closed error.
+// readGuard returns the SETTINGS clause for a read, or the fail-closed error. It is
+// the SINGLE seam through which every DSL read (queryDocs, getDoc, GetTraceSpans,
+// QueryTraces, QueryAggregation) and the erasure id-resolver obtain their settings, so
+// the erasure read-back guarantees below apply to EVERY read by construction — a new
+// read path inherits them by calling readGuard, not by remembering to add settings
+// (invariant 11).
+//
+// #88 (GDPR erasure read-back): apply_deleted_mask=1 is pinned on every read so a
+// lightweight-deleted (erased) row is NEVER returned, regardless of the server default
+// — the version floor (probeServer) guarantees the server honors it. When the server
+// has the lazy-materialization optimization, it is disabled on reads too, since a plan
+// reorder could otherwise surface an erased row past the mask.
 func (s *Store) readGuard() (string, error) {
 	if !s.limits.valid() {
 		return "", errReadLimitsUnset
 	}
-	return s.limits.settings(), nil
+	settings := s.limits.settings() + ", apply_deleted_mask=1"
+	if s.guardLazyMaterialization {
+		settings += ", query_plan_optimize_lazy_materialization=0"
+	}
+	return settings, nil
 }
 
 // dedupInner wraps a base table in the settled-row read model: pick the latest
@@ -56,6 +71,28 @@ func (s *Store) readGuard() (string, error) {
 func dedupInner(table string) string {
 	return "(SELECT * FROM " + table + " WHERE project_id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id)"
 }
+
+// spansSuppressionExclusion excludes any span whose (project_id, id) carries an
+// UNEXPIRED erasure-suppression tombstone (#77). The deleted mask (apply_deleted_mask)
+// hides a lightweight-deleted row, but PersistSpan's suppression check is not atomic
+// with its insert — a concurrent write (e.g. a backfill copying an erased id) can insert
+// a FRESH, non-lightweight-deleted row for an erased id AFTER the erase deleted, which
+// the mask does not hide. This read-side exclusion is the other half of the guarantee:
+// a resurrected row is never RETURNED while its tombstone is unexpired, for EVERY
+// interleaving. Server-time now64(6) (never event-controlled) bounds it to the tombstone
+// TTL, so an id legitimately re-created after the retention window reads again. The
+// tuple match needs NO bind, so it appends to any spans read without disturbing arg order.
+// Applied to SPANS reads only — scores are a separate id namespace and are never erased.
+//
+// EVERY spans-read site MUST carry this (the query shapes differ, so it is placed
+// per-site, not at one seam — a new spans read must add it by this checklist):
+//  1. QuerySpans/QueryScores → queryDocs (spans only)
+//  2. GetSpan/GetScore → getDoc (spans only)
+//  3. GetTraceSpans
+//  4. the trace projection's span_base CTE (chTraceProjection)
+//  5. QueryAggregation's spans target
+const spansSuppressionExclusion = " AND (project_id, id) NOT IN " +
+	"(SELECT project_id, id FROM erasure_suppression WHERE expires_at > now64(6))"
 
 // projectArg extracts the tenant id the compiler always binds first (project
 // scoping is predicate #1, arg #0). The dedup subquery reuses it for tenant
@@ -91,6 +128,9 @@ func (s *Store) queryDocs(ctx context.Context, table, where string, args []any, 
 	}
 	_ = pid
 	sql := "SELECT doc FROM " + dedupInner(table) + " WHERE is_deleted = 0"
+	if table == "spans" {
+		sql += spansSuppressionExclusion
+	}
 	if where != "" {
 		sql += " AND (" + where + ")"
 	}
@@ -137,8 +177,12 @@ func (s *Store) getDoc(ctx context.Context, table, projectID, id string) (json.R
 		return nil, err
 	}
 	// Point read of the settled row; is_deleted filtered after dedup.
+	suppress := ""
+	if table == "spans" {
+		suppress = spansSuppressionExclusion
+	}
 	sql := "SELECT doc FROM (SELECT * FROM " + table +
-		" WHERE project_id = ? AND id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id) WHERE is_deleted = 0" + settings
+		" WHERE project_id = ? AND id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id) WHERE is_deleted = 0" + suppress + settings
 	rows, err := s.conn.Query(ctx, sql, projectID, id)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get: %w", err)
@@ -165,7 +209,7 @@ func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([
 	// correctness-safe (every version of a span shares its trace_id) AND bounds the
 	// scan to one trace instead of the whole project.
 	sql := "SELECT doc FROM (SELECT * FROM spans WHERE project_id = ? AND trace_id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id) " +
-		"WHERE is_deleted = 0 ORDER BY start_time ASC, id ASC" + settings
+		"WHERE is_deleted = 0" + spansSuppressionExclusion + " ORDER BY start_time ASC, id ASC" + settings
 	rows, err := s.conn.Query(ctx, sql, projectID, traceID)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse get trace spans: %w", err)
@@ -197,7 +241,7 @@ var chTraceProjection = `
 WITH span_base AS (
     SELECT * FROM (
         SELECT * FROM spans WHERE project_id = ? ORDER BY ver DESC LIMIT 1 BY project_id, id
-    ) WHERE is_deleted = 0
+    ) WHERE is_deleted = 0` + spansSuppressionExclusion + `
 ),
 roots AS (
     SELECT trace_id, name, environment, release, version, session_id, user_id, status_code, attributes
@@ -349,6 +393,12 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	switch target {
 	case "spans", "scores":
 		sql = "SELECT " + sel + " FROM " + dedupInner(target) + " WHERE is_deleted = 0"
+		if target == "spans" {
+			// #77: the aggregation spans target is a spans read too — it must carry the
+			// suppression exclusion, or a resurrected erased span would still be counted/
+			// summed/grouped (an aggregate-level erasure leak).
+			sql += spansSuppressionExclusion
+		}
 		if where != "" {
 			sql += " AND (" + where + ")"
 		}

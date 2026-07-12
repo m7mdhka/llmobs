@@ -181,11 +181,28 @@ func (s *Store) PersistSpan(ctx context.Context, ev storage.Event) error {
 
 // (merge-on-write folds via MergeEvent above; see merge.go for the fold.)
 
+// spansSuppressionExclusion excludes any span whose (project_id, id) carries an
+// UNEXPIRED erasure-suppression tombstone (#77) — the read-side half of the erasure
+// guarantee, symmetric with the ClickHouse adapter. The write path guards inserts with a
+// NOT EXISTS against this table, but that guard races a tombstone committed after the
+// insert's snapshot (a concurrent erase during a backfill/re-ingest): the span lands with
+// is_deleted=false and would otherwise be readable — a resurrected erased span. Excluding
+// suppressed ids at read time closes it for every interleaving, bounded to the tombstone
+// TTL by now() so a legitimately re-created id reads again after the retention window.
+// Correlated NOT EXISTS: no new bind, and it appends after `is_deleted=false` wherever
+// the FROM is the bare `spans` table.
+//
+// EVERY spans-read site MUST carry this (query shapes differ, so it is placed per-site,
+// not at one seam — a new spans read must add it by this checklist): GetSpan, QuerySpans,
+// GetTraceSpans, the traceProjection span_base CTE, and QueryAggregation's spans target.
+const spansSuppressionExclusion = ` AND NOT EXISTS (SELECT 1 FROM erasure_suppression es ` +
+	`WHERE es.project_id = spans.project_id AND es.id = spans.id AND es.expires_at > now())`
+
 // GetSpan returns the folded span document by id, or nil if absent/deleted.
 func (s *Store) GetSpan(ctx context.Context, projectID, id string) (json.RawMessage, error) {
 	var doc []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT doc FROM spans WHERE project_id=$1 AND id=$2 AND is_deleted=false`,
+		`SELECT doc FROM spans WHERE project_id=$1 AND id=$2 AND is_deleted=false`+spansSuppressionExclusion,
 		projectID, id).Scan(&doc)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -205,7 +222,7 @@ func (s *Store) GetSpan(ctx context.Context, projectID, id string) (json.RawMess
 // materialization — traces have no write path.
 var traceProjection = `
 WITH span_base AS (
-	SELECT * FROM spans WHERE is_deleted = false
+	SELECT * FROM spans WHERE is_deleted = false` + spansSuppressionExclusion + `
 ),
 roots AS (
 	SELECT DISTINCT ON (trace_id)
@@ -338,7 +355,7 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 // by (start_time, id) so the tree assembler produces a deterministic preorder.
 func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([]json.RawMessage, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT doc FROM spans WHERE project_id=$1 AND trace_id=$2 AND is_deleted=false
+		`SELECT doc FROM spans WHERE project_id=$1 AND trace_id=$2 AND is_deleted=false`+spansSuppressionExclusion+`
 		 ORDER BY start_time ASC, id ASC`, projectID, traceID)
 	if err != nil {
 		return nil, err
@@ -363,7 +380,7 @@ func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([
 // where is a SQL predicate (excluding project/is_deleted, added here); args are
 // its parameters starting at $1; order and limit come from the compiler.
 func (s *Store) QuerySpans(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error) {
-	sql := `SELECT doc FROM spans WHERE is_deleted=false`
+	sql := `SELECT doc FROM spans WHERE is_deleted=false` + spansSuppressionExclusion
 	if where != "" {
 		sql += " AND (" + where + ")"
 	}

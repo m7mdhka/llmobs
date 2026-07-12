@@ -39,12 +39,22 @@ type Store struct {
 	suppressionTTL time.Duration // erasure-tombstone retention (G3)
 	lastVer        atomic.Int64  // monotonic write-order stamp (RMT version)
 	limits         ReadLimits    // per-query resource caps (RULING-CH9); fail-closed
+	// guardLazyMaterialization appends query_plan_optimize_lazy_materialization=0 to
+	// every read when the server HAS that setting (#88). Lazy materialization can, on a
+	// plan reorder, surface a lightweight-deleted (GDPR-erased) row past the deleted
+	// mask; disabling it on reads closes that read-back. Feature-detected at boot so we
+	// never send the setting to a ClickHouse version that lacks it.
+	guardLazyMaterialization bool
 }
 
 // SetReadLimits configures the mandatory per-query resource caps (RULING-CH9).
 // Until set to a fully-valid value, every DSL read fails closed — the adapter
 // refuses to emit an unbounded ClickHouse read.
 func (s *Store) SetReadLimits(l ReadLimits) { s.limits = l }
+
+// SetLazyMaterializationGuard enables the read-side lazy-materialization guard (#88)
+// when the server supports the setting (feature-detected at boot). See the Store field.
+func (s *Store) SetLazyMaterializationGuard(on bool) { s.guardLazyMaterialization = on }
 
 // nextVer returns a strictly-increasing write-order stamp for the ReplacingMergeTree
 // version column. It tracks wall-clock nanoseconds (so it is comparable across nodes

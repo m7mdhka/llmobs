@@ -31,6 +31,14 @@ and a historical span in lite is always readable, with **no window where either
 is missing** — proven in both directions and under concurrent load
 (`internal/storage/dualstore/dualread_test.go`).
 
+**ClickHouse version requirement (GDPR erasure).** The kernel refuses to start against
+a ClickHouse older than **23.8**. GDPR erasure uses a lightweight `DELETE`, and reads
+rely on `apply_deleted_mask` to guarantee an erased span is *never* read back (even
+before the physical merge); below 23.8 that guarantee is not reliable, so booting is a
+fail-loud error rather than a silent risk of serving erased data. On versions that have
+the lazy-materialization optimization, the kernel disables it on reads (feature-detected
+at boot) so a query-plan reorder cannot surface an erased row past the mask.
+
 ```
 LLMOBS_CLICKHOUSE_URL=clickhouse://user:pass@ch-host:9000/llmobs
 # optional cluster name for ON CLUSTER DDL (empty = standalone; "default" is refused):

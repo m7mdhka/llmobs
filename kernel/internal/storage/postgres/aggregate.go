@@ -14,7 +14,10 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	var sql string
 	switch target {
 	case "spans":
-		sql = "SELECT " + sel + " FROM spans WHERE is_deleted = false"
+		// #77: the aggregation spans target is a spans read too — it must carry the
+		// suppression exclusion, or a resurrected erased span would still be counted/
+		// summed/grouped (an aggregate-level erasure leak).
+		sql = "SELECT " + sel + " FROM spans WHERE is_deleted = false" + spansSuppressionExclusion
 		if where != "" {
 			sql += " AND (" + where + ")"
 		}

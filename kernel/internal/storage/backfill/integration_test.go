@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -226,6 +227,80 @@ func TestErasedLiteSpanNotResurrectedByBackfill(t *testing.T) {
 		t.Fatalf("scale GetSpan: %v", err)
 	} else if doc != nil {
 		t.Fatal("ERASED lite-only span was resurrected into scale — the suppression guard failed")
+	}
+}
+
+// TestErasedSpanNotResurrectedByConcurrentBackfill is the #77 proof: a GDPR erase and
+// the lite→scale backfill running CONCURRENTLY must never resurrect an erased span in
+// scale — the race the sequential fixture (TestErasedLiteSpanNotResurrectedByBackfill)
+// cannot reach. The invariant holds for EVERY interleaving because reads exclude any id
+// with an unexpired suppression tombstone (the read-side exclusion): even if a backfill
+// insert races past the write-side suppression check and lands a non-deleted row for an
+// erased id, that row is never RETURNED while suppressed. (The deterministic proof of the
+// read-side exclusion itself is TestIntegrationSuppressedIdNotReadableEvenIfReinserted in
+// the clickhouse package; this exercises the real concurrent path end to end.)
+func TestErasedSpanNotResurrectedByConcurrentBackfill(t *testing.T) {
+	lite, scale := setupEngines(t)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second)
+	const nErase, nKeep = 40, 10
+	eraseIDs := make([]string, 0, nErase)
+	for i := 0; i < nErase; i++ {
+		id := fmt.Sprintf("er-%02d", i)
+		eraseIDs = append(eraseIDs, id)
+		ev := spanEvent(id, base.Add(time.Duration(i)*time.Second))
+		ev.Payload["user_id"] = "u-erase"
+		if err := lite.PersistSpan(ctx, ev); err != nil {
+			t.Fatalf("seed erase %s: %v", id, err)
+		}
+	}
+	keepIDs := make([]string, 0, nKeep)
+	for i := 0; i < nKeep; i++ {
+		id := fmt.Sprintf("keep-%02d", i)
+		keepIDs = append(keepIDs, id)
+		ev := spanEvent(id, base.Add(time.Duration(i)*time.Second))
+		ev.Payload["user_id"] = "u-keep"
+		if err := lite.PersistSpan(ctx, ev); err != nil {
+			t.Fatalf("seed keep %s: %v", id, err)
+		}
+	}
+
+	dual := dualstore.New(lite, scale)
+	// Tiny chunks widen the window where the backfill is mid-flight while the erase runs.
+	r := backfill.New(lite, scale, backfill.Config{ChunkSize: 2, BackoffBase: time.Millisecond}, quietLog())
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var bfErr, erErr error
+	go func() { defer wg.Done(); _, bfErr = r.Run(ctx) }()
+	go func() {
+		defer wg.Done()
+		_, _, erErr = dual.EraseSpans(ctx, projectID, "u-erase", "session:x", base.Add(-time.Hour), base.Add(2*time.Minute))
+	}()
+	wg.Wait()
+	if bfErr != nil {
+		t.Fatalf("concurrent backfill: %v", bfErr)
+	}
+	if erErr != nil {
+		t.Fatalf("concurrent erase: %v", erErr)
+	}
+
+	// INVARIANT: no erased span is readable in scale, regardless of the interleaving.
+	for _, id := range eraseIDs {
+		if doc, err := scale.GetSpan(ctx, projectID, id); err != nil {
+			t.Fatalf("scale GetSpan %s: %v", id, err)
+		} else if doc != nil {
+			t.Fatalf("erased span %s resurrected into scale by the concurrent backfill — GDPR break", id)
+		}
+	}
+	// And no collateral loss: the non-erased spans are safely backfilled.
+	for _, id := range keepIDs {
+		if doc, err := scale.GetSpan(ctx, projectID, id); err != nil {
+			t.Fatalf("scale GetSpan %s: %v", id, err)
+		} else if doc == nil {
+			t.Fatalf("non-erased span %s lost — the erase/backfill race dropped good data", id)
+		}
 	}
 }
 

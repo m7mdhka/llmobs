@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -33,12 +34,36 @@ func NewPriceStore(pool *pgxpool.Pool) *PriceStore { return &PriceStore{pool: po
 func (s *PriceStore) Resolve(ctx context.Context, rawProvider, rawModel string, at time.Time) (*pricing.Entry, error) {
 	prov := pricing.CanonicalProvider(rawProvider)
 	model := pricing.CanonicalModel(rawModel)
+	// 1) EXACT canonical match — the primary-key path (R6: byte-identical model at load & lookup).
+	e, err := s.resolveWhere(ctx,
+		`provider=$1 AND model=$2 AND effective_from <= $3`, prov, model, at.UTC())
+	if e != nil || err != nil {
+		return e, err
+	}
+	// 2) DOT/DASH fallback (#106) — ONLY when the exact match missed. Providers and price
+	//    tables spell version separators inconsistently ("claude-3.5-sonnet" vs
+	//    "claude-3-5-sonnet"); a dotted variant would otherwise miss and silently derive NO cost.
+	//    We compare with '.' and '-' normalized to the same character on BOTH the stored and the
+	//    queried model, so the match is direction-agnostic. This never changes a stored key (the
+	//    exact path above is untouched), and it cannot false-match: providers use the dot as a
+	//    version-decimal separator, so "x.y" and "x-y" denote the same model, not two.
+	if strings.ContainsAny(model, ".-") {
+		return s.resolveWhere(ctx,
+			`provider=$1 AND translate(model, '.', '-') = translate($2, '.', '-') AND effective_from <= $3`,
+			prov, model, at.UTC())
+	}
+	return nil, nil
+}
+
+// resolveWhere runs the price-entry lookup with the given WHERE predicate (parameters
+// $1=provider, $2=model, $3=at), newest-effective + highest-version first. ErrNoRows → nil.
+func (s *PriceStore) resolveWhere(ctx context.Context, where string, prov, model string, at time.Time) (*pricing.Entry, error) {
 	row := s.pool.QueryRow(ctx,
 		`SELECT id, provider, model, version, effective_from, rates, tiers, source, raw_provider, created_by, created_at
 		   FROM price_entries
-		  WHERE provider=$1 AND model=$2 AND effective_from <= $3
+		  WHERE `+where+`
 		  ORDER BY effective_from DESC, version DESC
-		  LIMIT 1`, prov, model, at.UTC())
+		  LIMIT 1`, prov, model, at)
 	e, err := scanEntry(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

@@ -236,3 +236,59 @@ func TestDefaultSeedsValid(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveDotDashFallback is the #106 prove-the-negative: a dotted model variant
+// ("claude-3.5-sonnet") still prices against a dashed stored entry ("claude-3-5-sonnet")
+// instead of silently deriving NO cost — while the EXACT match still wins (R6 primary path)
+// and a genuinely different model does NOT false-match.
+func TestResolveDotDashFallback(t *testing.T) {
+	s, _ := setupPrices(t)
+	ctx := context.Background()
+	at := mustTime(t, "2026-06-01T00:00:00Z")
+
+	// Stored with DASHES.
+	if _, err := s.Upsert(ctx, pricing.Entry{
+		Provider: "anthropic", Model: "claude-3-5-sonnet", EffectiveFrom: "2026-01-01T00:00:00Z",
+		Rates: map[string]pricing.Rate{"input": {PerToken: 0.000003}, "output": {PerToken: 0.000015}},
+	}, "session:admin@x"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Queried with DOTS → must resolve via the fallback (not nil).
+	e, err := s.Resolve(ctx, "anthropic", "claude-3.5-sonnet", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e == nil || e.Model != "claude-3-5-sonnet" {
+		t.Fatalf("dotted variant must price against the dashed entry, got %v", e)
+	}
+	// Exact (dashed) still resolves — the primary path is unchanged.
+	if e2, _ := s.Resolve(ctx, "anthropic", "claude-3-5-sonnet", at); e2 == nil {
+		t.Fatal("exact model must still resolve")
+	}
+
+	// Reverse direction: store DOTS, query DASHES.
+	if _, err := s.Upsert(ctx, pricing.Entry{
+		Provider: "openai", Model: "gpt-4.1", EffectiveFrom: "2026-01-01T00:00:00Z",
+		Rates: map[string]pricing.Rate{"input": {PerToken: 0.000002}},
+	}, "session:admin@x"); err != nil {
+		t.Fatal(err)
+	}
+	if e3, _ := s.Resolve(ctx, "openai", "gpt-4-1", at); e3 == nil || e3.Model != "gpt-4.1" {
+		t.Fatalf("dashed query must price against the dotted entry, got %v", e3)
+	}
+
+	// A genuinely different model (no dot/dash coincidence) must NOT match.
+	if e4, _ := s.Resolve(ctx, "anthropic", "claude-3-opus", at); e4 != nil {
+		t.Fatalf("an unrelated model must not false-match, got %v", e4)
+	}
+}
+
+func mustTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	tt, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tt
+}

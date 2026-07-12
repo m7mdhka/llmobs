@@ -40,8 +40,11 @@ conformance from the first commit.
     (6 GiB) crash loading a large multi-span trace (no per-query cap), and Opik #4576
     is a start-up crash loop from hardcoded `ON CLUSTER '{cluster}'` on a single-node
     install (no `No macro 'cluster'`). RULING-CH9's fail-closed caps and R-CH1's
-    threaded cluster name are the direct antidotes. (Round 1 Opik cross-over mine,
-    `docs/research/opik-issues/round-01-findings.md`.)
+    threaded cluster name are the direct antidotes. (Opik cross-over mine: the concrete
+    incidents are public issues `comet-ml/opik` #4136 — a 6 GB `MEMORY_LIMIT_EXCEEDED`
+    loading a 3k-span trace — and #4576 — migration changesets hardcoding
+    `ON CLUSTER '{cluster}'`, crash-looping single-node installs with no recovery
+    tooling.)
 - **RULING-SP7 — local WAL spool for the durable floor, async S3 as the archival/replay
   tier behind it (NOT S3-on-the-hot-path).** The ack becomes durable when bytes hit a
   local WAL (fast, no hot-path network, closes the SIGKILL window); a background
@@ -241,6 +244,9 @@ rather than silently degrading the GDPR guarantee.
 
 ## Deferred / later arc
 
-- The `docs/research/langfuse-study/` teardown book that informed the model is **not
-  committed** (lives in conversation history). Flag for a later reconstruct-and-commit
-  so the "why" is in-repo. Not built in Arc L.
+- ~~The `docs/research/langfuse-study/` teardown book that informed the model is not
+  committed.~~ **Resolved by explicit drop (2026-07-13):** the teardown book was never
+  committed, and the competitive-research tree it would have joined is now retired. The
+  decisions it informed are normative in the canonical model spec and in this ADR; the
+  positioning evidence it supported is preserved, cited to public primary URLs, in
+  `docs/positioning.md` (Evidence appendix). Nothing is owed here.

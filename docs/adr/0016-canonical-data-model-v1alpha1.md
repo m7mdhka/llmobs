@@ -15,8 +15,8 @@ normalizers, the DSL planner, the SDK — can be designed until it exists.
 Before designing it we conducted a deep teardown of **Langfuse**, the
 most-deployed open-source LLM observability platform, whose schema survived
 production scale and a v2→v3 architectural migration (Postgres-only → ClickHouse
-+ Redis + S3). That study (the Langfuse teardown study; `feature/docs-langfuse-study`,
-chapters and `findings-for-data-model.md`) is the evidence base for this model.
++ Redis + S3). That teardown study is the evidence base for this model; it was a
+read-only analysis, never committed, and its conclusions are what this ADR records.
 The data-model design session concluded with **twelve locked decisions**
 (LM-1..LM-12). This ADR records the model and links each decision to its
 normative specification.
@@ -100,7 +100,10 @@ as the core cases. No physical representation may become observable.
 
 - Specification: [`api/model/v1alpha1/`](../../api/model/v1alpha1/) (files `00`–`08`, `99`, `schema/`).
 - Sub-decisions: ADR-0017 (score model), ADR-0018 (span taxonomy and payload shapes).
-- Evidence base: the Langfuse teardown study (`feature/docs-langfuse-study`,
-  `docs/research/langfuse-study/findings-for-data-model.md` and chapters 03, 05, 06, 07).
+- Evidence base: the Langfuse teardown study — a read of the incumbent's data model
+  (entities, merge/update semantics, usage+cost, references) done to learn which of its
+  shapes were essential and which were incidental. The study itself was never committed;
+  its conclusions are what this ADR and the canonical model spec record, and the
+  competitive evidence that survived is in `docs/positioning.md` (Evidence appendix).
 - Relates to design decisions D3 (OTLP-canonical), D8 (SDK primitives / data nouns),
   D9 (typed query DSL), D11 (K8s-style versioning) — see the repository design doc.

@@ -56,6 +56,18 @@ make lint    # linters
 make e2e     # end-to-end tests
 ```
 
+With `make dev` running (shell on <http://localhost:3000>), **send your first trace and
+see it** — in another terminal:
+
+```sh
+LLMOBS_API_KEY=sk-dev-demo-key go run ./examples/otel-genai-demo
+# prints a trace id; open http://localhost:3000 → Traces to see the agent trace,
+# its spans, and derived cost.
+```
+
+`examples/otel-genai-demo` emits one agent-shaped OTel GenAI trace to the kernel's OTLP
+endpoint (`localhost:4318`) using the `sk-dev-demo-key` that `make dev` bootstraps.
+
 Toolchain versions are pinned in [`mise.toml`](mise.toml). The
 [`.devcontainer/`](.devcontainer/) provides the full stack in one container.
 

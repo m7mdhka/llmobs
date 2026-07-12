@@ -72,6 +72,10 @@ func (r *Registry) Normalize(in SpanInput, ctx Context) map[string]any {
 	if attrs, ok := out["attributes"].(map[string]any); ok {
 		SanitizeAttributeKeys(attrs)
 	}
+	// Strip NUL from every string value (attributes, nested, and promoted fields) so a span
+	// with a NUL never fails the lite Postgres INSERT while landing on scale — one shared stage,
+	// both profiles identical (#127).
+	SanitizeNullBytes(out)
 	return out
 }
 

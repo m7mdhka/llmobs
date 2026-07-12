@@ -37,6 +37,16 @@ import (
 type Store struct {
 	rdb *redis.Client
 	ns  string // key namespace prefix (brand-derived)
+	// streamMaxLen bounds each per-(topic,project) stream via an APPROXIMATE XADD
+	// MAXLEN so the Streams log cannot grow without bound (#98). It is set to the bus
+	// backlog cap: the bus dead-letters any subscriber more than backlogCap behind
+	// latest (bus.go), so NOTHING below `latest-backlogCap` is ever deliverable — an
+	// approximate trim to ~backlogCap (which Redis keeps AT LEAST, trimming in whole
+	// macro-node chunks) therefore preserves the entire deliverable window and only
+	// drops entries already skipped/dead-lettered. This is a watermark tied to the
+	// delivery contract, NOT a naive fixed MAXLEN that could drop unconsumed backlog.
+	// 0 disables trimming (the log grows unbounded — used only where a cap is unset).
+	streamMaxLen int64
 }
 
 var _ bus.Store = (*Store)(nil)
@@ -45,6 +55,16 @@ var _ bus.Store = (*Store)(nil)
 // caller supplies it, brand-derived — no product name is hardcoded here).
 func New(rdb *redis.Client, ns string) *Store {
 	return &Store{rdb: rdb, ns: ns}
+}
+
+// SetStreamMaxLen sets the approximate per-stream retention (#98). Pass the bus backlog
+// cap: entries older than that window are never deliverable, so trimming to it is safe.
+// Non-positive disables trimming.
+func (s *Store) SetStreamMaxLen(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	s.streamMaxLen = n
 }
 
 // seqKey is a SINGLE GLOBAL counter, so ids are globally unique across all
@@ -93,16 +113,23 @@ func enc(component string) string {
 // key) and XADDs the entry to the per-(topic,project) log with the explicit id
 // `<n>-0`, so ids are globally unique AND strictly ascending within each stream,
 // and stream order can never diverge from the counter under concurrent Appends.
-// KEYS: global-seq, log. ARGV: subject.
+// When ARGV[2] (maxlen) > 0 the XADD carries an APPROXIMATE MAXLEN (#98) so the log
+// is bounded to the delivery window in the same atomic op — no separate trim pass,
+// no drift. KEYS: global-seq, log. ARGV: subject, maxlen.
 var appendScript = redis.NewScript(`
 local id = redis.call('INCR', KEYS[1])
-redis.call('XADD', KEYS[2], id .. '-0', 'subject', ARGV[1])
+local maxlen = tonumber(ARGV[2])
+if maxlen and maxlen > 0 then
+  redis.call('XADD', KEYS[2], 'MAXLEN', '~', maxlen, id .. '-0', 'subject', ARGV[1])
+else
+  redis.call('XADD', KEYS[2], id .. '-0', 'subject', ARGV[1])
+end
 return id
 `)
 
 func (s *Store) Append(ctx context.Context, topic, projectID, subjectID string) (int64, error) {
 	id, err := appendScript.Run(ctx, s.rdb,
-		[]string{s.seqKey(), s.logKey(topic, projectID)}, subjectID).Int64()
+		[]string{s.seqKey(), s.logKey(topic, projectID)}, subjectID, s.streamMaxLen).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("redis append: %w", err)
 	}

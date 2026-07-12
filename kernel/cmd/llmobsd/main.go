@@ -212,14 +212,21 @@ func run() error {
 			SentinelAddrs:    cfg.EventRedisSentinelAddrs,
 			Password:         cfg.EventRedisPassword,
 			SentinelPassword: cfg.EventRedisSentinelPassword,
+			Username:         cfg.EventRedisUsername,     // #126 ACL/IAM user
+			PasswordFile:     cfg.EventRedisPasswordFile, // #126 rotating token file
 		})
 		if rerr != nil {
 			log.Error("scale event bus (Redis/Valkey) init failed", "err", rerr.Error())
 			os.Exit(1)
 		}
 		defer func() { _ = rdb.Close() }()
-		eventStore = redisstore.New(rdb, strings.ToLower(brand.Name))
-		log.Info("scale event bus enabled (Redis/Valkey Streams)")
+		rstore := redisstore.New(rdb, strings.ToLower(brand.Name))
+		// #98: bound each stream to the delivery window (the backlog cap). Nothing older
+		// than backlogCap behind latest is deliverable (the bus dead-letters it), so the
+		// approximate trim never drops deliverable backlog.
+		rstore.SetStreamMaxLen(int64(cfg.EventBacklogCap))
+		eventStore = rstore
+		log.Info("scale event bus enabled (Redis/Valkey Streams)", "stream_max_len", cfg.EventBacklogCap)
 	}
 	eventBus := bus.New(eventStore, int64(cfg.EventBacklogCap))
 	reg := normalize.Default()

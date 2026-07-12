@@ -50,6 +50,24 @@ services:
     # R-EV3: Valkey (Redis-protocol-compatible) for the scale event bus. Version
     # pinned; the adapter feature-detects (DisableIdentity) rather than version-gating.
     image: valkey/valkey:8
+    # #112 — durable + NON-EVICTING config for the event-bus Streams backlog. Stock
+    # defaults (no AOF, an eviction-capable maxmemory-policy) can silently lose or evict
+    # unconsumed Streams entries — an at-least-once-delivery break.
+    #   --appendonly yes / --appendfsync everysec: fsync the AOF so an unconsumed backlog
+    #     survives a restart (RDB snapshots between saves can drop it); ~1s durability
+    #     window keeps throughput acceptable.
+    #   --maxmemory-policy noeviction: NEVER evict stream entries under memory pressure —
+    #     a full memory returns an error to the producer (loud backpressure) instead of
+    #     silently dropping backlog. Memory is bounded by the committed-watermark trim
+    #     (#98, in the adapter), not by eviction.
+    command:
+      - valkey-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 2s

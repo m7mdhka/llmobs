@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,25 +36,63 @@ func NewPriceStore(pool *pgxpool.Pool) *PriceStore { return &PriceStore{pool: po
 func (s *PriceStore) Resolve(ctx context.Context, rawProvider, rawModel string, at time.Time) (*pricing.Entry, error) {
 	prov := pricing.CanonicalProvider(rawProvider)
 	model := pricing.CanonicalModel(rawModel)
-	// 1) EXACT canonical match — the primary-key path (R6: byte-identical model at load & lookup).
+	// 1) The exact model (+ dot/dash fallback, #106).
+	if e, err := s.resolveModel(ctx, prov, model, at); e != nil || err != nil {
+		return e, err
+	}
+	// 2) DATE-SUFFIX fallback (#102) — ONLY when the model (with its date) missed. Providers
+	//    publish dated snapshots ("gpt-4o-2024-05-13", "claude-3-5-sonnet-20241022",
+	//    "gpt-4-0613") whose price table often carries just the base model; the dated variant
+	//    would otherwise silently derive NO cost. Strip a trailing date suffix and re-resolve the
+	//    base (which itself gets the dot/dash fallback). Conservative: only an ISO date, a
+	//    compact YYYYMMDD, or a VALID MMDD snapshot is treated as a date — a trailing 4-digit run
+	//    that isn't a real month/day (e.g. "-1234") is left intact, so a genuine model segment is
+	//    never mistaken for a date. Stored keys are untouched (R6 primary path unchanged).
+	if base, ok := stripDateSuffix(model); ok {
+		return s.resolveModel(ctx, prov, base, at)
+	}
+	return nil, nil
+}
+
+// resolveModel resolves a canonical model with the EXACT match first (R6 primary-key path),
+// then the dot/dash-insensitive fallback (#106). Shared by Resolve's exact and date-stripped
+// attempts.
+func (s *PriceStore) resolveModel(ctx context.Context, prov, model string, at time.Time) (*pricing.Entry, error) {
 	e, err := s.resolveWhere(ctx,
 		`provider=$1 AND model=$2 AND effective_from <= $3`, prov, model, at.UTC())
 	if e != nil || err != nil {
 		return e, err
 	}
-	// 2) DOT/DASH fallback (#106) — ONLY when the exact match missed. Providers and price
-	//    tables spell version separators inconsistently ("claude-3.5-sonnet" vs
-	//    "claude-3-5-sonnet"); a dotted variant would otherwise miss and silently derive NO cost.
-	//    We compare with '.' and '-' normalized to the same character on BOTH the stored and the
-	//    queried model, so the match is direction-agnostic. This never changes a stored key (the
-	//    exact path above is untouched), and it cannot false-match: providers use the dot as a
-	//    version-decimal separator, so "x.y" and "x-y" denote the same model, not two.
 	if strings.ContainsAny(model, ".-") {
 		return s.resolveWhere(ctx,
 			`provider=$1 AND translate(model, '.', '-') = translate($2, '.', '-') AND effective_from <= $3`,
 			prov, model, at.UTC())
 	}
 	return nil, nil
+}
+
+var (
+	dateSuffixRe = regexp.MustCompile(`-(\d{4}-\d{2}-\d{2}|\d{8})$`) // -YYYY-MM-DD or -YYYYMMDD
+	mmddSuffixRe = regexp.MustCompile(`-(\d{4})$`)                   // -MMDD (OpenAI snapshot, validated)
+)
+
+// stripDateSuffix removes a trailing provider date/snapshot suffix from a canonical model,
+// returning the base and whether a suffix was stripped. It is deliberately conservative to
+// avoid false matches: an ISO date (-YYYY-MM-DD) or compact date (-YYYYMMDD) is always a date;
+// a 4-digit -MMDD is treated as a date ONLY when MM∈[1,12] and DD∈[1,31] (so "-1234" or a
+// legitimate numeric model segment is not mistaken for a snapshot).
+func stripDateSuffix(model string) (string, bool) {
+	if loc := dateSuffixRe.FindStringIndex(model); loc != nil {
+		return model[:loc[0]], true
+	}
+	if m := mmddSuffixRe.FindStringSubmatch(model); m != nil {
+		mm, _ := strconv.Atoi(m[1][:2])
+		dd, _ := strconv.Atoi(m[1][2:])
+		if mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31 {
+			return model[:len(model)-len(m[0])], true
+		}
+	}
+	return model, false
 }
 
 // resolveWhere runs the price-entry lookup with the given WHERE predicate (parameters

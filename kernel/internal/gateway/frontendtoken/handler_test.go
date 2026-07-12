@@ -29,8 +29,8 @@ func newHandler(t *testing.T, plugins []registry.Plugin) (*Handler, *plugintoken
 	}
 	proj := func(*http.Request) (string, error) { return "projA", nil }
 	// The role resolver returns the user's per-project-org role; the tests key User.ID to
-	// the role. Because it ignores sess.User.Role, these tests also prove O2 authorizes off
-	// the resolved per-project role, not the ambient session field.
+	// the role. Because it ignores sess.User.Role, these tests also prove authority is taken
+	// from the resolved per-project role, not the ambient session field.
 	role := func(_ context.Context, userID, _ string) (string, error) { return userID, nil }
 	return New(signer, fakeSource{plugins: plugins}, proj, role), signer
 }

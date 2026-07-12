@@ -10,10 +10,10 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/bus/redisstore"
 )
 
-// TestRedisConformance is the L4 load-bearing proof: the SAME event-bus conformance
+// TestRedisConformance is the load-bearing proof: the SAME event-bus conformance
 // suite the in-memory + Postgres backends pass runs GREEN against the Redis/Valkey
-// Streams scale backend — the event-bus analogue of L2's cross-adapter storage
-// proof. H6 backlog-replay, at-least-once, backlog-cap→DLQ, and tenant/topic
+// Streams scale backend — the event-bus analogue of the cross-adapter storage
+// proof. Backlog-replay, at-least-once, backlog-cap→DLQ, and tenant/topic
 // isolation are all driven through the shared bus.Bus over the real backend.
 //
 // Env-gated on LLMOBS_REDIS_TEST_URL (a real Redis/Valkey); skips otherwise.

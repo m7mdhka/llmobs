@@ -1,5 +1,5 @@
-// Package pluginsettings implements the plugin settings store (J2, ADR-0024):
-// settings is the `kv` primitive made frontend-reachable and schema-aware. It parses
+// Package pluginsettings implements the plugin settings store: settings is the `kv`
+// primitive made frontend-reachable and schema-aware. It parses
 // the small JSON Schema subset a settings form uses, validates a settings write
 // against it, and persists values — envelope-encrypting `writeOnly` (secret) fields
 // and NEVER returning them. The same subset drives packages/schema-form, so client
@@ -38,10 +38,10 @@ type Field struct {
 }
 
 // Model is the parsed settings schema: a flat set of fields (settings are one level;
-// nested objects/arrays are a future arc, ADR-0024). In CUSTOM mode (N2) the plugin
-// mounts its own settings view and non-secret values are stored opaquely; Fields then
-// holds ONLY the declared secret (writeOnly) fields, so H4 (encrypt + never return) still
-// applies, while any other key is accepted and persisted as-is (bounded by MaxValueBytes).
+// nested objects/arrays are future work). In CUSTOM mode the plugin mounts its own
+// settings view and non-secret values are stored opaquely; Fields then holds ONLY the
+// declared secret (writeOnly) fields, so those are still encrypted on write and never
+// returned, while any other key is accepted and persisted as-is (bounded by MaxValueBytes).
 type Model struct {
 	Fields []Field
 	Custom bool
@@ -101,8 +101,9 @@ type propSpec struct {
 // form is the client's concern).
 func ParseSchema(raw []byte, custom bool) (*Model, error) {
 	// Custom mode: the plugin renders its own view and stores opaque non-secret JSON. A
-	// schema is OPTIONAL and read ONLY for its writeOnly (secret) string fields (so H4
-	// holds); an empty/absent schema simply means "no secrets, everything opaque". We do
+	// schema is OPTIONAL and read ONLY for its writeOnly (secret) string fields (so they
+	// stay encrypted and never returned); an empty/absent schema simply means "no secrets,
+	// everything opaque". We do
 	// NOT reject non-subset property types here — the custom view owns validation.
 	if custom {
 		return parseCustom(raw)

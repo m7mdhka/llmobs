@@ -14,9 +14,9 @@ import (
 
 var errMissingScoreIdentity = errors.New("score event missing project_id or id")
 
-// PersistScore applies one score event with merge-on-write (LM-3/LM-8), the same
+// PersistScore applies one score event with merge-on-write, the same
 // per-field provenance fold as spans (entity type "score"). Idempotency key is
-// (project_id, id): reusing an id overwrites (05-update-semantics.md, 04 §6).
+// (project_id, id): reusing an id overwrites the prior score.
 func (s *Store) PersistScore(ctx context.Context, ev storage.Event) error {
 	projectID, _ := ev.Payload["project_id"].(string)
 	id, _ := ev.Payload["id"].(string)

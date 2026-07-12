@@ -12,12 +12,13 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
-// Provisioning persistence (Arc O / O3). Every function here is PURE PERSISTENCE — the
+// Provisioning persistence. Every function here is PURE PERSISTENCE — the
 // caller (the HTTP handler) is the authorization gate. Nothing in this file resolves or
 // trusts an actor role; the handler resolves the actor's role against the TARGET org and
-// enforces the strictly-below cap BEFORE calling in. Keeping authz out of persistence is
-// deliberate: the one gate lives at the handler seam (invariant #11), not smeared across
-// the data layer where a new caller could forget it.
+// enforces the strictly-below cap (a principal may assign/modify only a role strictly below
+// their own) BEFORE calling in. Keeping authz out of persistence is deliberate: the one gate
+// lives at the handler seam, not smeared across the data layer where a new caller could
+// forget it.
 
 // Org is a created organization (the create-org response).
 type Org struct {

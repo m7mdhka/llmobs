@@ -15,7 +15,7 @@ import (
 )
 
 // TestDisableRevokesPluginTokens: disabling a RUNNING plugin fires the token-revoker hook (so
-// its already-issued service token is denied at the next verify, not at TTL — O4/#63), and
+// its already-issued service token is denied at the next verify, not at TTL), and
 // re-enabling fires the reinstate hook. Dropping the local rt.token alone would leave the
 // issued token valid for its whole TTL, which is exactly the gap.
 func TestDisableRevokesPluginTokens(t *testing.T) {

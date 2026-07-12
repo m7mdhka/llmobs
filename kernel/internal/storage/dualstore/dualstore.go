@@ -1,14 +1,19 @@
-// Package dualstore is the permanent lite↔scale dual-read layer (ADR-0026
-// RULING-MIG6). It implements storage.TelemetryStore by fanning every read out to
+// Package dualstore is the permanent lite↔scale dual-read layer: historical data
+// stays on Postgres-lite, new data goes to ClickHouse-scale, and both are unified
+// at the Query API as a designed, permanent default (not a temporary migration
+// phase). It implements storage.TelemetryStore by fanning every read out to
 // BOTH backends — Postgres-lite (historical) and ClickHouse-scale (new) — and
 // unifying the results, so the Query API never strands a self-hoster on a
 // migration cliff: a span written to scale is immediately readable, historical
 // spans in lite are still readable, with NO window where either is missing.
 //
-// This is the ONE convergence seam every read funnels through (invariant #11):
-// injected once in place of the single adapter, it intercepts all 9 read/erase
-// call sites by construction — including the implicit empty-product onboarding
-// checks (the list + Get-404 paths) that were Langfuse's #14827 trap.
+// This is the ONE convergence seam every read funnels through (the kernel's
+// enforce-at-the-single-seam invariant): injected once in place of the single
+// adapter, it intercepts all 9 read/erase call sites by construction — including
+// the implicit empty-product onboarding checks (the list + Get-404 paths). A
+// forgotten existence check that still queries the old table after cutover is the
+// classic dual-read data-leak trap; funneling every path through this one seam
+// eliminates it by construction rather than by per-caller vigilance.
 //
 // Model:
 //   - Writes go to SCALE (new data). If the entity already exists ONLY in lite
@@ -227,7 +232,7 @@ func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string,
 	// FAIL CLOSED: erasure MUST NOT proceed without the cross-boundary guard, or a
 	// lite-only span could be erased with no scale tombstone and later resurrected. If
 	// a future decorator wraps either store and drops the capability, refuse the erase
-	// loudly rather than silently degrade the GDPR guarantee (invariant #11).
+	// loudly rather than silently degrade the GDPR guarantee.
 	resolver, ok := s.lite.(EraseIDResolver)
 	if !ok {
 		return 0, "", errors.New("dualstore: lite store lacks EraseIDResolver; refusing to erase without the cross-boundary resurrection guard")

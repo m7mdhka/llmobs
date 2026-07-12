@@ -56,7 +56,7 @@ func Validate(m *Model, incoming map[string]json.RawMessage, alreadySet map[stri
 	return nil
 }
 
-// validateCustom checks a custom-mode write (N2): the plugin owns validation of its
+// validateCustom checks a custom-mode write: the plugin owns validation of its
 // opaque non-secret values, so the kernel only enforces that (a) a declared SECRET field
 // is a string (or empty = preserve — it is stored encrypted), and (b) every value is
 // itself valid JSON. The total-size ceiling is enforced by the store against the merged

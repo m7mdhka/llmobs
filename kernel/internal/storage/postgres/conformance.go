@@ -7,7 +7,7 @@ import (
 
 // Conformer exposes the adapter's normative-merge behavior to the shared
 // conformance harness (tools/conformance). It has no DB dependency: the merge
-// fold is a pure function, so the harness runs the spec's V-vectors and the
+// fold is a pure function, so the harness runs the spec's normative test vectors and the
 // order-independence property without a database.
 type Conformer struct{}
 

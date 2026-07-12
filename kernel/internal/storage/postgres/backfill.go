@@ -12,7 +12,8 @@ import (
 // BackfillCursor is the TOTAL order a lite→scale backfill resumes from:
 // (ts, project_id, id). The tuple is fully ordering — two projects sharing a
 // timestamp+id still order deterministically — so a keyset scan strictly advances
-// and same-timestamp rows can never loop (the #7117 infinite-loop trap). The zero
+// and same-timestamp rows can never loop (a non-strict cursor that revisits a
+// same-timestamp cluster forever is the classic infinite-loop trap). The zero
 // cursor (TS zero, empty ids) starts from the very beginning.
 type BackfillCursor struct {
 	TS        time.Time
@@ -134,8 +135,10 @@ func (s *Store) SaveBackfillState(ctx context.Context, kind string, cur Backfill
 }
 
 // DeadLetterBackfill records a PERMANENTLY-failing record so the backfill can skip it
-// and make progress (CLAUDE.md #12). The row is retained for audit; it is never
-// silently dropped and never retried forever.
+// and make progress. A permanent failure (malformed record, a deterministic rejection)
+// must dead-letter rather than retry forever — retrying forever would pin the run and
+// either loop indefinitely or force a data-dropping shortcut. The row is retained for
+// audit; it is never silently dropped and never retried forever.
 func (s *Store) DeadLetterBackfill(ctx context.Context, kind, projectID, id, reason string) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO backfill_deadletter (kind, project_id, id, reason, at)

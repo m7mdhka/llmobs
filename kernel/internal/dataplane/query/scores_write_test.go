@@ -44,7 +44,7 @@ func TestValidateScoreValueUnion(t *testing.T) {
 }
 
 func TestValidateScoreSubjectType(t *testing.T) {
-	// plugin-namespaced subject type is accepted (LM-8, no registry gate)
+	// plugin-namespaced subject type is accepted (no registry gate)
 	s := baseScore()
 	s["subject_type"] = "rag/document"
 	if err := validateScore(s); err != nil {

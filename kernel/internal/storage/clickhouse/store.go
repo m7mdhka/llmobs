@@ -27,32 +27,32 @@ type writeConn interface {
 	PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error)
 }
 
-// Store is the scale-profile (ClickHouse) storage adapter. L1 implements the
-// write side: merge-on-write producing one settled row per (project_id, id) via
+// Store is the scale-profile (ClickHouse) storage adapter. The write side is
+// merge-on-write producing one settled row per (project_id, id) via
 // the SHARED merge fold (kernel/internal/storage/merge) — the identical fold the
 // lite adapter runs, so the two engines can only diverge on the SQL surface,
-// which is exactly what SQL-level conformance (L2) tests. The read side (DSL
-// compiler + resource limits) lands in L2; this type does not yet implement the
-// full TelemetryStore.
+// which is exactly what SQL-level conformance tests. The read side (DSL
+// compiler + resource limits) lives in store_read.go.
 type Store struct {
 	conn           writeConn
-	suppressionTTL time.Duration // erasure-tombstone retention (G3)
+	suppressionTTL time.Duration // erasure-tombstone retention window
 	lastVer        atomic.Int64  // monotonic write-order stamp (RMT version)
-	limits         ReadLimits    // per-query resource caps (RULING-CH9); fail-closed
+	limits         ReadLimits    // per-query resource caps; fail-closed
 	// guardLazyMaterialization appends query_plan_optimize_lazy_materialization=0 to
-	// every read when the server HAS that setting (#88). Lazy materialization can, on a
+	// every read when the server HAS that setting (part of the GDPR-erasure read-back
+	// guard). Lazy materialization can, on a
 	// plan reorder, surface a lightweight-deleted (GDPR-erased) row past the deleted
 	// mask; disabling it on reads closes that read-back. Feature-detected at boot so we
 	// never send the setting to a ClickHouse version that lacks it.
 	guardLazyMaterialization bool
 }
 
-// SetReadLimits configures the mandatory per-query resource caps (RULING-CH9).
+// SetReadLimits configures the mandatory per-query resource caps.
 // Until set to a fully-valid value, every DSL read fails closed — the adapter
 // refuses to emit an unbounded ClickHouse read.
 func (s *Store) SetReadLimits(l ReadLimits) { s.limits = l }
 
-// SetLazyMaterializationGuard enables the read-side lazy-materialization guard (#88)
+// SetLazyMaterializationGuard enables the read-side lazy-materialization guard
 // when the server supports the setting (feature-detected at boot). See the Store field.
 func (s *Store) SetLazyMaterializationGuard(on bool) { s.guardLazyMaterialization = on }
 
@@ -87,7 +87,7 @@ func NewStore(conn writeConn) *Store {
 }
 
 // SetErasureSuppressionTTL overrides how long erasure tombstones block
-// re-delivery of an erased span (G3). Non-positive values are ignored.
+// re-delivery of an erased span. Non-positive values are ignored.
 func (s *Store) SetErasureSuppressionTTL(d time.Duration) {
 	if d > 0 {
 		s.suppressionTTL = d
@@ -100,7 +100,7 @@ func (s *Store) SetErasureSuppressionTTL(d time.Duration) {
 // in-place mutation, which CH does not do synchronously). The fold is the shared
 // canonical fold, so out-of-order events converge exactly as in lite.
 //
-// G3: if an unexpired erasure tombstone covers this key, the write is suppressed
+// Tombstone-on-replay: if an unexpired erasure tombstone covers this key, the write is suppressed
 // and ErrSuppressedByErasure is returned (not a storage failure) so the caller
 // drops the span without marking persistence unhealthy — the same contract as lite.
 func (s *Store) PersistSpan(ctx context.Context, ev storage.Event) error {

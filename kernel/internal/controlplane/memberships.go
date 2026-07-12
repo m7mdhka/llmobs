@@ -9,7 +9,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
-// Membership is a user's role in one org (Arc O / O1). A user's authority is per-org,
+// Membership is a user's role in one org. A user's authority is per-org,
 // resolved server-side from org_memberships — never a client-supplied claim.
 type Membership struct {
 	OrgID string
@@ -27,8 +27,7 @@ func DefaultOrgID(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 }
 
 // OrgForProject returns the org that owns a project. The authorization seam uses this to
-// resolve which membership role governs a request scoped to a given project (O2 wires the
-// per-project resolution; O1 provides it).
+// resolve which membership role governs a request scoped to a given project.
 func OrgForProject(ctx context.Context, pool *pgxpool.Pool, projectID string) (string, error) {
 	var orgID string
 	err := pool.QueryRow(ctx, `SELECT org_id FROM projects WHERE id = $1`, projectID).Scan(&orgID)
@@ -36,8 +35,9 @@ func OrgForProject(ctx context.Context, pool *pgxpool.Pool, projectID string) (s
 }
 
 // RoleForProject resolves a user's membership role in the org that OWNS a project — the
-// per-request-per-project authority the auth convergence seam uses (Arc O / O2). One
-// query: project → its org → the user's membership role there. Returns "" when the project
+// per-request-per-project authority the auth convergence seam uses. Authority is always
+// checked against the org that owns the target project, never the actor's ambient/default
+// org. One query: project → its org → the user's membership role there. Returns "" when the project
 // is unknown OR the user is not a member of its org → perm.RoleScopes("") = no scopes
 // (FAIL CLOSED). This is what makes a user who is owner in org A but viewer in org B get
 // VIEWER scope on org B's project — never their ambient default-org role.
@@ -88,7 +88,7 @@ func MembershipsForUser(ctx context.Context, pool *pgxpool.Pool, userID string) 
 }
 
 // SetMembership upserts a user's role in an org. Used by BootstrapAdmin (the first owner)
-// and by provisioning (O3). The role MUST be valid (perm.ValidRole) — the caller is the
+// and by provisioning. The role MUST be valid (perm.ValidRole) — the caller is the
 // authorization gate; this is the persistence.
 func SetMembership(ctx context.Context, pool *pgxpool.Pool, userID, orgID, role string) error {
 	if !perm.ValidRole(role) {

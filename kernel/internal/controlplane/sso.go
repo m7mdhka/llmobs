@@ -11,7 +11,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
-// OIDC/SSO (Arc O / O5, #21) — the FIRST external trust boundary. Everything here is invoked
+// OIDC/SSO — the FIRST external trust boundary. Everything here is invoked
 // only AFTER the HTTP layer has fully verified the IdP assertion (signature/iss/aud/exp/nonce)
 // and the browser state (CSRF). This file never verifies a token; it stores the per-org config
 // and applies the group→role mapping + JIT provisioning that the verified claims drive. A role
@@ -125,8 +125,9 @@ func GetSSOProviderView(ctx context.Context, pool *pgxpool.Pool, orgID string) (
 
 // SetSSOProvider upserts an org's provider and REPLACES its group→role map, atomically. The
 // client secret is sealed at rest. The caller (HTTP handler) is the authorization gate and has
-// ALREADY capped every mapped role strictly-below the configurer's own role (the O3 escalation
-// cap on this fourth provisioning path); this validates ValidRole as defense-in-depth.
+// ALREADY capped every mapped role strictly-below the configurer's own role (the escalation
+// cap applied on this JIT-provisioning path, same as member provisioning); this validates
+// ValidRole as defense-in-depth.
 func SetSSOProvider(ctx context.Context, pool *pgxpool.Pool, box sealer, p *SSOProvider) error {
 	if strings.TrimSpace(p.Issuer) == "" || strings.TrimSpace(p.ClientID) == "" {
 		return fmt.Errorf("issuer and client_id are required")
@@ -220,7 +221,7 @@ func SSORoleForGroups(groupRoles map[string]string, userGroups []string) string 
 }
 
 // JITProvisionSSOUser find-or-creates a passwordless user by email and sets their membership in
-// the TARGET org to the mapped role (Arc O / O5). It goes THROUGH the O3 discipline, not around
+// the TARGET org to the mapped role. It goes THROUGH the same provisioning discipline, not around
 // it: role only into orgID (target-tenant); the role is the group-map result, already capped
 // strictly-below the configurer at config time (so it is never owner); and an existing OWNER is
 // NEVER downgraded or altered by SSO (owners are locally-managed break-glass accounts — SSO can

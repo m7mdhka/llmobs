@@ -39,7 +39,7 @@ func (h *Handler) apiKeysCollection(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
 	case http.MethodPost:
 		// Minting a machine credential is a configuration WRITE — gate it on write authority
-		// in THIS project's org (O3), so a read-only viewer cannot mint a key at all.
+		// in THIS project's org, so a read-only viewer cannot mint a key at all.
 		// Resolved against the key's project, never an ambient default-org role.
 		sess, _ := SessionFrom(r.Context())
 		if _, ok := h.writeAuthorityInProject(r, projectID); !ok {
@@ -53,10 +53,10 @@ func (h *Handler) apiKeysCollection(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "schema_invalid", "invalid JSON")
 			return
 		}
-		// Cap the minted scopes to the MINTER's own authority (both reviews' HIGH): a member
+		// Cap the minted scopes to the MINTER's own authority: a member
 		// who holds no traces:write/traces:delete cannot mint an ingest/delete key and thereby
-		// escalate past their own role. Resolved per-project (O2) and enforced at the
-		// CreateAPIKey seam; the frontend token already caps the same way (DataPermsOnly).
+		// escalate past their own role. The role is resolved per-project and the cap is enforced
+		// at the CreateAPIKey seam; the frontend token already caps the same way (DataPermsOnly).
 		minterRole, rerr := controlplane.RoleForProject(r.Context(), h.pool, sess.User.ID, projectID)
 		if rerr != nil {
 			writeErr(w, http.StatusInternalServerError, "internal", "resolve minter authority failed")

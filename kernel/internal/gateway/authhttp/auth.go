@@ -1,4 +1,4 @@
-// Package authhttp is the HTTP edge of local single-admin auth (PR-D1): login /
+// Package authhttp is the HTTP edge of local auth: login /
 // logout / me endpoints, a server-side session cookie, CSRF enforcement on
 // state-changing routes, and the session middleware that terminates auth for the
 // rest of the gateway. It is deliberately the single place that turns a cookie
@@ -36,10 +36,10 @@ type Handler struct {
 	limiter  *rateLimiter
 	secure   bool // set Secure on cookies (behind TLS/where the deployment is https)
 	cookieNS string
-	// Authority seams (Arc O / O3), injectable so the fast authz-matrix unit tests can drive
+	// Authority seams, injectable so the fast authz-matrix unit tests can drive
 	// the decision without a DB. Nil in production → the pool-backed resolvers in authority.go.
 	// They answer "is this user an instance admin?" and "may this user write config in this
-	// project's org?" — the two axes O3 gates pricing, api-keys, and create-org on.
+	// project's org?" — the two axes that gate pricing, api-keys, and create-org.
 	instanceAdminFn func(ctx context.Context, userID string) (bool, error)
 	projectWriteFn  func(ctx context.Context, userID, projectID string) (bool, error)
 }
@@ -147,7 +147,7 @@ func (h *Handler) Middleware(next http.Handler) http.Handler {
 			if sess, serr := controlplane.ResolveSession(r.Context(), h.pool, c.Value); serr == nil {
 				// Forward-looking seam: this is where a per-request kernel-signed
 				// identity assertion will be minted for plugin→kernel calls.
-				// mintIdentityAssertion(sess) — not built in D1.
+				// mintIdentityAssertion(sess) — not built here yet.
 				r = r.WithContext(WithSession(r.Context(), sess))
 			}
 		}

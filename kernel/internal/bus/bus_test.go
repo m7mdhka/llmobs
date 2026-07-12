@@ -7,7 +7,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/bus/bustest"
 )
 
-// TestMemConformance runs the shared event-bus conformance suite (H6 backlog-replay,
+// TestMemConformance runs the shared event-bus conformance suite (backlog-replay,
 // at-least-once, backlog-cap→DLQ, tenant/topic isolation) against the in-memory
 // backend. The Redis/Valkey scale backend runs the IDENTICAL suite
 // (internal/bus/redisstore) — the contract is the interface, not the backend.

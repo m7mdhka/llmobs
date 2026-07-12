@@ -10,16 +10,17 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
 )
 
-// Provisioning endpoints (Arc O / O3) — the arc's most dangerous surface: creating orgs,
+// Provisioning endpoints — the most dangerous surface: creating orgs,
 // inviting/promoting/removing members. The whole design is one rule stated three ways:
 //
 //  1. ONE shared gate. Every MEMBER-provisioning sibling (invite, set-role, remove) enters
 //     through orgProvisioner FIRST — no sibling is reachable with less, and none is strictly
-//     more powerful than another. A new sibling added here MUST call it too (invariant #11).
+//     more powerful than another. A new sibling added here MUST call it too, so the gate is
+//     inherited by construction rather than re-checked per handler.
 //  2. Resolve against the TARGET org. orgProvisioner resolves the actor's role in the org the
-//     action TARGETS (the {org} path segment), never an ambient/default org. This is the O2
-//     plugin-settings bug's family (a gate reading the wrong tenant); provisioning is where it
-//     is most dangerous, so it is closed by construction here.
+//     action TARGETS (the {org} path segment), never an ambient/default org. This is the
+//     wrong-tenant gate bug's family (a gate reading a different tenant than the action
+//     targets); provisioning is where it is most dangerous, so it is closed by construction here.
 //  3. Strictly below your own (perm.RoleAbove). A principal assigns only roles strictly below
 //     their own and touches only members strictly below their own — the crown-jewel rule that
 //     stops a provisioning bug from becoming account-takeover. Owners are therefore immutable

@@ -3,7 +3,7 @@ package backfill_test
 // Integration proof for the resumable backfill against BOTH real engines: settled
 // Postgres-lite rows are copied into ClickHouse-scale and become readable there. This
 // exercises the real (ts, project_id, id) keyset SQL (row-value comparison + COALESCE)
-// — the piece a fake source can't validate — and the #7117 same-timestamp cluster on
+// — the piece a fake source can't validate — and the same-timestamp cluster advance on
 // a real engine. Env-gated on LLMOBS_TEST_DATABASE_URL + LLMOBS_CH_TEST_DSN.
 
 import (
@@ -230,7 +230,7 @@ func TestErasedLiteSpanNotResurrectedByBackfill(t *testing.T) {
 	}
 }
 
-// TestErasedSpanNotResurrectedByConcurrentBackfill is the #77 proof: a GDPR erase and
+// TestErasedSpanNotResurrectedByConcurrentBackfill proves erasure-suppression holds: a GDPR erase and
 // the lite→scale backfill running CONCURRENTLY must never resurrect an erased span in
 // scale — the race the sequential fixture (TestErasedLiteSpanNotResurrectedByBackfill)
 // cannot reach. The invariant holds for EVERY interleaving because reads exclude any id
@@ -308,7 +308,7 @@ func TestBackfillLiteToScaleReadable(t *testing.T) {
 	lite, scale := setupEngines(t)
 	ctx := context.Background()
 
-	// Seed lite: 20 spans, HALF sharing one exact timestamp (the #7117 cluster).
+	// Seed lite: 20 spans, HALF sharing one exact timestamp (the same-timestamp cluster).
 	shared := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
 	want := map[string]bool{}
 	for i := 0; i < 20; i++ {

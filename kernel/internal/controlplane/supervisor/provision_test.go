@@ -88,7 +88,7 @@ func TestProvisionFailureDegrades(t *testing.T) {
 // TestProvisionRestartIdempotentNoFault: a kernel restart (fresh supervisor, new
 // key, empty state) re-provisions idempotently and returns the plugin to running
 // with ZERO faults — an interrupted migration recovered on re-handshake must not
-// count toward the disable cap (ADR-0023).
+// count toward the disable cap.
 func TestProvisionRestartIdempotentNoFault(t *testing.T) {
 	ctx := context.Background()
 	clk := &clock{t: time.Unix(1_700_000_000, 0)}

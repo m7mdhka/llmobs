@@ -1,7 +1,8 @@
 // Package crossadapter holds the SQL-level cross-adapter conformance proof: it
 // drives identical event streams and identical DSL queries through BOTH real
 // storage engines (Postgres-lite and ClickHouse-scale) and asserts byte-identical
-// Query-API output. This is the meta-decision made real (ADR-0026) — fold-level
+// Query-API output. This makes real the governing rule that the ClickHouse adapter
+// MUST produce identical observable Query-API results to Postgres — fold-level
 // conformance (tools/conformance) proves the merge is identical; THIS proves the
 // two SQL dialects + planners produce the same observable answer.
 //
@@ -14,7 +15,7 @@
 //
 // Design note — this harness is a SECURITY mechanism, not only an elegance one.
 // A safety property proven on ONE adapter is not proven until proven on EVERY
-// adapter: L2's HIGH SQL injection was invisible on Postgres (a dialect difference
+// adapter: a HIGH-severity SQL injection bug was invisible on Postgres (a dialect difference
 // ClickHouse does not forgive), so any suite that ran against Postgres alone — or a
 // mocked ClickHouse — would have shipped it to every scale deployment. Because the
 // two engines diverge in ways no single-engine test can see (NULL vs ” sentinel,
@@ -267,7 +268,7 @@ func TestCrossAdapterRowQueries(t *testing.T) {
 	}
 }
 
-// TestCrossAdapterResponseBudget is the #83 cross-adapter parity proof: the
+// TestCrossAdapterResponseBudget is the response-budget cross-adapter parity proof: the
 // serialized-response byte ceiling must hold IDENTICALLY on Postgres (lite) and
 // ClickHouse (scale) — the bug is BOTH-profile, so a fix proven on one engine is not
 // proven. Against a tight budget BOTH adapters must refuse the SAME query with

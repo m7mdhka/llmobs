@@ -22,7 +22,7 @@ type PriceOps interface {
 	SetDiscount(ctx context.Context, projectID string, factor float64, actor string) error
 }
 
-// RepriceStarter starts a background re-pricing run (Arc M / M4). Implemented by
+// RepriceStarter starts a background re-pricing run. Implemented by
 // *reprice.Launcher; declared here so authhttp stays free of the storage/reprice
 // packages. It returns the run key and whether a new run started (false = an identical run
 // was already in flight). A nil starter disables the trigger endpoint.
@@ -30,13 +30,13 @@ type RepriceStarter interface {
 	StartReprice(snapshotRefID, projectID string) (runKey string, started bool)
 }
 
-// RegisterPricing mounts the price-table management endpoints (ADR-0029). All are
+// RegisterPricing mounts the price-table management endpoints. All are
 // session-authenticated and CSRF-protected on mutating methods (via RequireAuth).
-// READS are open to any authenticated session. WRITES split by scope (Arc O / O3): editing
+// READS are open to any authenticated session. WRITES split by scope: editing
 // the GLOBAL price table (one table every tenant is billed against) requires instance-admin
 // (an owner of the default org); the per-project DISCOUNT requires configuration authority in
 // that project's own org (any role with write authority, resolved per-project — not "admin"
-// specifically, and never an ambient default-org role). reprice (M4) MAY be nil (re-pricing
+// specifically, and never an ambient default-org role). reprice MAY be nil (re-pricing
 // disabled); when set it mounts the same split gate on its two scopes.
 func (h *Handler) RegisterPricing(mux *http.ServeMux, store PriceOps, reprice RepriceStarter) {
 	p := &pricingHandler{h: h, store: store, reprice: reprice}
@@ -50,13 +50,13 @@ type pricingHandler struct {
 	reprice RepriceStarter
 }
 
-// Pricing authority (Arc O / O3) resolves the O2 residual by splitting the one question the
-// old single canWrite conflated into the two it actually is:
+// Pricing authority splits the one question the old single canWrite conflated into the two
+// it actually is:
 //
 //   - GLOBAL price entries are ONE instance-wide table shared by every tenant. Editing them
 //     (upsert, or re-pricing history off a superseded version) is genuinely an INSTANCE-level
 //     action — gated on h.instanceAdmin (an owner of the default org), NOT an ambient per-org
-//     role. This is the residual, resolved by naming the authority explicitly.
+//     role. The authority is named explicitly rather than reusing a per-org role globally.
 //   - The per-project DISCOUNT is tenant config — gated on h.writeAuthorityInProject, resolved
 //     against the discount's own project org (like plugin settings), never a default-org role.
 
@@ -116,8 +116,8 @@ func (p *pricingHandler) sub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// repriceTrigger: POST /v1alpha1/pricing/reprice — start a background re-pricing run
-// (M4, 06-usage-cost.md §5). Admin-gated exactly like a price/discount edit, because it
+// repriceTrigger: POST /v1alpha1/pricing/reprice — start a background re-pricing run.
+// Admin-gated exactly like a price/discount edit, because it
 // MUTATES money across history. Two scopes:
 //   - scope="price" (default): re-price spans priced against a superseded version of
 //     (provider, model, version). GLOBAL across projects — a price applies instance-wide.
@@ -159,7 +159,7 @@ func (p *pricingHandler) repriceTrigger(w http.ResponseWriter, r *http.Request) 
 			writeErr(w, http.StatusBadRequest, "schema_invalid", "provider, model, and a positive version are required")
 			return
 		}
-		// Canonicalize so the ref id matches how derivation stamped it (R6) — a raw
+		// Canonicalize so the ref id matches how derivation stamped it — a raw
 		// spelling ("Google") must resolve to the same id as the canonical one.
 		snapshotRefID = pricing.EntryID(pricing.CanonicalProvider(req.Provider), pricing.CanonicalModel(req.Model), req.Version)
 	case "discount":

@@ -9,20 +9,22 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/dualstore"
 )
 
-// The dual-read seam (ADR-0026 RULING-MIG6). Because compiled SQL is
-// dialect-specific, the compiled-SQL query paths cannot fan ONE statement to two
-// engines — so the router compiles the SAME DSL doc for BOTH dialects (Postgres for
-// lite, ClickHouse for scale), runs each backend, and unifies via the dualstore
-// merge helpers. The non-SQL paths (Get*/Erase/PersistScore/GetTraceSpans) go
-// through the dualstore.Store decorator. This is the ONE seam every read funnels
-// through (R-MIG4): the server uses it whenever a dual store is set, so no read
-// resolves against a single adapter directly — including the implicit
-// empty-product onboarding checks (the list + Get-404 paths).
+// The dual-read seam. Migrating lite→scale is permanent dual-read: every read
+// unifies the historical (lite) and new (scale) backends, so a migrating user
+// never sees an empty product. Because compiled SQL is dialect-specific, the
+// compiled-SQL query paths cannot fan ONE statement to two engines — so the
+// router compiles the SAME DSL doc for BOTH dialects (Postgres for lite,
+// ClickHouse for scale), runs each backend, and unifies via the dualstore merge
+// helpers. The non-SQL paths (Get*/Erase/PersistScore/GetTraceSpans) go through
+// the dualstore.Store decorator. This is the ONE seam every read funnels
+// through: the server uses it whenever a dual store is set, so no read resolves
+// against a single adapter directly — including the implicit empty-product
+// onboarding checks (the list + Get-404 paths).
 
 // listRows is THE convergence seam for compiled-SQL list reads (spans/scores/traces):
 // dual-read when a scale store is configured (compile both dialects, run both, merge),
 // else the single store. Every list handler funnels through here, so a new one inherits
-// dual-read by construction (invariant #11) — nothing reads a single adapter directly.
+// dual-read by construction — nothing reads a single adapter directly.
 func (s *Server) listRows(ctx context.Context, target string, doc map[string]any, projectID string, c *Compiled) ([]json.RawMessage, error) {
 	if s.dual != nil {
 		return s.dualRows(ctx, target, doc, projectID, c.Limit+1)
@@ -51,7 +53,7 @@ func (s *Server) aggRows(ctx context.Context, target string, doc map[string]any,
 	return groups, warnings, nil
 }
 
-// flagAggTruncation enforces the #108 no-silent-truncation rule. The adapters over-fetch
+// flagAggTruncation enforces the no-silent-truncation rule. The adapters over-fetch
 // one past MaxAggregationGroups, so a result of cap+1 is PROVABLY truncated: trim it back
 // to the cap and emit a LOUD warning, so an incomplete aggregate is never returned as if
 // complete (a silent-wrong result the user trusts, and which corrupts the dual-read
@@ -143,7 +145,7 @@ func orderKeys(ks []OrderKey) []dualstore.OrderKey {
 // dualAgg runs an aggregation across both backends and merges group rows. It also
 // returns human-facing warnings: when a non-mergeable aggregate (avg, count_distinct,
 // percentile) is computed over a group that straddles BOTH stores, the merged value is
-// scale's partial only (ADR-0026 D8) — the caller must tell the user it is approximate
+// scale's partial only — the caller must tell the user it is approximate
 // until that group's data is single-store (e.g. after backfill).
 func (s *Server) dualAgg(ctx context.Context, target string, doc map[string]any, projectID string) ([]map[string]any, []string, error) {
 	lite, scale := s.dual.Backends()
@@ -163,7 +165,7 @@ func (s *Server) dualAgg(ctx context.Context, target string, doc map[string]any,
 	if err != nil {
 		return nil, nil, err
 	}
-	// #108: detect truncation on EITHER store BEFORE the merge. Merging a truncated set
+	// Detect truncation on EITHER store BEFORE the merge. Merging a truncated set
 	// with a complete one silently corrupts the combined groups (a group present only in
 	// the truncated store's dropped tail looks single-store), so the truncation must be
 	// flagged loudly — never a silent wrong merge. Trim each to the cap and warn once.

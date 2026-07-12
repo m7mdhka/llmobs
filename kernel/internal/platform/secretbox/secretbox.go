@@ -1,9 +1,10 @@
-// Package secretbox is envelope encryption for plugin secrets (H4), stdlib-only
+// Package secretbox is envelope encryption for plugin secrets: a plugin-declared
+// secret is encrypted on write and never returned in the clear. Stdlib-only
 // (AES-256-GCM). The kernel holds a master key; for the lite profile it is
 // generated in memory at boot (like the plugin signing key). A KMS-backed key
 // provider slots in for scale behind the same Box surface — that is the deferred
-// hardening seam (ADR-0023). GCM authenticates the ciphertext, so tampering is
-// detected on Open.
+// hardening seam. GCM authenticates the ciphertext, so tampering is detected on
+// Open.
 package secretbox
 
 import (

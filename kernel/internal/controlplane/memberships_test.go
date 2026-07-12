@@ -12,7 +12,7 @@ import (
 )
 
 // mpSetup connects to the test Postgres, migrates, and returns a clean pool. These are the
-// RBAC-foundation prove-the-negatives (Arc O / O1) on the real schema.
+// RBAC-foundation prove-the-negatives on the real schema.
 func mpSetup(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("LLMOBS_TEST_DATABASE_URL")
@@ -93,7 +93,7 @@ func TestMembershipIsPerOrg(t *testing.T) {
 	}
 }
 
-// TestRoleForProjectCrossOrg is the O2 headline prove-the-negative: a user who is OWNER in
+// TestRoleForProjectCrossOrg is the headline prove-the-negative: a user who is OWNER in
 // org A and VIEWER in org B resolves to VIEWER scope when acting on org B's project — never
 // their org-A owner role — and to NO scope on a project in an org they don't belong to
 // (fail closed). This is the cross-org isolation the ambient default-org role masked.

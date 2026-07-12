@@ -8,7 +8,7 @@ import (
 
 // Handler is the jobs ops API: on-demand trigger + run status. Gated by `actor`,
 // which returns the caller's audit actor (e.g. "session:admin@x") and whether they
-// are allowed (admin today; RBAC beyond admin is issue #21).
+// are allowed (admin today; RBAC beyond admin is future work).
 type Handler struct {
 	sched *Scheduler
 	actor func(*http.Request) (actor string, allowed bool)

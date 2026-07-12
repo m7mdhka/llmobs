@@ -25,8 +25,8 @@ var (
 	ErrBadPurpose     = errors.New("pluginproto: wrong token purpose")
 )
 
-// PurposeFrontend marks an identity assertion minted as a plugin FRONTEND token
-// (J1): its scopes were already intersected (plugin-grant ∩ user ∩ project) at
+// PurposeFrontend marks an identity assertion minted as a plugin FRONTEND token:
+// its scopes were already intersected (plugin-grant ∩ user ∩ project) at
 // mint, so the Query API frontend-token case may use them directly. This marker is
 // SIGNED — it distinguishes a frontend token from a proxy/jobs-minted identity
 // assertion, which carry un-intersected (full role) scopes and MUST NOT be usable
@@ -64,7 +64,7 @@ type IdentityAssertionClaims struct {
 	// Purpose distinguishes token classes that share this claim shape. Empty for the
 	// per-request proxy assertion and the jobs system assertion (both carry
 	// un-intersected user/plugin scopes, confined downstream by the service-token
-	// intersection). Set to PurposeFrontend ONLY for J1 frontend tokens, whose scopes
+	// intersection). Set to PurposeFrontend ONLY for frontend tokens, whose scopes
 	// are pre-intersected — so the frontend seam can accept them and reject the
 	// others. Additive/optional (v1alpha1).
 	Purpose string `json:"purpose,omitempty"`
@@ -178,7 +178,7 @@ func VerifyIdentityAssertion(pub ed25519.PublicKey, token, expectedAud string, n
 	return c, nil
 }
 
-// MintFrontendToken issues a J1 frontend token: an identity assertion whose scopes
+// MintFrontendToken issues a frontend token: an identity assertion whose scopes
 // are ALREADY the plugin-grant ∩ user ∩ project intersection, stamped with a signed
 // PurposeFrontend marker. Only this mint sets the marker, and only
 // VerifyFrontendToken accepts it — so a proxy/jobs-minted assertion (un-intersected
@@ -194,7 +194,7 @@ func MintFrontendToken(priv ed25519.PrivateKey, pluginID, subject, projectID, ac
 	return t, c, err
 }
 
-// VerifyFrontendToken checks a J1 frontend token: signature, issuer, the signed
+// VerifyFrontendToken checks a frontend token: signature, issuer, the signed
 // PurposeFrontend marker (this is what rejects proxy/jobs assertions), and expiry.
 // There is no per-plugin audience check — the frontend seam has no service token to
 // name a specific plugin, and the scopes were already bounded at mint.
@@ -217,8 +217,8 @@ func VerifyFrontendToken(pub ed25519.PublicKey, token string, now time.Time) (Id
 
 // Intersect returns the scopes present in BOTH a and b, order-preserving by a and
 // de-duplicated. The kernel computes effective plugin access as the intersection
-// of the service-token scopes, the identity-assertion scopes, and project scope
-// (R3); this is the building block. Nil/empty inputs yield an empty intersection.
+// of the service-token scopes, the identity-assertion scopes, and project scope;
+// this is the building block. Nil/empty inputs yield an empty intersection.
 func Intersect(a, b []string) []string {
 	set := make(map[string]struct{}, len(b))
 	for _, s := range b {

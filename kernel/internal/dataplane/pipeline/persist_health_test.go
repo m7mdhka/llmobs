@@ -24,7 +24,7 @@ func (f *failStore) PersistSpan(context.Context, storage.Event) error {
 }
 
 // TestPersistStageFeedsHealthSignal proves the persist stage folds storage
-// outcomes into the shared signal (the G2 unit that makes /readyz flip): the
+// outcomes into the shared signal (the unit that makes /readyz flip): the
 // signal stays healthy below the failure threshold, flips at it, and recovers on
 // the first success.
 func TestPersistStageFeedsHealthSignal(t *testing.T) {

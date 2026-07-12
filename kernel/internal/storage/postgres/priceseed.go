@@ -4,11 +4,11 @@ import "github.com/m7mdhka/llmobs/kernel/internal/pricing"
 
 // defaultPriceSeeds is a reasonable baseline price set (per-token USD) for common
 // models, so cost derivation works out of the box. This is a STARTING POINT, not
-// authoritative — the point of the price table (ADR-0029) is that an operator corrects
+// authoritative — the point of the price table is that an operator corrects
 // or extends it via the API without a code change. Rates are illustrative and dated;
 // keep the list short and canonical. Provider/model are canonicalized on seed.
 //
-// Detail-rate `Reduces` declares the residual base (R3): cache_read tokens come out of
+// Detail-rate `Reduces` declares the residual base: cache_read tokens come out of
 // the input count, so the base input rate bills only `input − cache_read`.
 func defaultPriceSeeds() []pricing.Entry {
 	return []pricing.Entry{
@@ -44,7 +44,7 @@ func defaultPriceSeeds() []pricing.Entry {
 				"output":     {PerToken: 0.000005},
 				"cache_read": {PerToken: 0.0000003125, Reduces: "input"},
 			},
-			// Long-context tier (§7.5/R7): tokens above 128k bill at the higher rate.
+			// Long-context tier: tokens above 128k bill at the higher rate.
 			Tiers: []pricing.Tier{
 				{Key: "input", ThresholdTokens: 128000, PerToken: 0.0000025},
 				{Key: "output", ThresholdTokens: 128000, PerToken: 0.00001},

@@ -26,7 +26,7 @@ type Sealer interface {
 // Secrets serves the `secrets` primitive, gated on cap:secrets. The plaintext is
 // NEVER persisted, NEVER logged, and returned by exactly ONE path: the owning
 // plugin's authenticated delivery (get). Every other surface — list, kv, query,
-// errors, logs — carries names/flags only. (H4)
+// errors, logs — carries names/flags only.
 type Secrets struct {
 	authz *pluginauth.Authorizer
 	store SecretStore

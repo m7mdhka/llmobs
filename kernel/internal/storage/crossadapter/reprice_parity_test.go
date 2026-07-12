@@ -18,7 +18,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 )
 
-// TestReprice_CrossAdapterParity proves the M4 cross-adapter guarantee: a price correction
+// TestReprice_CrossAdapterParity proves the re-pricing cross-adapter guarantee: a price correction
 // re-priced independently against the Postgres scanner and the ClickHouse scanner lands
 // the SAME new cost and the SAME new snapshot ref on both engines. The derivation is the
 // shared costderive path (store-independent), and the re-emit folds identically, so the

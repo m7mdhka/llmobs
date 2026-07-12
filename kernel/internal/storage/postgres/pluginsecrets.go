@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PluginSecrets stores per-plugin encrypted secrets (H4). It only ever holds
+// PluginSecrets stores per-plugin encrypted secrets. It only ever holds
 // ciphertext + nonce; encryption/decryption is the handler's job (secretbox).
 type PluginSecrets struct {
 	pool *pgxpool.Pool

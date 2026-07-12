@@ -16,8 +16,8 @@ func (f fakePrices) Resolve(context.Context, string, string, time.Time) (*pricin
 
 func approxf(a, b float64) bool { d := a - b; return d < 1e-12 && d > -1e-12 }
 
-// TestDeriveSpanCostAudioPricedAtAudioRateNotText is the #79 END-TO-END prove-the-negative
-// (the Opik #7137 bug): an audio-model span with audio tokens in dedicated buckets must derive
+// TestDeriveSpanCostAudioPricedAtAudioRateNotText is the END-TO-END prove-the-negative
+// for audio pricing: an audio-model span with audio tokens in dedicated buckets must derive
 // cost that prices audio at its OWN (often ~16×) rate and bills the TEXT base only on the
 // residual — never folding audio into the text buckets at the text rate (a massive
 // under-charge). Exercises the shared DeriveSpanCost that both ingest-enrich and re-pricing use.
@@ -31,8 +31,8 @@ func TestDeriveSpanCostAudioPricedAtAudioRateNotText(t *testing.T) {
 			"audio_input": int64(300), "audio_output": int64(150),
 		},
 	}
-	// Data-driven price entry (§7.7): text rates + SEPARATE audio rates that REDUCE the text
-	// base. Audio input at 16× the text rate — the exact premium Opik #7137 lost by billing
+	// Data-driven price entry: text rates + SEPARATE audio rates that REDUCE the text
+	// base. Audio input at 16× the text rate — the exact premium lost by billing
 	// audio as text.
 	entry := &pricing.Entry{
 		Provider: "openai", Model: "gpt-4o-audio-preview", Version: 1, ID: "openai/gpt-4o-audio-preview#1",
@@ -76,14 +76,14 @@ func TestDeriveSpanCostAudioPricedAtAudioRateNotText(t *testing.T) {
 	// ~7.7× lower. A correct derivation must NOT produce that.
 	const asTextBug = 500*0.0000025 + 200*0.00001 // 0.00325
 	if approxf(total, asTextBug) {
-		t.Fatalf("audio was billed at the TEXT rate (Opik #7137 undercharge): total=%v", total)
+		t.Fatalf("audio was billed at the TEXT rate (undercharge): total=%v", total)
 	}
 	if got.ID != entry.ID || p["cost_source"] != "derived" {
 		t.Fatalf("cost provenance wrong: source=%v ref=%v", p["cost_source"], got.ID)
 	}
 }
 
-// TestDeriveSpanCostAudioNoRateNotBilled is the data-driven negative (R2/R4): if the price
+// TestDeriveSpanCostAudioNoRateNotBilled is the data-driven negative: if the price
 // entry declares NO audio rate, audio tokens are simply not billed — never invented and never
 // folded into text. The base residual is still reduced by the (unpriced) audio tokens? No —
 // a bucket only reduces its base if that bucket's rate declares Reduces. An unpriced audio
@@ -97,7 +97,7 @@ func TestDeriveSpanCostAudioNoRateNotBilled(t *testing.T) {
 	}
 	entry := &pricing.Entry{
 		Provider: "acme", Model: "some-audio-model", Version: 1, ID: "acme/some-audio-model#1",
-		Rates:    map[string]pricing.Rate{"input": {PerToken: 0.0000025}}, // no audio rate
+		Rates: map[string]pricing.Rate{"input": {PerToken: 0.0000025}}, // no audio rate
 	}
 	if _, err := DeriveSpanCost(context.Background(), p, fakePrices{entry}, 1.0, map[string]*pricing.Entry{}); err != nil {
 		t.Fatal(err)

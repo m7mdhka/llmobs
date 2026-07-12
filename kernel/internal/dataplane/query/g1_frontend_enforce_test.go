@@ -16,15 +16,15 @@ import (
 
 // adminSession returns a context-injected full-admin session (RoleScopes("admin") ==
 // the FULL permission set) — the ambient browser session every plugin frontend runs
-// under. The whole point of G1 is that a plugin must NOT inherit this.
+// under. The whole point of frontend-token enforcement is that a plugin must NOT inherit this.
 func adminSessionReq(method string) *http.Request {
 	r := httptest.NewRequest(method, "/v1alpha1/query", nil)
 	sess := controlplane.Session{User: controlplane.User{ID: "u1", Email: "user@x", Role: "admin"}}
 	return r.WithContext(authhttp.WithSession(r.Context(), sess))
 }
 
-// TestG1FrontendEnforcedAgainstAmbientSession is the G1 prove-the-negative: the live
-// privilege-escalation the audit found. A Tier-2 frontend plugin, calling the Query API
+// TestG1FrontendEnforcedAgainstAmbientSession is the prove-the-negative: the live
+// privilege-escalation the audit found. A frontend-only plugin, calling the Query API
 // from the browser with a VALID admin user session, must be confined to its minted
 // (intersected) grant — never the user's full session scope — and a marked plugin
 // request whose token is missing/expired must FAIL CLOSED, not silently escalate.
@@ -34,8 +34,8 @@ func TestG1FrontendEnforcedAgainstAmbientSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{signer: signer}
-	// O2: the shell's own session (Case 2) resolves its per-project-org role (admin → full);
-	// injected (no DB in this unit test). G1 confines PLUGINS, not the first-party shell.
+	// The shell's own session (Case 2) resolves its per-project-org role (admin → full);
+	// injected (no DB in this unit test). Enforcement confines PLUGINS, not the first-party shell.
 	s.SetRoleResolver(func(_ context.Context, _, _ string) (string, error) { return "admin", nil })
 	const grantedProject, otherProject = "projA", "projB"
 
@@ -159,7 +159,7 @@ func TestG1FrontendEnforcedAgainstAmbientSession(t *testing.T) {
 	})
 
 	// Control: the SHELL's own request (no plugin marker, no token, admin session) still
-	// gets full scope — G1 confines plugins, it does not break the first-party shell.
+	// gets full scope — enforcement confines plugins, it does not break the first-party shell.
 	t.Run("shell_own_request_unaffected", func(t *testing.T) {
 		r := adminSessionReq(http.MethodPost)
 		r.Header.Set("X-LLMObs-Project", grantedProject) // shell selects the project (no pool in the test)

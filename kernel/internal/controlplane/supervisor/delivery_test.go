@@ -16,7 +16,7 @@ import (
 
 // TestTokenDeliveredAndScoped: reaching running means the kernel PUSHED the
 // service token to the plugin's own URL, and the delivered token verifies + is
-// scoped to that plugin (H7c).
+// scoped to that plugin.
 func TestTokenDeliveredAndScoped(t *testing.T) {
 	ctx := context.Background()
 	clk := &clock{t: time.Unix(1_700_000_000, 0)}
@@ -69,7 +69,7 @@ func TestTokenDeliveryFailureDegrades(t *testing.T) {
 	}
 }
 
-// TestTokenDeliveryPerPluginNoCrossDelivery is H7c's prove-the-negative: delivery
+// TestTokenDeliveryPerPluginNoCrossDelivery is the prove-the-negative: delivery
 // is kernel-initiated to EACH plugin's own registered URL, so each backend receives
 // only ITS OWN token, scoped to its own id. There is no plugin-pull path, so
 // "obtain another plugin's token" is not an expressible operation — each backend

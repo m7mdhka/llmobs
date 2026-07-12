@@ -12,8 +12,8 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
-// TestSuppressedIdNotReadableEvenIfReinserted is the Postgres symmetric read-side #77
-// proof (mirrors the ClickHouse TestIntegrationSuppressedIdNotReadableEvenIfReinserted):
+// TestSuppressedIdNotReadableEvenIfReinserted is the Postgres symmetric read-side
+// suppression proof (mirrors the ClickHouse TestIntegrationSuppressedIdNotReadableEvenIfReinserted):
 // a non-deleted span that carries an unexpired suppression tombstone — the outcome of a
 // concurrent erase whose tombstone commits AFTER a re-ingest/backfill insert races past
 // the write-side NOT EXISTS guard — must be excluded from every read. Without the

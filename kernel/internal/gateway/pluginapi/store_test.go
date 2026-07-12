@@ -102,7 +102,7 @@ func callStore(h *Store, op, svc, asr, body string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestStoreCrossTenantIsolation is H5's prove-the-negative: a plugin scoped to
+// TestStoreCrossTenantIsolation is the store's prove-the-negative: a plugin scoped to
 // project A cannot read (get OR query) project B's rows in its OWN collection —
 // even with a valid token — because project_id comes from the assertion, never the
 // body. Positive control: it CAN read its own project's rows.

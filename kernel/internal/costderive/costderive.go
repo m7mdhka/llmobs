@@ -1,10 +1,10 @@
-// Package costderive holds the ONE span-level cost derivation path (06-usage-cost.md
-// §3.2, §4, §7). Both the ingest enrich stage (M2, pipeline/enrich.go) and the
-// re-pricing backfill (M4, storage/reprice) call DeriveSpanCost — the derivation is
+// Package costderive holds the ONE span-level cost derivation path. Both the ingest
+// enrich stage (pipeline/enrich.go) and the
+// re-pricing backfill (storage/reprice) call DeriveSpanCost — the derivation is
 // NEVER forked, so a span re-priced by the backfill computes byte-identically to one
 // priced at ingest. The pure money math lives in pricing.Derive; this package is the
-// thin span-payload adapter around it (resolve usage, honor R1 provided-wins and R4
-// no-usage-null, stamp the re-derivable pricing_snapshot_ref).
+// thin span-payload adapter around it (resolve usage, honor provided-cost-wins and
+// no-usage-means-null, stamp the re-derivable pricing_snapshot_ref).
 package costderive
 
 import (
@@ -41,15 +41,15 @@ type DiscountLookup interface {
 // share one lookup; pass a fresh map per batch/run so a price edit is never served stale
 // beyond that unit.
 func DeriveSpanCost(ctx context.Context, p map[string]any, prices PriceLookup, discount float64, cache map[string]*pricing.Entry) (*pricing.Entry, error) {
-	// §3.2.1 — usage_details = a normalized copy of provided_usage_details (drop
+	// usage_details = a normalized copy of provided_usage_details (drop
 	// negative/non-integer values; synthesize `total` from input+output if absent). We
-	// do NOT derive usage (no tokenizer, §7.3/R4 forbids phantom usage).
+	// do NOT derive usage (no tokenizer, and fabricating phantom usage is forbidden).
 	usage := normalizeUsage(p["provided_usage_details"])
 	if len(usage) > 0 {
 		p["usage_details"] = intMapToAny(usage)
 	}
 
-	// §4 step 1 — PROVIDED COST WINS and SHORT-CIRCUITS derivation (R1). No price entry
+	// PROVIDED COST WINS and SHORT-CIRCUITS derivation. No price entry
 	// is consulted; pricing_snapshot_ref stays null.
 	if pcd, ok := p["provided_cost_details"].(map[string]any); ok && len(pcd) > 0 {
 		p["cost_details"] = copyAnyMap(pcd)
@@ -60,14 +60,14 @@ func DeriveSpanCost(ctx context.Context, p map[string]any, prices PriceLookup, d
 		return nil, nil
 	}
 
-	// §4 step 3 default (R4) — no usage → no derived cost, leave cost null (never zero).
+	// Default — no usage → no derived cost, leave cost null (never zero).
 	if len(usage) == 0 {
 		return nil, nil
 	}
 	model, _ := p["model"].(string)
 	provider, _ := p["provider"].(string)
 	if model == "" {
-		return nil, nil // no served model → no price lookup (§4 step 3)
+		return nil, nil // no served model → no price lookup
 	}
 
 	key := pricing.CanonicalProvider(provider) + "\x1e" + pricing.CanonicalModel(model)
@@ -81,10 +81,10 @@ func DeriveSpanCost(ctx context.Context, p map[string]any, prices PriceLookup, d
 		entry = e
 	}
 	if entry == nil {
-		return nil, nil // no price entry → cost null (§4 step 3), never zero
+		return nil, nil // no price entry → cost null, never zero
 	}
 
-	// §4 step 2 + §7 — derive, stamp derived cost + the re-derivable snapshot ref.
+	// Derive, stamp derived cost + the re-derivable snapshot ref.
 	costDetails, total := pricing.Derive(usage, entry, discount)
 	if len(costDetails) == 0 {
 		return nil, nil
@@ -101,7 +101,7 @@ func DeriveSpanCost(ctx context.Context, p map[string]any, prices PriceLookup, d
 }
 
 // normalizeUsage returns provided usage as map[string]int64: non-negative integer
-// values only, `total` synthesized from input+output when absent (§3.2.1). Handles both
+// values only, `total` synthesized from input+output when absent. Handles both
 // int64 (native ingest) and float64 (JSON-round-tripped) inputs.
 func normalizeUsage(v any) map[string]int64 {
 	m, ok := v.(map[string]any)

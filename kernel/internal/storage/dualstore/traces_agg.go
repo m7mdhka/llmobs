@@ -158,9 +158,11 @@ func SynthesizeTrace(spans []json.RawMessage) json.RawMessage {
 		if p.parent != "" && !ids[p.parent] {
 			incomplete = true // orphan-with-parent-ref (Collector dropped the parent)
 		}
-		// trace-level cost (§7.1): sum only NON-aggregate spans' cost, matching the SQL
+		// trace-level cost: sum only NON-aggregate spans' cost, matching the SQL
 		// projections' `kind NOT IN (agg kinds)` so a re-synthesized split trace's
-		// total_cost is identical to a single-store one.
+		// total_cost is identical to a single-store one. Aggregate spans
+		// (agent_step/invoke_agent) duplicate their child model-call span's usage, so
+		// summing both would double-count the trace's cost.
 		if p.hasCost && !storage.IsAggregateKind(p.kind) {
 			traceCost += p.cost
 			hasTraceCost = true
@@ -300,7 +302,9 @@ func combine(op string, scaleVal, liteVal any) (any, bool) {
 	if !mergeableOps[op] {
 		// avg / count_distinct / p50..p99 across a straddle are NOT reconstructable from
 		// partials; keep scale's value and flag it (the caller warns). count_distinct is
-		// explicitly here — summing it double-counts overlapping distinct values (ADR-0026 D8).
+		// explicitly here — summing it double-counts overlapping distinct values. Only
+		// count/sum/min/max are summary-mergeable across the straddle; the rest need the
+		// raw rows, which no single store has during a transitional straddle.
 		return scaleVal, false
 	}
 	fa, oka := asFloat(scaleVal)

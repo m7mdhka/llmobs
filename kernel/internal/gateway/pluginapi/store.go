@@ -9,7 +9,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/plugindata"
 )
 
-// StoreBackend is the plugin-store surface the endpoints need (R1 boundary).
+// StoreBackend is the plugin-store surface the endpoints need (interface-at-consumer).
 type StoreBackend interface {
 	Put(ctx context.Context, pluginID, projectID, collection, id string, record json.RawMessage) error
 	Get(ctx context.Context, pluginID, projectID, collection, id string) (json.RawMessage, bool, error)
@@ -20,7 +20,7 @@ type StoreBackend interface {
 // Store serves the `store` primitive, gated on cap:store. Every op is scoped to
 // the caller's (plugin_id, project_id) — project_id comes from the verified
 // assertion, NEVER the request body, so a plugin can never reach another tenant's
-// rows (the cross-tenant isolation invariant). (H5)
+// rows (the cross-tenant isolation invariant).
 type Store struct {
 	authz *pluginauth.Authorizer
 	store StoreBackend

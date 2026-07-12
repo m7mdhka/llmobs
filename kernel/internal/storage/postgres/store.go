@@ -15,7 +15,7 @@ import (
 // Store is the lite-profile storage adapter.
 type Store struct {
 	pool           *pgxpool.Pool
-	suppressionTTL time.Duration // erasure-tombstone retention (G3)
+	suppressionTTL time.Duration // erasure-tombstone retention window
 	queryTimeout   time.Duration // server-side statement_timeout for DSL reads (0 = off)
 }
 
@@ -28,7 +28,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 }
 
 // SetErasureSuppressionTTL overrides how long erasure tombstones block
-// re-delivery of an erased span (G3). Non-positive values are ignored.
+// re-delivery of an erased span. Non-positive values are ignored.
 func (s *Store) SetErasureSuppressionTTL(d time.Duration) {
 	if d > 0 {
 		s.suppressionTTL = d
@@ -79,8 +79,8 @@ func (s *Store) queryRead(ctx context.Context, sql string, args ...any) (pgx.Row
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// PersistSpan applies one span event with **merge-on-write under the row lock**
-// (LM-5 observable semantics): read the current row FOR UPDATE, fold the current
+// PersistSpan applies one span event with **merge-on-write under the row lock**:
+// read the current row FOR UPDATE, fold the current
 // state together with the incoming event, and write the result. On first sight of
 // an id, the folded single-event state is inserted.
 func (s *Store) PersistSpan(ctx context.Context, ev storage.Event) error {
@@ -119,7 +119,7 @@ func (s *Store) PersistSpan(ctx context.Context, ev storage.Event) error {
 		return err
 	}
 
-	// Per-field provenance fold under the row lock (issue #17): incoming event
+	// Per-field provenance fold under the row lock: incoming event
 	// folds against per-group stamps, so out-of-order updates converge to the
 	// same state as the ordered Fold.
 	merged, newProv := merge.MergeEvent("span", state, prov, ev)
@@ -133,7 +133,7 @@ func (s *Store) PersistSpan(ctx context.Context, ev storage.Event) error {
 		return err
 	}
 	c := extractSpanColumns(merged, ev.EventTS)
-	// Erasure suppression (G3): the write is guarded by NOT EXISTS against an
+	// Erasure suppression: the write is guarded by NOT EXISTS against an
 	// unexpired tombstone, so a re-delivery of a GDPR-erased span inserts zero rows
 	// (detected below) instead of resurrecting it. The guard is atomic with the
 	// upsert, and the spans row lock (held from the SELECT ... FOR UPDATE above)
@@ -182,7 +182,7 @@ func (s *Store) PersistSpan(ctx context.Context, ev storage.Event) error {
 // (merge-on-write folds via MergeEvent above; see merge.go for the fold.)
 
 // spansSuppressionExclusion excludes any span whose (project_id, id) carries an
-// UNEXPIRED erasure-suppression tombstone (#77) — the read-side half of the erasure
+// UNEXPIRED erasure-suppression tombstone — the read-side half of the erasure
 // guarantee, symmetric with the ClickHouse adapter. The write path guards inserts with a
 // NOT EXISTS against this table, but that guard races a tombstone committed after the
 // insert's snapshot (a concurrent erase during a backfill/re-ingest): the span lands with
@@ -210,11 +210,11 @@ func (s *Store) GetSpan(ctx context.Context, projectID, id string) (json.RawMess
 	return doc, err
 }
 
-// traceProjection synthesizes one row per trace from its spans (DSL §4.1): times
+// traceProjection synthesizes one row per trace from its spans: times
 // span earliest start to latest end, dimensions come from the root span (parent
 // empty, tie-broken by earliest (start_time,id); else the earliest span), status is
 // `error` if any span errored, and total_cost sums only NON-aggregate spans' cost
-// (§7.1 — an agent_step/tool_call duplicates its children's usage, so summing it would
+// (an agent_step/tool_call duplicates its children's usage, so summing it would
 // double-count). Built once from storage.AggregateKinds so the excluded-kinds set is
 // shared with the ClickHouse projection and the dual-read re-synthesis. `SUM … FILTER`
 // ignores NULL costs and aggregate kinds and is NULL when a trace has no leaf cost

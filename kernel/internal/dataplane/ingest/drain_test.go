@@ -74,7 +74,7 @@ func metricValue(reg *metrics.Registry, name string) float64 {
 	return -1
 }
 
-// TestDrainPersistsQueuedJobsOnShutdown is the G1 structural proof: fill the
+// TestDrainPersistsQueuedJobsOnShutdown is the drain structural proof: fill the
 // queue, simulate SIGTERM by cancelling the context passed to Start (the old code
 // killed workers on this and dropped the queue), then DrainAndWait with a generous
 // deadline — every acked job must be processed and none counted as dropped.
@@ -106,7 +106,7 @@ func TestDrainPersistsQueuedJobsOnShutdown(t *testing.T) {
 	}
 }
 
-// TestDrainDeadlineCountsDrops is the G1 deadline proof: when work cannot drain in
+// TestDrainDeadlineCountsDrops is the drain deadline proof: when work cannot drain in
 // time, DrainAndWait must return (not block forever) and count the residual as
 // dropped-on-shutdown rather than losing it silently.
 func TestDrainDeadlineCountsDrops(t *testing.T) {

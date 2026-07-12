@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// LM-4 provided-cost passthrough (Dmitri's regression test): when the client
+// Provided-cost passthrough regression: when the client
 // sends cost, it must flow to provided_cost_details, stamp cost_source=provided,
 // and populate the promoted total_cost — even without kernel derivation.
 func TestProvidedCostPassthrough(t *testing.T) {
@@ -55,8 +55,8 @@ func TestProvidedCostExplicitTotal(t *testing.T) {
 	}
 }
 
-// TestAggregateSpanUsageDropped is the #81/R5 prove-the-negative (dual-incumbent
-// Langfuse #14808 + Opik #4695): an aggregate agent span carrying usage that duplicates
+// TestAggregateSpanUsageDropped is the no-double-count prove-the-negative: an
+// aggregate agent span carrying usage that duplicates
 // its child must NOT have that usage extracted (or trace-level cost double-counts).
 func TestAggregateSpanUsageDropped(t *testing.T) {
 	agg := SpanInput{TraceID: "t", SpanID: "agg", Name: "invoke_agent x", Attributes: map[string]any{
@@ -86,8 +86,8 @@ func TestAggregateSpanUsageDropped(t *testing.T) {
 	}
 }
 
-// TestAudioBucketsMapped is the #79 proof: audio tokens map to dedicated buckets so cost
-// derivation can price them at the audio rate, not the text rate (Opik #7137).
+// TestAudioBucketsMapped proves audio tokens map to dedicated buckets so cost
+// derivation can price them at the audio rate, not the text rate.
 func TestAudioBucketsMapped(t *testing.T) {
 	in := SpanInput{TraceID: "t", SpanID: "s", Name: "chat", Attributes: map[string]any{
 		"gen_ai.operation.name": "chat", "gen_ai.request.model": "gpt-4o-audio-preview",
@@ -104,7 +104,7 @@ func TestAudioBucketsMapped(t *testing.T) {
 	}
 }
 
-// TestProvidedCostRejectsBadValues is the M2-review money-integrity fix: a NaN/Inf/
+// TestProvidedCostRejectsBadValues is the money-integrity fix: a NaN/Inf/
 // negative provided cost is DROPPED (not stored verbatim), so one crafted span can't
 // poison SUM(total_cost) across the project.
 func TestProvidedCostRejectsBadValues(t *testing.T) {
@@ -132,7 +132,7 @@ func TestProvidedCostRejectsBadValues(t *testing.T) {
 	}
 }
 
-// TestAggregateGateCaseFold: the #81 gate is case-insensitive (defense-in-depth) — an
+// TestAggregateGateCaseFold: the aggregate-span gate is case-insensitive (defense-in-depth) — an
 // oddly-cased aggregate op still drops usage.
 func TestAggregateGateCaseFold(t *testing.T) {
 	in := SpanInput{TraceID: "t", SpanID: "s", Name: "agent", Attributes: map[string]any{

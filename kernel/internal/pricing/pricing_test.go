@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestCanonicalModelSymmetric is the R6 prove-the-negative (Opik #5621: a prefix
+// TestCanonicalModelSymmetric is the symmetric-normalization prove-the-negative (a prefix
 // stripped at load but not at lookup → all LiteLLM OTel spans record cost=0). The same
 // normalizer is applied at load and lookup, so a prefixed name and its bare form MUST
 // canonicalize to the SAME key — and canonicalizing an already-canonical key is a
@@ -22,7 +22,7 @@ func TestCanonicalModelSymmetric(t *testing.T) {
 		want := CanonicalModel(g[0])
 		for _, raw := range g {
 			if got := CanonicalModel(raw); got != want {
-				t.Errorf("CanonicalModel(%q)=%q, want %q — asymmetric normalization = silent zero cost (R6)", raw, got, want)
+				t.Errorf("CanonicalModel(%q)=%q, want %q — asymmetric normalization = silent zero cost", raw, got, want)
 			}
 			// Idempotence: canonicalizing the canonical form is a fixpoint, so load and
 			// lookup agree no matter how many times normalization is applied.
@@ -48,7 +48,7 @@ func TestCanonicalModelPreservesNonPrefix(t *testing.T) {
 	}
 }
 
-// TestCanonicalProviderSingleTable is R6's provider half (Opik #6928: Vertex AI routed
+// TestCanonicalProviderSingleTable is the provider half (Vertex AI routed
 // to provider='gemini' broke pricing AND credentials). The Google family collapses to
 // ONE canonical identity through the single table; azure stays distinct from openai
 // (they price differently); unknown providers pass through.

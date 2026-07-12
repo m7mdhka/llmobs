@@ -63,7 +63,7 @@ func TestTracesOrderable(t *testing.T) {
 	}
 }
 
-// The score semi-join (QD-9) compiles to an EXISTS over the scores table.
+// The score semi-join compiles to an EXISTS over the scores table.
 func TestTracesScoresSemiJoin(t *testing.T) {
 	doc := traceDoc()
 	doc["scores"] = []any{map[string]any{"name": "hallucination", "data_type": "numeric", "op": "lt", "value": 0.5}}

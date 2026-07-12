@@ -8,10 +8,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PluginKV is the per-plugin key/value store (H4). Every operation is scoped by
+// PluginKV is the per-plugin key/value store. Every operation is scoped by
 // (plugin_id, project_id, user_id) so a plugin's kv is isolated per tenant and per plugin,
-// and — Arc O / O6 — optionally per USER. userID == "" is PROJECT scope (shared across the
-// project's users); a non-empty userID (the O1-resolved acting user) is USER scope, isolated
+// and optionally per USER. userID == "" is PROJECT scope (shared across the
+// project's users); a non-empty userID (the kernel-resolved acting user) is USER scope, isolated
 // so one user's per-user state is invisible to another in the same project.
 type PluginKV struct {
 	pool *pgxpool.Pool

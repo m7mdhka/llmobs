@@ -14,7 +14,7 @@ import (
 )
 
 // wal is an append-only, fsync-on-append write-ahead log used as the durable
-// floor for the ingest spool (ADR-0027). Records carry a monotonic seq and a
+// floor for the ingest spool. Records carry a monotonic seq and a
 // per-record CRC; a torn tail (a partial final write after a crash) is detected on
 // replay by a short read or CRC mismatch and truncated. The log is segmented so a
 // sealed segment fully below the checkpoint watermark can be archived and dropped

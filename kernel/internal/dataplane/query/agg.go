@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Aggregation ceilings (00-dsl-spec.md §5, §12).
+// Aggregation ceilings: max aggregations per query, and max groupBy members.
 const (
 	maxAggregations = 10
 	maxGroupBy      = 3

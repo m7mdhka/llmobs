@@ -1,9 +1,9 @@
 // Package pricing is the cost-derivation domain: the price-entry model and the ONE
 // canonical model-key + provider normalizer shared by price-table load and derivation
-// lookup (ADR-0029; 06-usage-cost.md §7). Keeping normalization in a single place — and
-// applying it byte-identically at both write and lookup — is the R6 immunity: an
-// asymmetric transform makes every lookup miss and silently records zero cost
-// (Opik #5621). The storage adapter (postgres.PriceStore) and the enrich stage (M2)
+// lookup. Keeping normalization in a single place — and
+// applying it byte-identically at both write and lookup — is the immunity against an
+// asymmetric transform that makes every lookup miss and silently records zero cost.
+// The storage adapter (postgres.PriceStore) and the enrich stage
 // both key on these canonical values.
 package pricing
 
@@ -20,15 +20,15 @@ import (
 // API (which maps it to 409) share one sentinel.
 var ErrVersionConflict = errors.New("price entry version conflict (retry)")
 
-// Rate is one usage-detail bucket's unit price (§7.4/R4). Reduces, when set, declares
-// which base count this bucket's tokens are subtracted from for the residual (§7.3/R3);
+// Rate is one usage-detail bucket's unit price. Reduces, when set, declares
+// which base count this bucket's tokens are subtracted from for the residual;
 // empty means a standalone additive bucket that reduces no base.
 type Rate struct {
 	PerToken float64 `json:"per_token"`
 	Reduces  string  `json:"reduces,omitempty"` // "input" | "output" | ""
 }
 
-// Tier is one above-threshold rate (§7.5/R7): tokens of Key above ThresholdTokens
+// Tier is one above-threshold rate: tokens of Key above ThresholdTokens
 // bill at PerToken instead of the base rate.
 type Tier struct {
 	Key             string  `json:"key"`
@@ -38,8 +38,8 @@ type Tier struct {
 
 // Entry is one immutable, versioned pricing snapshot for a (Provider, Model). It
 // mirrors api/schemas/pricing/v1alpha1/price-entry.schema.json. ID
-// ("<provider>/<model>#<version>") is the primary key AND the pricing_snapshot_ref id
-// (§5/D4). Provider and Model are stored canonical (via Canonical* below).
+// ("<provider>/<model>#<version>") is the primary key AND the pricing_snapshot_ref id.
+// Provider and Model are stored canonical (via Canonical* below).
 type Entry struct {
 	ID            string          `json:"id"`
 	Provider      string          `json:"provider"`
@@ -90,9 +90,10 @@ func EntryID(providerCanon, modelCanon string, version int) string {
 	return providerCanon + "/" + modelCanon + "#" + strconv.Itoa(version)
 }
 
-// providerCanon collapses provider aliases to ONE identity (R6). The Google family
-// (Vertex AI / Gemini / Google AI) is the load-bearing case both incumbents got wrong
-// (Opik #6928). Unlisted providers pass through lowercased+trimmed — pricing is
+// providerCanon collapses provider aliases to ONE identity. The Google family
+// (Vertex AI / Gemini / Google AI) is the load-bearing case: routing Vertex AI models
+// to a separate identity breaks both pricing and credential resolution. Unlisted
+// providers pass through lowercased+trimmed — pricing is
 // data-driven, so a new provider is a new price row, never a code change here.
 var providerCanon = map[string]string{
 	"vertex_ai": "google", "vertexai": "google", "vertex-ai": "google",
@@ -115,7 +116,7 @@ func CanonicalProvider(raw string) string {
 
 // modelPrefixStrip is the set of leading path segments in a model name that denote a
 // provider or router, not the model itself, and are stripped so a prefixed name
-// resolves to the same key as the bare name (R6). Kept in sync with providerCanon's
+// resolves to the same key as the bare name. Kept in sync with providerCanon's
 // intent; unlisted segments are preserved (they are part of the model).
 var modelPrefixStrip = map[string]bool{
 	"openrouter": true, "openai": true, "anthropic": true, "google": true,
@@ -130,7 +131,7 @@ var modelPrefixStrip = map[string]bool{
 
 // CanonicalModel strips provider/router prefix segments and lowercases, so
 // "openai/gpt-4o", "openrouter/openai/gpt-4o", and "gpt-4o" all resolve to "gpt-4o".
-// Byte-identical at load and lookup (R6). A model name whose leading segment is not a
+// Byte-identical at load and lookup. A model name whose leading segment is not a
 // known prefix is preserved verbatim (it is part of the model).
 func CanonicalModel(raw string) string {
 	m := strings.ToLower(strings.TrimSpace(raw))

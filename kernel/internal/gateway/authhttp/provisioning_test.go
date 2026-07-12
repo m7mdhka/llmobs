@@ -16,7 +16,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage/postgres"
 )
 
-// Arc O / O3 — the exhaustive provisioning escalation matrix at the HTTP boundary, on the
+// The exhaustive provisioning escalation matrix at the HTTP boundary, on the
 // real schema. It proves, per sibling: no principal assigns/affects a role at or above their
 // own; no sibling is reachable without the shared members:manage gate; the gate is resolved
 // against the TARGET org (cross-org is blocked); the SERVER session governs (never the body);

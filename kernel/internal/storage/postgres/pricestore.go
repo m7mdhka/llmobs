@@ -17,12 +17,13 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/pricing"
 )
 
-// PriceStore is the append-only, versioned price table (ADR-0029). An edit to a
+// PriceStore is the append-only, versioned price table. An edit to a
 // (provider, model) price INSERTs a new version; prior versions are never mutated, so a
 // derived cost's pricing_snapshot_ref stays resolvable and re-pricing is deterministic.
 // Provider/model are always stored CANONICAL (internal/pricing.Canonical*), applied here
-// at the write seam so a lookup with the same normalizer always hits (R6). Prices are
-// instance-global; the only tenant-scoped surface is the per-project discount.
+// at the write seam; the SAME canonicalizer runs at both write and lookup, so a lookup
+// with the same normalizer always hits. Prices are instance-global; the only
+// tenant-scoped surface is the per-project discount.
 type PriceStore struct {
 	pool *pgxpool.Pool
 }
@@ -32,31 +33,32 @@ func NewPriceStore(pool *pgxpool.Pool) *PriceStore { return &PriceStore{pool: po
 // Resolve returns the price entry that applies to a span of (rawProvider, rawModel) at
 // time `at`: the newest version whose effective_from <= at, after canonicalizing the
 // inputs with the SAME normalizer used at write. Returns (nil, nil) when no entry
-// matches — the caller leaves cost null (§4 step 3), never fabricates a zero.
+// matches — the caller leaves cost null, never fabricates a zero.
 func (s *PriceStore) Resolve(ctx context.Context, rawProvider, rawModel string, at time.Time) (*pricing.Entry, error) {
 	prov := pricing.CanonicalProvider(rawProvider)
 	model := pricing.CanonicalModel(rawModel)
-	// 1) The exact model (+ dot/dash fallback, #106).
+	// 1) The exact model (+ dot/dash-insensitive fallback).
 	if e, err := s.resolveModel(ctx, prov, model, at); e != nil || err != nil {
 		return e, err
 	}
-	// 2) DATE-SUFFIX fallback (#102) — ONLY when the model (with its date) missed. Providers
+	// 2) DATE-SUFFIX fallback — ONLY when the model (with its date) missed. Providers
 	//    publish dated snapshots ("gpt-4o-2024-05-13", "claude-3-5-sonnet-20241022",
 	//    "gpt-4-0613") whose price table often carries just the base model; the dated variant
 	//    would otherwise silently derive NO cost. Strip a trailing date suffix and re-resolve the
 	//    base (which itself gets the dot/dash fallback). Conservative: only an ISO date, a
 	//    compact YYYYMMDD, or a VALID MMDD snapshot is treated as a date — a trailing 4-digit run
 	//    that isn't a real month/day (e.g. "-1234") is left intact, so a genuine model segment is
-	//    never mistaken for a date. Stored keys are untouched (R6 primary path unchanged).
+	//    never mistaken for a date. Stored keys are untouched (the exact-match primary path
+	//    is unchanged).
 	if base, ok := stripDateSuffix(model); ok {
 		return s.resolveModel(ctx, prov, base, at)
 	}
 	return nil, nil
 }
 
-// resolveModel resolves a canonical model with the EXACT match first (R6 primary-key path),
-// then the dot/dash-insensitive fallback (#106). Shared by Resolve's exact and date-stripped
-// attempts.
+// resolveModel resolves a canonical model with the EXACT match first (the primary-key
+// path), then the dot/dash-insensitive fallback. Shared by Resolve's exact and
+// date-stripped attempts.
 func (s *PriceStore) resolveModel(ctx context.Context, prov, model string, at time.Time) (*pricing.Entry, error) {
 	e, err := s.resolveWhere(ctx,
 		`provider=$1 AND model=$2 AND effective_from <= $3`, prov, model, at.UTC())

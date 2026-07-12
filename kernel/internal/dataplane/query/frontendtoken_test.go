@@ -14,7 +14,7 @@ import (
 )
 
 // frontendReq crafts a browser→kernel request carrying ONLY a plugin frontend
-// token (the J1 credential) — no service token, no session cookie. The token is a
+// token — no service token, no session cookie. The token is a
 // kernel-minted identity assertion whose scopes were already intersected at mint
 // (plugin-grant ∩ user-session), which is exactly what frontendtoken.Handler emits.
 func frontendReq(t *testing.T, signer *plugintoken.Signer, pluginID string, scopes []string, projectID string, age, ttl time.Duration) *http.Request {
@@ -28,7 +28,7 @@ func frontendReq(t *testing.T, signer *plugintoken.Signer, pluginID string, scop
 	return r
 }
 
-// TestFrontendTokenLeastPrivilege proves the POSITIVE half of the J1 ruling: for a
+// TestFrontendTokenLeastPrivilege proves the POSITIVE half of the frontend-token contract: for a
 // cooperating SDK-using frontend, the frontend token delivers least-privilege — the
 // token's scopes (already plugin ∩ user ∩ project) are the ceiling, over-reach is
 // denied, and the token cannot pick another tenant or survive forgery/expiry.
@@ -110,7 +110,7 @@ func TestFrontendTokenLeastPrivilege(t *testing.T) {
 }
 
 // TestProxyAssertionCannotBeReplayedAsFrontendToken is the regression for the
-// token-class-confusion escalation the J1 security review caught: the gateway proxy
+// token-class-confusion escalation the security review caught: the gateway proxy
 // (and the jobs runner) mint an identity assertion of the SAME claim shape but with
 // UN-INTERSECTED scopes (the user's full role scopes) — deliberately, because the
 // double-token intersection confines them later at authPlugin. A malicious BACKEND
@@ -146,24 +146,24 @@ func TestProxyAssertionCannotBeReplayedAsFrontendToken(t *testing.T) {
 	}
 }
 
-// TestFrontendTokenIsNotABoundary is the HONEST NEGATIVE the J1 ruling demands:
+// TestFrontendTokenIsNotABoundary is the HONEST NEGATIVE the frontend-token design demands:
 // the frontend token is least-privilege-BY-DEFAULT, NOT a containment boundary. A
-// plugin frontend runs in the shell's origin + JS realm (ADR-0004), so it can DROP
+// plugin frontend runs in the shell's origin + JS realm, so it can DROP
 // the SDK's frontend token and call the Query API with the ambient session cookie
 // instead — Case 2 — and get the user's FULL session scope. This test proves the
 // limitation exists and is named, rather than hiding it.
 //
-// The real boundary for untrusted frontends is origin isolation (ADR-0004
-// amendment / tracking issue), built when the first untrusted third-party frontend
+// The real boundary for untrusted frontends is origin isolation, a deferred future
+// boundary built when the first untrusted third-party frontend
 // plugin is a real requirement. Until then: a frontend that needs HARD confinement
-// runs a backend (H3 truly confines backends).
+// runs a backend (only a backend, isolated in its own process, is truly confined).
 func TestFrontendTokenIsNotABoundary(t *testing.T) {
 	signer, err := plugintoken.NewSigner()
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &Server{signer: signer}
-	// O2: the session (Case 2) resolves its per-project-org role — here an admin → full
+	// The session (Case 2) resolves its per-project-org role — here an admin → full
 	// scopes. Injected (no DB in this unit test).
 	s.SetRoleResolver(func(_ context.Context, _, _ string) (string, error) { return "admin", nil })
 
@@ -188,5 +188,5 @@ func TestFrontendTokenIsNotABoundary(t *testing.T) {
 		t.Fatal("bypass must yield the user's FULL scopes — that is precisely why the frontend token is not a boundary")
 	}
 	// Documented, proven, named: confinement of a hostile frontend requires origin
-	// isolation, not this token. See ADR-0004 amendment + ADR-0023 J1 section.
+	// isolation, not this token.
 }

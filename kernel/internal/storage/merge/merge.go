@@ -1,14 +1,15 @@
 // Package postgres implements the lite-profile storage adapter.
 //
-// This file is the real implementation of the canonical merge algorithm
-// (api/model/v1alpha1/05-update-semantics.md), written from the spec. The lite
-// adapter applies it as merge-on-write under a row lock (LM-5); the same fold is
+// This file is the real implementation of the canonical merge algorithm: the
+// fold that turns a set of ingested events into one observable entity state. The
+// lite adapter applies it as merge-on-write under a row lock; the same fold is
 // the conformance target the ClickHouse adapter must also satisfy.
 //
 // Merge is per-field-group: each field-group carries its own (event_ts, event_id)
-// provenance, so out-of-order updates fold correctly (spec V3) — not a single
-// row-level stamp. The stored provenance lets a read-modify-write reproduce the
-// full ordered Fold from the persisted state + one new event (issue #17 closed).
+// provenance, so out-of-order updates fold correctly (an event with an older
+// stamp loses per field-group) — not a single row-level stamp. The stored
+// provenance lets a read-modify-write reproduce the full ordered Fold from the
+// persisted state + one new event.
 package merge
 
 import (
@@ -30,17 +31,19 @@ const (
 	OpDelete = storage.OpDelete
 )
 
-// Event is one ingested event targeting a single entity (05 §1).
+// Event is one ingested event targeting a single entity.
 type Event = storage.Event
 
-// frozenFields per entity type (05 §5).
+// frozenFields per entity type: fields set once by the earliest (event_ts,
+// event_id) event and never overwritten; a later differing value is absorbed as
+// a data-quality conflict rather than applied.
 var frozenFields = map[string]map[string]bool{
 	"span":  {"id": true, "project_id": true, "trace_id": true, "kind": true, "start_time": true, "environment": true},
 	"trace": {"id": true, "project_id": true, "start_time": true, "environment": true},
 	"score": {"id": true, "project_id": true, "subject_type": true, "subject_id": true, "timestamp": true, "environment": true},
 }
 
-// mapFields are deep-merged per leaf key (05 §2); everything else is a scalar
+// mapFields are deep-merged per leaf key; everything else is a scalar
 // field-group replaced wholesale, latest-wins.
 var mapFields = map[string]bool{
 	"attributes": true, "metadata": true, "model_parameters": true,
@@ -58,7 +61,8 @@ const isDeletedKey = "is_deleted"
 // provenance column persists (NUL raises SQLSTATE 22P05).
 const pathSep = "\x01"
 
-// isSet reports whether a value "sets" its field-group (05 §2.1): not-set when
+// isSet reports whether a value "sets" its field-group (empty never clobbers):
+// not-set when
 // nil, "", empty array, or a composite whose leaves are all unset (recursively).
 func isSet(v any) bool {
 	switch t := v.(type) {
@@ -80,7 +84,7 @@ func isSet(v any) bool {
 	}
 }
 
-// orderKey compares two events by (event_ts, event_id) lexicographically (05 §2).
+// orderKey compares two events by (event_ts, event_id) lexicographically.
 type orderKey struct {
 	ts  time.Time
 	eid string
@@ -260,7 +264,7 @@ func (f *folder) provenance() Provenance {
 	return p
 }
 
-// Fold computes the observable entity state from a set of events, per 05 §2–§5.
+// Fold computes the observable entity state from a set of events.
 // entityType selects the frozen-field set. Order-independent and idempotent.
 func Fold(entityType string, events []Event) map[string]any {
 	f := newFolder(entityType)

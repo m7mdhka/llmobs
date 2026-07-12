@@ -1,19 +1,21 @@
 // Package backfill copies settled lite (Postgres) rows into the scale (ClickHouse)
 // adapter in the background. It is a CONVENIENCE, not a correctness requirement: the
-// permanent dual-read layer (ADR-0026 RULING-MIG6) already makes historical lite data
-// readable through the unified Query API, so a store that is 0%, 50%, or 100%
+// permanent dual-read layer already makes historical lite data readable through the
+// unified Query API, so a store that is 0%, 50%, or 100%
 // backfilled is equally correct to a reader. Backfill just moves cold data onto the
 // scale engine over time.
 //
-// Design constraints (each maps to a real migration scar):
+// Design constraints (each maps to a real migration failure mode seen in the wild):
 //   - Resumable via a (ts, project_id, id) TOTAL-ordered cursor persisted after every
-//     batch. Strict tuple advance means same-timestamp rows never loop (#7117).
+//     batch. Strict tuple advance means a cluster of same-timestamp rows never loops
+//     forever re-reading its own timestamp.
 //   - A SEPARATE, generous execution budget — NOT the interactive read timeout. A
 //     short query timeout is exactly what broke v4's own backfill mid-run.
 //   - Bounded chunks, per-batch retry with backoff, visible progress.
 //   - Fail loud, never silent-hang: a persistent lite-read failure stops the run with
 //     an error; a per-row deterministic failure dead-letters (recorded, auditable) so
-//     the run still makes progress (failure taxonomy, CLAUDE.md #12).
+//     the run still makes progress (the permanent-vs-transient failure taxonomy:
+//     permanent failures dead-letter, transient failures retry and are never dropped).
 //   - Decoupled from boot readiness: the runner is a background task; /readyz never
 //     waits on it, and a partial backfill is fully correct via dual-read.
 package backfill
@@ -177,7 +179,7 @@ func (r *Runner) migrateKind(ctx context.Context, kind string) (kindStats, bool,
 					r.log.Info("backfill paused on budget during persist (resumable)", "kind", kind, "migrated", stats.migrated)
 					return stats, false, nil
 				}
-				// The failure taxonomy (CLAUDE.md #12), classified at the persist error:
+				// The permanent-vs-transient failure taxonomy, classified at the persist error:
 				//   - TRANSIENT (backend down/unreachable/timeout, survived retries): STOP
 				//     the run LOUD and resumable — never dead-letter, so an outage can't be
 				//     converted into dropped rows. The cursor is unchanged; a later run

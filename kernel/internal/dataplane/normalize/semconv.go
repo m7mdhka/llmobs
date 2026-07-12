@@ -9,7 +9,7 @@ import (
 )
 
 // SemConv maps official OpenTelemetry GenAI semantic conventions onto the
-// canonical model (validation worksheet in api/model/v1alpha1/validation/otel-genai.md).
+// canonical model.
 type SemConv struct{}
 
 func (s *SemConv) Name() string { return "otel-genai" }
@@ -29,12 +29,12 @@ var consumedKeys = map[string]bool{
 }
 
 // usageAliases maps the de-facto OTel GenAI usage attribute keys onto the
-// well-known canonical token buckets (06-usage-cost.md §3.1). First present alias
-// per bucket wins. These are PURE ALIASES only (F3) — a rename, never a
+// well-known canonical token buckets. First present alias
+// per bucket wins. These are PURE ALIASES only — a rename, never a
 // reinterpretation: cache_read/cache_write/reasoning are stored verbatim as
 // additive detail keys and are NEVER subtracted from input. Emitters spell the
 // cache/reasoning keys several ways (Anthropic-style, OTel-nested, the
-// #14902 input_cached alias), so the common spellings are covered here to avoid
+// input_cached alias), so the common spellings are covered here to avoid
 // silently dropping the bucket into the raw bag.
 var usageAliases = []struct{ attr, bucket string }{
 	{"gen_ai.usage.input_tokens", "input"},
@@ -48,7 +48,7 @@ var usageAliases = []struct{ attr, bucket string }{
 	// (input_tokens_details.cached_tokens). Without these, a prompt-cached OpenAI span
 	// leaves its cached tokens in the raw bag → never reduced from `input` and never priced
 	// at the cheaper cache rate → billed at the FULL input text rate (a silent overcharge).
-	// Symmetric with the audio nested spellings below (#146, same class as #79).
+	// Symmetric with the audio nested spellings below.
 	{"gen_ai.usage.prompt_tokens_details.cached_tokens", "cache_read"},
 	{"gen_ai.usage.input_tokens_details.cached_tokens", "cache_read"},
 	{"gen_ai.usage.cache_creation_input_tokens", "cache_write"},
@@ -56,11 +56,11 @@ var usageAliases = []struct{ attr, bucket string }{
 	{"gen_ai.usage.cache_creation.input_tokens", "cache_write"},
 	{"gen_ai.usage.reasoning_tokens", "reasoning"},
 	{"gen_ai.usage.output_reasoning_tokens", "reasoning"},
-	// Audio tokens (#79, 06-usage-cost.md §3.1). Multimodal/audio models report audio
+	// Audio tokens. Multimodal/audio models report audio
 	// input/output token counts SEPARATELY from text and price them at a different
 	// (often much higher) rate. Mapped to dedicated buckets so cost derivation can price
 	// them at the audio rate, not the text rate (a bucket folded into input would bill
-	// at the text rate — the Opik #7137/#7253 bug). Pure aliases (F3); the price entry
+	// at the text rate — an overcharge). Pure aliases; the price entry
 	// declares audio_input reduces input / audio_output reduces output.
 	{"gen_ai.usage.input_audio_tokens", "audio_input"},
 	{"gen_ai.usage.input_tokens_details.audio_tokens", "audio_input"},
@@ -142,7 +142,7 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 	// opaque input/output. I/O may arrive on span ATTRIBUTES (classic) or, on OTel
 	// GenAI semconv v1.37+ emitters, on a span EVENT (e.g. the
 	// gen_ai.client.inference.operation.details event) — scan attributes first, then
-	// fall back to events so modern emitters don't yield null I/O (#14930). Stored
+	// fall back to events so modern emitters don't yield null I/O. Stored
 	// opaque: whatever string the messages carry (incl. the `parts:[…]` shape).
 	if v := getStr(in.Attributes, "gen_ai.input.messages"); v != "" {
 		out["input"] = v
@@ -171,26 +171,26 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 			out["model_parameters"] = params
 		}
 		// Aggregate spans (invoke_agent/create_agent/execute_tool) frequently carry the
-		// SUM of their child model-call usage/cost (the Vercel AI SDK / LangGraph pattern,
-		// #81). Extracting it here would double-count against the child leaf that also
-		// carries it, inflating every per-trace and per-project total (§7.1, dual-incumbent
-		// Langfuse #14808 + Opik #4695). So usage/cost are extracted ONLY for usage-bearing
+		// SUM of their child model-call usage/cost (the Vercel AI SDK / LangGraph pattern).
+		// Extracting it here would double-count against the child leaf that also
+		// carries it, inflating every per-trace and per-project total. So usage/cost are
+		// extracted ONLY for usage-bearing
 		// model calls, never aggregate spans — the model/provider are still promoted
-		// (informational); with no usage, derivation produces no cost (§7.3/R4), leaving the
-		// cost to the child leaf. This is the ingest half of the no-double-count rule (R5);
-		// trace-level aggregation is the query-time half (M3).
+		// (informational); with no usage, derivation produces no cost, leaving the
+		// cost to the child leaf. This is the ingest half of the no-double-count rule;
+		// trace-level aggregation is the query-time half.
 		if !isAggregateUsageSpan(op) {
 			if usage, mismatch := providedUsage(in.Attributes); len(usage) > 0 {
 				out["provided_usage_details"] = usage
 				if mismatch {
-					// Advisory (#14875): provided value buckets sum past the provided total.
+					// Advisory: provided value buckets sum past the provided total.
 					attrs["llmobs.dq.usage_total_mismatch"] = true
 				}
 			}
-			// Provided cost (LM-4 provided-wins): when the client sends cost, preserve
+			// Provided cost (provided-wins): when the client sends cost, preserve
 			// it verbatim as provided_cost_details, stamp cost_source=provided, and
 			// populate the promoted total_cost so dashboards work unchanged even before
-			// kernel derivation exists (#13). This is Dmitri's GPU-seconds path.
+			// kernel derivation exists. This is the GPU-seconds path.
 			if cost := providedCost(in.Attributes); len(cost) > 0 {
 				out["provided_cost_details"] = cost
 				out["cost_source"] = "provided"
@@ -199,8 +199,8 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 				}
 			}
 		}
-		// completion_start_time — time to first token (02-span.md §5), when the
-		// source provides it. Enables the DSL `ttft` computed field (§4.2).
+		// completion_start_time — time to first token, when the
+		// source provides it. Enables the DSL `ttft` computed field.
 		if cst, present := firstAttr(in, "gen_ai.response.completion_start_time"); present {
 			out["completion_start_time"] = cst
 		}
@@ -225,7 +225,7 @@ func (s *SemConv) Map(in SpanInput, ctx Context) map[string]any {
 
 // isAggregateUsageSpan reports whether an operation type denotes an aggregate span
 // (an agent/tool step) that may carry usage duplicating its child model calls, so its
-// usage/cost MUST NOT be extracted (#81, §7.1). Only usage-bearing model-call ops (chat,
+// usage/cost MUST NOT be extracted. Only usage-bearing model-call ops (chat,
 // generate_content, …) and unknown/untyped spans have their usage read.
 func isAggregateUsageSpan(op string) bool {
 	switch strings.ToLower(strings.TrimSpace(op)) {
@@ -272,16 +272,16 @@ func requestParams(a map[string]any) map[string]any {
 	for _, k := range requestParamKeys {
 		if v, ok := a[k]; ok && v != nil {
 			name := strings.TrimPrefix(k, "gen_ai.request.")
-			out[name] = fmt.Sprint(v) // verbatim string (F2)
+			out[name] = fmt.Sprint(v) // verbatim string
 		}
 	}
 	return out
 }
 
 // providedUsage maps the provider's token counts verbatim into the well-known
-// canonical buckets (F3: no reinterpretation, cache never subtracted from input).
+// canonical buckets (no reinterpretation, cache never subtracted from input).
 // It returns the map and whether the provided total is inconsistent with the value
-// buckets (the advisory #14875 signal — the caller stamps the dq attribute).
+// buckets (an advisory signal — the caller stamps the dq attribute).
 func providedUsage(a map[string]any) (usage map[string]any, totalMismatch bool) {
 	out := map[string]any{}
 	providerTotal := false
@@ -303,7 +303,7 @@ func providedUsage(a map[string]any) (usage map[string]any, totalMismatch bool) 
 		// Synthesize total from the two PRIMARY buckets only. cache_read/cache_write
 		// (a detail of input) and reasoning (a detail of output) are NOT summed in —
 		// adding them would double-count when the provider's input/output already
-		// include them (F3: we cannot assume otherwise). Matches read-time reduction (§6).
+		// include them (we cannot assume otherwise). Matches read-time reduction.
 		if in, iok := out["input"].(int64); iok {
 			if o, ook := out["output"].(int64); ook {
 				out["total"] = in + o
@@ -316,12 +316,12 @@ func providedUsage(a map[string]any) (usage map[string]any, totalMismatch bool) 
 }
 
 // usageBucketsExceedTotal reports whether the sum of the non-total value buckets
-// exceeds the provided total beyond a tolerance of max(1, total*1%) — the #14875
+// exceeds the provided total beyond a tolerance of max(1, total*1%) — the
 // double-count-suspect heuristic (e.g. an inclusive `input` reported alongside a
 // separate cache bucket, with `total` the smaller real figure). ADVISORY ONLY: the
 // values are still stored verbatim; this only raises a dq flag for a consumer to
 // weigh, and may false-positive on a provider whose `input` is genuinely inclusive
-// of cache (F3 forbids us assuming either way).
+// of cache (we cannot assume either way).
 func usageBucketsExceedTotal(u map[string]any) bool {
 	total, ok := u["total"].(int64)
 	if !ok {
@@ -356,10 +356,10 @@ func eventStr(events []SpanEventInput, key string) string {
 	return ""
 }
 
-// providedCost maps client-sent cost into provided_cost_details (LM-4). Amounts are
+// providedCost maps client-sent cost into provided_cost_details. Amounts are
 // decimals; total is summed from input+output when not sent explicitly. Values are
 // sanitized to FINITE, NON-NEGATIVE numbers: a client's provided cost short-circuits
-// derivation (R1) and is stored verbatim, so a NaN/Inf/negative would land in
+// derivation and is stored verbatim, so a NaN/Inf/negative would land in
 // total_cost and poison every SUM(total_cost) aggregate across the project (NaN is
 // contagious; Inf can break the Decimal64(12) write). A bad cost value is dropped
 // (bad data never corrupts a valid path), not stored.
@@ -443,7 +443,7 @@ func toInt(v any) (int64, bool) {
 		return int64(t), true
 	case string:
 		// Some exporters emit usage counts as an OTLP StringValue ("150") rather than an
-		// IntValue (#130). Parse a plain integer, or a float-shaped string ("150.0") which we
+		// IntValue. Parse a plain integer, or a float-shaped string ("150.0") which we
 		// truncate to a count. A non-numeric string is not a count → (0, false), NOT a silent
 		// zero — the caller then treats the bucket as absent, exactly as before.
 		s := strings.TrimSpace(t)
@@ -468,7 +468,7 @@ func toFloat(v any) (float64, bool) {
 	case int:
 		return float64(t), true
 	case string:
-		// String-typed numeric (OTLP StringValue), same rationale as toInt (#130).
+		// String-typed numeric (OTLP StringValue), same rationale as toInt.
 		if f, err := strconv.ParseFloat(strings.TrimSpace(t), 64); err == nil {
 			return f, true
 		}

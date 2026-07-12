@@ -91,7 +91,7 @@ CREATE TABLE b (y String) ENGINE = MergeTree() ORDER BY y;
 	}
 }
 
-// TestMigrationFilesHygiene enforces the R-CH1/R-CH2 scars structurally: the
+// TestMigrationFilesHygiene enforces the migration DDL hygiene rules structurally: the
 // migration SQL must never carry a literal cluster name, never CREATE OR REPLACE
 // a view (NFS/EFS-unsafe), and every CREATE must be IF NOT EXISTS (idempotent).
 func TestMigrationFilesHygiene(t *testing.T) {
@@ -123,15 +123,15 @@ func TestMigrationFilesHygiene(t *testing.T) {
 		sql := code.String()
 		lower := strings.ToLower(sql)
 
-		// R-CH1: cluster name is templated, never a literal ON CLUSTER <name>.
+		// Cluster name is templated, never a literal ON CLUSTER <name>.
 		if strings.Contains(lower, "on cluster") {
 			t.Errorf("%s: literal ON CLUSTER found — cluster must be the {{on_cluster}} placeholder (R-CH1)", e.Name())
 		}
-		// R-CH2: no CREATE OR REPLACE VIEW (not atomic on NFS/EFS).
+		// No CREATE OR REPLACE VIEW (not atomic on NFS/EFS).
 		if strings.Contains(lower, "create or replace") {
 			t.Errorf("%s: CREATE OR REPLACE is NFS/EFS-unsafe — use DROP + CREATE (R-CH2)", e.Name())
 		}
-		// R-CH2: every CREATE TABLE/VIEW is IF NOT EXISTS (idempotent re-apply).
+		// Every CREATE TABLE/VIEW is IF NOT EXISTS (idempotent re-apply).
 		for _, line := range strings.Split(lower, "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "create table") || strings.HasPrefix(line, "create view") {

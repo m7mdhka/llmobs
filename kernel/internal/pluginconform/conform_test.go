@@ -59,7 +59,7 @@ func TestFirstPartyPluginsConform(t *testing.T) {
 			if m == nil {
 				t.Fatalf("%s: manifest did not parse", name)
 			}
-			// If the plugin declares a settings schema (J2), it must be within the
+			// If the plugin declares a settings schema, it must be within the
 			// supported subset — load it relative to the manifest and check.
 			if m.Spec.SettingsSchema != "" {
 				schemaPath := filepath.Join(filepath.Dir(path), filepath.Clean("/"+m.Spec.SettingsSchema))
@@ -78,7 +78,7 @@ func TestFirstPartyPluginsConform(t *testing.T) {
 }
 
 // TestSettingsSchemaConformance: a schema within the supported subset passes; one
-// using an unsupported field type fails the subset check (J2).
+// using an unsupported field type fails the subset check.
 func TestSettingsSchemaConformance(t *testing.T) {
 	good := []byte(`{"type":"object","required":["k"],"properties":{"k":{"type":"string","writeOnly":true},"n":{"type":"integer","minimum":1}}}`)
 	if rep := CheckSettingsSchema(good, false); !rep.OK() {

@@ -1,5 +1,5 @@
-// Package reprice re-derives span cost across history against the current price table
-// (Arc M / M4, 06-usage-cost.md §5). It is the payoff of M1's APPEND-ONLY versioned
+// Package reprice re-derives span cost across history against the current price table.
+// It is the payoff of the APPEND-ONLY versioned
 // price store: because every derived cost recorded the exact price version it used
 // (pricing_snapshot_ref.id), re-pricing is DETERMINISTIC — the job finds the spans
 // priced against a superseded version (or, for a discount change, a project's derived
@@ -8,13 +8,13 @@
 // chain stays re-derivable. (Langfuse structurally cannot do this — its prices mutate in
 // place, so a re-price is best-effort against whatever the price row happens to be now.)
 //
-// It reuses the L5 backfill discipline exactly, because it MUTATES money across a time
-// range:
+// It reuses the lite→scale backfill discipline exactly, because it MUTATES money across a
+// time range:
 //   - Bounded chunks; a (ts, project_id, id) TOTAL-ordered resumable cursor persisted
-//     after every batch (same-timestamp spans never loop, #7117).
+//     after every batch (same-timestamp spans never loop).
 //   - A SEPARATE, generous execution budget — NOT the interactive read timeout (a short
-//     timeout is exactly what broke v4's own backfill mid-run).
-//   - Failure taxonomy (CLAUDE.md #12): a TRANSIENT failure (price-store or persist blip)
+//     timeout is exactly what breaks a backfill mid-run).
+//   - Failure taxonomy: a TRANSIENT failure (price-store or persist blip)
 //     STOPS the run loud and resumable — it is NEVER converted into a per-span null,
 //     because here nulling would DROP an existing cost (the ingest enrich stage nulls on
 //     the same blip only because at ingest there is no cost yet to lose). A DETERMINISTIC
@@ -408,7 +408,7 @@ func costDetailKeys(v any) map[string]struct{} {
 
 // isTransient classifies a persist error (past its retries) as a transient backend
 // problem (→ stop loud, resumable) vs a deterministic rejection (→ dead-letter). Mirrors
-// the L5 backfill classifier: recognizes network/timeout/availability signals; anything
+// the lite→scale backfill classifier: recognizes network/timeout/availability signals; anything
 // else is deterministic. A mis-scoped deterministic error only ever stops the run LOUDLY
 // (visible, never silent), so the conservative default favors liveness without data loss.
 func isTransient(err error) bool {

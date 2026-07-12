@@ -7,7 +7,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
-// QueryAggregation runs a compiled aggregation (QD-4) for one target and returns
+// QueryAggregation runs a compiled aggregation for one target and returns
 // group rows as maps (column name -> value). The compiler supplies the SELECT
 // (group + agg expressions), WHERE, and GROUP BY; the adapter supplies the FROM
 // source per target — the base table for spans/scores, the synthesized projection
@@ -16,7 +16,7 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	var sql string
 	switch target {
 	case "spans":
-		// #77: the aggregation spans target is a spans read too — it must carry the
+		// The aggregation spans target is a spans read too — it must carry the
 		// suppression exclusion, or a resurrected erased span would still be counted/
 		// summed/grouped (an aggregate-level erasure leak).
 		sql = "SELECT " + sel + " FROM spans WHERE is_deleted = false" + spansSuppressionExclusion
@@ -39,8 +39,8 @@ func (s *Store) QueryAggregation(ctx context.Context, target, sel, where, groupB
 	if groupBy != "" {
 		sql += " GROUP BY " + groupBy
 	}
-	// Over-fetch ONE past the cap so the caller can DETECT truncation and flag it loudly
-	// (#108), rather than silently returning a truncated (wrong) aggregate.
+	// Over-fetch ONE past the cap so the caller can DETECT truncation and flag it loudly,
+	// rather than silently returning a truncated (wrong) aggregate.
 	sql += " LIMIT " + storage.AggOverfetchLimitSQL()
 
 	rows, done, err := s.queryRead(ctx, sql, args...)

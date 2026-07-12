@@ -13,7 +13,7 @@ import (
 
 // grpcTraceService implements the OTLP/gRPC TracesService. Like the HTTP hot
 // path it does no DB work: it marshals the request to proto bytes and enqueues
-// a job, so ack latency stays off the database (D13). Content-type is fixed to
+// a job, so ack latency stays off the database. Content-type is fixed to
 // protobuf — the worker's decode path is transport-agnostic.
 type grpcTraceService struct {
 	ptraceotlp.UnimplementedGRPCServer

@@ -118,7 +118,7 @@ func TestKVRoundTrip(t *testing.T) {
 	}
 }
 
-// TestKVIsolation is the H4 proof: a plugin cannot read another plugin's kv, and
+// TestKVIsolation proves: a plugin cannot read another plugin's kv, and
 // a project cannot read another project's kv — even with valid tokens.
 func TestKVIsolation(t *testing.T) {
 	h, signer := setup(t)
@@ -159,7 +159,7 @@ func tokensSub(t *testing.T, signer *plugintoken.Signer, pluginID, projectID, su
 	return svc, asr
 }
 
-// TestKVUserScopeIsolation is the O6 prove-the-negative: within the SAME plugin+project, one
+// TestKVUserScopeIsolation is the prove-the-negative: within the SAME plugin+project, one
 // user's per-user (scope="user") state is invisible and unwritable to another user — because
 // the store keys on the caller's VERIFIED subject, never a client-supplied field. Project scope
 // stays shared. A user-less credential cannot use per-user scope.

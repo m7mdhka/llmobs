@@ -1,4 +1,4 @@
-// Package pipeline is the D10 ingestion middleware chain as a real ordered
+// Package pipeline is the ingestion middleware chain as a real ordered
 // composition with per-stage interfaces:
 //
 //	authenticate -> decode -> normalize -> redact -> sample -> enrich -> persist -> publish
@@ -36,7 +36,7 @@ type Ingestion struct {
 	// Source, when set, is stamped onto every canonical span as llmobs.source by
 	// the normalize stage. The kernel sets it for plugin ingest ("plugin:{id}") so
 	// a plugin cannot forge a different source — the body's own source is
-	// overwritten (H7). Empty for OTLP (unstamped).
+	// overwritten. Empty for OTLP (unstamped).
 	Source string
 
 	// derived
@@ -64,15 +64,15 @@ type Config struct {
 	SkewThreshold time.Duration
 	// Metrics is the shared registry; nil disables instrumentation.
 	Metrics *metrics.Registry
-	// Signal is the shared persist-health gate (G2); nil disables health-driven
+	// Signal is the shared persist-health gate; nil disables health-driven
 	// readiness + backpressure (the persist stage still runs).
 	Signal *ingesthealth.Signal
-	// Prices resolves the price table for the enrich stage's cost derivation (M2). Nil
+	// Prices resolves the price table for the enrich stage's cost derivation. Nil
 	// makes enrich a no-op pass-through (cost simply absent, never wrong).
 	Prices PriceResolver
 	// Logger for fail-soft stage diagnostics (enrich price-lookup failures); nil = quiet.
 	Logger *slog.Logger
-	// RedactPresets/RedactCustom configure built-in payload redaction (#11). Empty
+	// RedactPresets/RedactCustom configure built-in payload redaction. Empty
 	// presets + no custom rules disables it. This is a global default today; the
 	// redact stage is structured for per-project resolution (the seam is present,
 	// the per-project config STORE is the noted follow-up).
@@ -109,7 +109,7 @@ func New(pool *pgxpool.Pool, store storage.TelemetryStore, reg *normalize.Regist
 			&normalizeStage{reg: reg, skewThreshold: cfg.SkewThreshold},
 			&redactStage{resolve: resolve},
 			&sampleStage{},                                    // no-op (issue: kernel-ingestion sampling)
-			&enrichStage{prices: cfg.Prices, log: cfg.Logger}, // cost derivation (M2, §3.2/§4/§7)
+			&enrichStage{prices: cfg.Prices, log: cfg.Logger}, // cost derivation
 			&persistStage{store: store, metrics: cfg.Metrics, signal: cfg.Signal},
 			&publishStage{bus: bus}, // no-op in-proc bus (issue: Redis Streams bus)
 		},
@@ -123,7 +123,7 @@ func (p *Pipeline) Run(ctx context.Context, ing *Ingestion) error {
 }
 
 // RunPreauth runs the pipeline for an ALREADY-AUTHENTICATED ingestion — the plugin
-// ingest capability (H7). The caller sets ing.Identity (project from the double
+// ingest capability. The caller sets ing.Identity (project from the double
 // token) and ing.Source ("plugin:{id}", stamped by the kernel), and the
 // authenticate stage is skipped. Everything else — decode, normalize, redact,
 // sample, enrich, persist, publish — runs identically, so plugin-pushed spans go

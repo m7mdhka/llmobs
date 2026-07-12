@@ -9,7 +9,7 @@ import (
 const maxEnvironmentLen = 40
 
 // SanitizeAttributeKeys strips ASCII control characters (U+0000–U+001F, U+007F)
-// from attribute keys (02-span.md §6.3). It runs in the shared normalize stage so
+// from attribute keys. It runs in the shared normalize stage so
 // the rule is identical across transports. For each offending key the sanitized
 // key carries the value, the original is preserved under
 // `llmobs.raw.attr_key.<sanitized>`, and `llmobs.dq.sanitized_attribute_keys` is
@@ -42,7 +42,7 @@ func SanitizeAttributeKeys(attrs map[string]any) map[string]any {
 // like input/output/name). PostgreSQL cannot store a NUL in a text or JSONB column (error
 // 22P05), so a span carrying a NUL in ANY value fails the lite INSERT and is dropped — while
 // the identical span lands on ClickHouse (scale), a SILENT lite-vs-scale divergence and a lost
-// span (#127). Stripping in the ONE shared normalize stage keeps the span AND makes both
+// span. Stripping in the ONE shared normalize stage keeps the span AND makes both
 // profiles byte-identical. NUL is the ONLY character Postgres rejects; other control chars
 // (tab, newline) are storable and legitimate in opaque payloads, so they are left intact — we
 // don't corrupt data beyond the one character that cannot be stored at all. The count of
@@ -109,8 +109,8 @@ func stripControlChars(s string) string {
 	return b.String()
 }
 
-// SanitizeEnvironment is the single dimension-sanitization routine (LM-11,
-// 08-data-quality.md §2), used by every transport including compat plugins. It
+// SanitizeEnvironment is the single dimension-sanitization routine,
+// used by every transport including compat plugins. It
 // returns the sanitized value and whether it was coerced/changed (so the caller
 // can preserve the raw value and raise the data-quality signal). An empty result
 // coerces to "default".

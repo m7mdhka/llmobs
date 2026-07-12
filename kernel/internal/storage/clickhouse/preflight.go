@@ -16,7 +16,7 @@ type preflightConn interface {
 	Exec(ctx context.Context, query string, args ...any) error
 }
 
-// Preflight validates the migration/write grant set FUNCTIONALLY (R-CH8): rather
+// Preflight validates the migration/write grant set FUNCTIONALLY: rather
 // than parse ClickHouse's privilege hierarchy out of SHOW GRANTS (CREATE implies
 // CREATE TABLE, ALL implies everything — brittle to reproduce), it performs each
 // operation the adapter needs on a throwaway table and maps any access failure

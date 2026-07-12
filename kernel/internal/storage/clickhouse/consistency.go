@@ -3,7 +3,7 @@ package clickhouse
 import ch "github.com/ClickHouse/clickhouse-go/v2"
 
 // ApplyReadYourWrites adds the ClickHouse connection settings that give read-after-write
-// consistency ACROSS REPLICAS (#109), to the operator-supplied options:
+// consistency ACROSS REPLICAS, to the operator-supplied options:
 //
 //   - insert_quorum='auto' makes a write block until a MAJORITY of replicas have acked it.
 //   - select_sequential_consistency=1 makes reads return only quorum-committed rows.

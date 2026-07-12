@@ -42,7 +42,7 @@ func (s *authenticateStage) Process(ctx context.Context, ing *Ingestion) error {
 
 // ErrPermanent marks an ingest failure that is DETERMINISTIC — the same bytes will
 // always fail (a malformed body, an unsupported content-type). The durable ingest
-// spool (ADR-0027) may dead-letter such a record, because retrying or replaying it
+// spool may dead-letter such a record, because retrying or replaying it
 // can never succeed. Everything NOT wrapped with ErrPermanent is treated as
 // transient (a DB/infra failure): the spool must retry/replay it forever and never
 // advance its watermark, or it would drop durable data on a passing outage.
@@ -89,7 +89,7 @@ func (s *normalizeStage) Process(_ context.Context, ing *Ingestion) error {
 		canonical := s.reg.Normalize(in, ctx)
 		et := eventTS(in)
 		stampClockSkew(canonical, et, ing.ReceivedAt, s.skewThreshold)
-		stampSource(canonical, ing.Source) // kernel-authoritative source (plugin ingest, H7)
+		stampSource(canonical, ing.Source) // kernel-authoritative source (plugin ingest)
 		ing.Events = append(ing.Events, storage.Event{
 			Op:      storage.OpUpsert,
 			EventTS: et,
@@ -101,8 +101,9 @@ func (s *normalizeStage) Process(_ context.Context, ing *Ingestion) error {
 }
 
 // stampClockSkew records llmobs.dq.clock_skew when producer time (event_ts)
-// deviates from receive time beyond the threshold — the edge-fleet reality
-// (Story 30). Detection only: producer time still wins the merge (see ADR-0022).
+// deviates from receive time beyond the threshold — the edge-fleet reality.
+// Detection only: producer time still wins the merge (the merge is keyed and
+// versioned by producer time, so re-delivery is idempotent).
 func stampClockSkew(canonical map[string]any, eventTS, receivedAt time.Time, threshold time.Duration) {
 	if receivedAt.IsZero() || threshold <= 0 {
 		return
@@ -147,7 +148,7 @@ func eventTS(in normalize.SpanInput) time.Time {
 	return time.Unix(0, int64(n)).UTC()
 }
 
-// redact: scrub PII/secret patterns from payload fields BEFORE persist (#11).
+// redact: scrub PII/secret patterns from payload fields BEFORE persist.
 // Scope: input, output, and span-event attribute VALUES — never keys, never
 // promoted fields. Redaction is observable: llmobs.dq.redacted carries per-rule
 // counts. The redactor is resolved per event (today a global default; the
@@ -212,7 +213,7 @@ func redactEvent(r *redact.Redactor, payload map[string]any) {
 }
 
 // sample: no-op pass-through.
-// TODO(issue): per-project sampling; not built in B1.
+// TODO(issue): per-project sampling; not built yet.
 type sampleStage struct{}
 
 func (s *sampleStage) Name() string                                  { return "sample" }
@@ -220,7 +221,7 @@ func (s *sampleStage) Process(_ context.Context, _ *Ingestion) error { return ni
 
 // persist: merge-on-write each canonical span event under the row lock, and emit
 // the data-derived ingest metrics (per project; never per-span-id labels). Each
-// persist outcome is folded into the shared persist-health signal (G2) so a run
+// persist outcome is folded into the shared persist-health signal so a run
 // of storage failures flips /readyz not-ready and the receivers shed with a
 // retryable 503 instead of acking into a queue that cannot drain.
 type persistStage struct {
@@ -239,7 +240,7 @@ func (s *persistStage) Process(ctx context.Context, ing *Ingestion) error {
 	for _, ev := range ing.Events {
 		err := s.store.PersistSpan(ctx, ev)
 		if errors.Is(err, storage.ErrSuppressedByErasure) {
-			// Expected: a GDPR-erased key was re-delivered and refused (G3). Not a
+			// Expected: a GDPR-erased key was re-delivered and refused. Not a
 			// storage failure — count it and move on, never touching persist health.
 			if s.metrics != nil {
 				s.metrics.CounterAdd("llmobs_ingest_suppressed_by_erasure_total",

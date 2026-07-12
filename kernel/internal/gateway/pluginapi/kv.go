@@ -14,7 +14,7 @@ import (
 )
 
 // KVStore is the storage surface the kv endpoints need (interface-at-consumer). userID is the
-// per-user scope dimension (O6): "" = project scope (shared), a user identity = per-user scope.
+// per-user scope dimension: "" = project scope (shared), a user identity = per-user scope.
 type KVStore interface {
 	Get(ctx context.Context, pluginID, projectID, userID, key string) (json.RawMessage, bool, error)
 	Set(ctx context.Context, pluginID, projectID, userID, key string, value json.RawMessage) error
@@ -76,9 +76,9 @@ const reservedPrefix = "__"
 func reservedKey(key string) bool { return strings.HasPrefix(key, reservedPrefix) }
 
 // scopeUserID resolves the storage user-scope from the request's scope choice + the VERIFIED
-// caller identity (O6/O2 lesson: resolve against the acting user, never a client field). "" =
-// project scope. "user" keys on the caller's Subject (the O1-resolved email); a user-less
-// credential (empty Subject) cannot use per-user scope.
+// caller identity (resolve against the acting user, never a client field). "" = project scope.
+// "user" keys on the caller's Subject (the verified user email); a user-less credential (empty
+// Subject) cannot use per-user scope.
 func scopeUserID(c pluginauth.Caller, scope string) (userID string, ok bool) {
 	switch scope {
 	case "", "project":

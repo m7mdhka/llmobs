@@ -1,15 +1,15 @@
 // Package ingest hosts the OTLP receivers. The HTTP hot path is async-ack: it
 // authenticates nothing and writes nothing to the database — it reads the body,
 // enqueues it in-process, and returns, so ack latency has no synchronous DB
-// dependency (D13 ack budget). A worker pool drains the queue and runs the full
-// pipeline (authenticate -> ... -> persist).
+// dependency. A worker pool drains the queue and runs the full pipeline
+// (authenticate -> ... -> persist).
 //
 // Async-ack has one honest cost: a job that is acked but not yet persisted lives
 // only in the in-process queue. On shutdown we DRAIN that queue before exiting
-// (G1) so a rolling deploy does not silently shed already-acked spans; the only
+// so a rolling deploy does not silently shed already-acked spans; the only
 // residual loss window is a forced termination that outlives the drain deadline,
 // which is counted (not silent). Under persist failure or saturation the
-// receivers shed with a retryable 503/UNAVAILABLE (G2) rather than acking into a
+// receivers shed with a retryable 503/UNAVAILABLE rather than acking into a
 // queue that cannot drain.
 package ingest
 
@@ -35,8 +35,8 @@ import (
 const maxBodyBytes = 4 << 20 // 4 MiB request cap
 
 // highWaterFraction is the queue-occupancy threshold (of capacity) at which the
-// receivers start shedding new work with a retryable 503 instead of acking it
-// (G2). Set at 80%: it leaves headroom so requests already past the check don't
+// receivers start shedding new work with a retryable 503 instead of acking it.
+// Set at 80%: it leaves headroom so requests already past the check don't
 // hard-fail at the channel, and it gives clients an early, honest backpressure
 // signal well before the queue is truly full — turning "false 200 then silent
 // loss" into "503 then client retry into the idempotent merge".
@@ -78,7 +78,7 @@ type Receiver struct {
 // NewReceiver builds a receiver with an in-memory spool and worker pool (lite
 // default). Call SetSpool to swap in the durable WAL spool for the scale profile.
 // mreg may be nil (instrumentation disabled). The persist-health signal is attached
-// separately via SetPersistSignal so backpressure-on-health is opt-in (G2).
+// separately via SetPersistSignal so backpressure-on-health is opt-in.
 func NewReceiver(pipe Runner, log *slog.Logger, queueSize, workers int, mreg *metrics.Registry) *Receiver {
 	if queueSize <= 0 {
 		queueSize = 1024
@@ -99,12 +99,12 @@ func NewReceiver(pipe Runner, log *slog.Logger, queueSize, workers int, mreg *me
 	}
 }
 
-// SetSpool swaps the ack-window implementation (ADR-0027) — e.g. the durable WAL
+// SetSpool swaps the ack-window implementation — e.g. the durable WAL
 // spool in the scale profile. Must be called before Start.
 func (r *Receiver) SetSpool(s Spool) { r.spool = s }
 
 // SetPersistSignal attaches the persist-health gate used for readiness-consistent
-// backpressure (G2). When the signal reports unhealthy, the receivers shed new
+// backpressure. When the signal reports unhealthy, the receivers shed new
 // work with a retryable 503/UNAVAILABLE instead of acking it.
 func (r *Receiver) SetPersistSignal(sig *ingesthealth.Signal) { r.signal = sig }
 
@@ -113,7 +113,7 @@ func (r *Receiver) QueueLen() int { return r.spool.Len() }
 func (r *Receiver) QueueCap() int { return r.spool.Cap() }
 
 // highWater is the spool-occupancy threshold (of capacity) at which new work is
-// shed (G2), computed from the current spool capacity.
+// shed, computed from the current spool capacity.
 func (r *Receiver) highWater() int {
 	hw := int(float64(r.spool.Cap()) * highWaterFraction)
 	if hw < 1 {
@@ -186,7 +186,7 @@ func (r *Receiver) Handler() http.Handler {
 
 // decodeBody reads the request body, transparently decompressing `Content-Encoding: gzip`
 // (OTLP exporters — the OTel SDKs, the Collector's otlphttp exporter — commonly enable gzip;
-// without this a normal gzipped export fails to unmarshal, #78). Decompression is BOUNDED to
+// without this a normal gzipped export fails to unmarshal). Decompression is BOUNDED to
 // maxBodyBytes to defeat a gzip bomb: a tiny compressed body cannot expand into unbounded
 // memory — an over-cap decompressed stream is rejected (413), never buffered or partially
 // processed. Returns the body and http.StatusOK, or (nil, statusCode) on a read/decode error.
@@ -211,7 +211,7 @@ func decodeBody(req *http.Request) ([]byte, int) {
 		return body, http.StatusOK
 	}
 	// Non-gzip path: read one byte past the cap so an over-cap body is DETECTED and rejected
-	// (413), never silently truncated then acked 2xx (#97). Silent truncation is data loss
+	// (413), never silently truncated then acked 2xx. Silent truncation is data loss
 	// disguised as success — the client believes its whole batch landed. 413 is the honest
 	// signal to split the batch.
 	body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes+1))
@@ -298,14 +298,14 @@ func (r *Receiver) finalDrain() {
 }
 
 // handle runs one leased record through the pipeline and settles it on the spool.
-// The failure classification is load-bearing for durability (ADR-0027 D6):
+// The failure classification is load-bearing for durability:
 //   - success / erasure-suppressed (pipe.Run returns nil for both) → Commit.
 //   - a PERMANENT error (malformed body — pipeline.ErrPermanent) → dead-letter: it
 //     can never succeed, so drop it and advance past it.
 //   - any OTHER error is TRANSIENT (a DB/infra outage): NEVER drop and NEVER commit
 //     it — that would advance the watermark past durable data and vaporize it on the
 //     next truncate. Back off and requeue; the record stays durable and replays,
-//     and G2 sheds new ingest until persistence recovers.
+//     and backpressure sheds new ingest until persistence recovers.
 func (r *Receiver) handle(ctx context.Context, l leased) {
 	err := r.pipe.Run(ctx, ingestionOf(l.j))
 	if err == nil {

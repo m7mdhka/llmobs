@@ -15,7 +15,8 @@ import (
 // SpansForReprice returns up to limit DERIVED span docs (non-deleted, carrying a
 // pricing_snapshot_ref) matching the filter, whose (start_time, project_id, id) is
 // strictly greater than after, ascending, with the next cursor. The keyset is the same
-// TOTAL order the L5 backfill uses so a same-timestamp cluster never loops (#7117).
+// TOTAL order the lite→scale backfill uses so a same-timestamp cluster never loops
+// (a non-strict cursor that revisits it forever is the classic infinite-loop trap).
 // Spans already dead-lettered for this run are excluded, so a permanent per-span anomaly
 // is stepped over once and never re-fetched. The caller runs this on its OWN generous
 // budget, never the interactive statement timeout.
@@ -26,7 +27,8 @@ func (s *Store) SpansForReprice(ctx context.Context, runKey string, f storage.Re
 	}
 	// Bound params only — the filter values (a price-version id, a project id) are always
 	// bound, never concatenated. A derived span is exactly one carrying a non-empty
-	// pricing_snapshot_ref.id; a provided-cost span (R1) has a null ref and is never
+	// pricing_snapshot_ref.id; a provided-cost span (cost supplied on the wire) has a
+	// null ref and is never
 	// scanned, so provided cost is untouchable by re-pricing by construction.
 	var where strings.Builder
 	where.WriteString(`is_deleted = false
@@ -139,8 +141,10 @@ func (s *Store) ClearRepriceState(ctx context.Context, runKey string) error {
 }
 
 // DeadLetterReprice records a span that PERMANENTLY fails to re-price (a data-integrity
-// anomaly) so the run steps over it and makes progress (CLAUDE.md #12) — retained for
-// audit, never silently dropped, never retried forever.
+// anomaly) so the run steps over it and makes progress. A permanent failure must
+// dead-letter, never retry forever: retrying forever would pin the run and risk either
+// an infinite loop or a data-dropping shortcut. Retained for audit, never silently
+// dropped, never retried forever.
 func (s *Store) DeadLetterReprice(ctx context.Context, runKey, projectID, id, reason string) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO reprice_deadletter (run_key, project_id, id, reason, at)

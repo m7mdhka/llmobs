@@ -1,10 +1,10 @@
-// Package plugindata defines the `store` primitive's contract (ADR-0023 / the
-// eighth primitive): manifest-declared typed collections a plugin owns, and the
-// deliberately-small query surface over them (R4: filter/order/paginate on
-// declared indexed fields; no aggregations, no joins). It holds the types,
-// identifier sanitization, and the pure query compiler — the boundary a
-// PluginStore adapter (Postgres for lite; a dedicated-DB backend for scale, R1)
-// implements. Depends on nothing kernel-internal.
+// Package plugindata defines the `store` primitive's contract (the eighth
+// primitive): manifest-declared typed collections a plugin owns, and the
+// deliberately-small query surface over them: filter/order/paginate on declared
+// indexed fields; no aggregations, no joins. It holds the types, identifier
+// sanitization, and the pure query compiler — the boundary a PluginStore adapter
+// (Postgres for lite; a dedicated-DB backend for scale) implements. Depends on
+// nothing kernel-internal.
 package plugindata
 
 import (
@@ -82,7 +82,7 @@ func (c CollectionSpec) Indexed() map[string]FieldSpec {
 	return out
 }
 
-// SchemaName renders the Postgres schema for a plugin id (R1: plugin-namespaced
+// SchemaName renders the Postgres schema for a plugin id (plugin-namespaced
 // schemas in the shared DB). Must be validated before use.
 func SchemaName(pluginID string) (string, error) {
 	if !pluginIDRe.MatchString(pluginID) {

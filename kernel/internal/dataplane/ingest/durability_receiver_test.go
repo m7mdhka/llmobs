@@ -27,7 +27,7 @@ func walReceiver(t *testing.T, capacity int, pipe Runner, reg *metrics.Registry)
 	return r, sp
 }
 
-// TestG2BackpressureViaSpoolFill proves the WAL spool preserves the G2 contract:
+// TestG2BackpressureViaSpoolFill proves the WAL spool preserves the backpressure contract:
 // once the durable spool is full, new OTLP requests are shed with a retryable 503
 // and a Retry-After header (the client retries into the idempotent merge).
 func TestG2BackpressureViaSpoolFill(t *testing.T) {

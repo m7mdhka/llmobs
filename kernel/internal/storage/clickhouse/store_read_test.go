@@ -25,7 +25,7 @@ func (c trippedConn) PrepareBatch(context.Context, string, ...driver.PrepareBatc
 	return nil, nil
 }
 
-// TestReadFailsClosedWithoutLimits is the RULING-CH9 prove-the-negative: with no
+// TestReadFailsClosedWithoutLimits is the fail-closed prove-the-negative: with no
 // (or incomplete) resource limits, EVERY DSL read refuses to emit — it never
 // reaches the database. A read that forgot a limit is a bug the adapter makes
 // impossible, not a config nicety.

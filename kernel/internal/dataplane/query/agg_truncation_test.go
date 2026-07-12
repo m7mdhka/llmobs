@@ -7,7 +7,7 @@ import (
 	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
-// TestFlagAggTruncation proves the #108 loud-or-complete rule: an aggregation result at
+// TestFlagAggTruncation proves the loud-or-complete rule: an aggregation result at
 // the cap is returned as-is (it MAY be exactly complete), but a result of cap+1 — the
 // adapters' deliberate over-fetch signal — is trimmed back to the cap AND carries a loud
 // warning, so a truncated (incomplete) aggregate is never returned as if it were complete.

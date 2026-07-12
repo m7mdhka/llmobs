@@ -1,11 +1,11 @@
-// Package pluginconform is the plugin conformance harness (H8). The storage
+// Package pluginconform is the plugin conformance harness. The storage
 // conformance (tools/conformance) proves an adapter reproduces the merge; THIS
 // proves a plugin honours the plugin contract: manifest validity,
 // capability-within-grant, handshake correctness, and health/watermark shape.
 // First-party plugins run through it in CI — the future "verified plugin" bar.
 //
 // Cross-tenant isolation is a KERNEL invariant, proven where it is enforced
-// (H3 intersection, H4/H5 primitive isolation prove-the-negatives); a plugin
+// (the intersection and primitive-isolation prove-the-negatives); a plugin
 // cannot violate it, so the harness asserts the kernel-side guarantees exist
 // rather than re-testing them from the plugin side.
 package pluginconform
@@ -63,7 +63,7 @@ type Manifest struct {
 		Capabilities   []string `yaml:"capabilities"`
 		Permissions    []string `yaml:"permissions"`
 		SettingsSchema string   `yaml:"settingsSchema"`
-		// SettingsView (N2) selects schema vs custom mode; a runner passes
+		// SettingsView selects schema vs custom mode; a runner passes
 		// (SettingsView == "custom") to CheckSettingsSchema so a custom plugin's
 		// intentionally non-subset schema is validated for secrets, not the flat subset.
 		SettingsView string `yaml:"settingsView"`
@@ -138,7 +138,7 @@ func CheckManifest(raw []byte) (Report, *Manifest) {
 	if m.Spec.Backend != nil {
 		rep.add("backend-url+health", m.Spec.Backend.URL != "" && m.Spec.Backend.HealthPath != "", "")
 	}
-	// Store collections must validate (R4 rules).
+	// Store collections must validate against their declared query-surface rules.
 	if m.Spec.Store != nil {
 		for _, c := range m.Spec.Store.Collections {
 			spec := plugindata.CollectionSpec{Name: c.Name}
@@ -162,7 +162,7 @@ func CheckManifest(raw []byte) (Report, *Manifest) {
 	return rep, &m
 }
 
-// CheckSettingsSchema verifies a plugin's settings JSON Schema (J2/N2). In SCHEMA mode it
+// CheckSettingsSchema verifies a plugin's settings JSON Schema. In SCHEMA mode it
 // must be within the supported flat subset the kernel + SchemaForm both validate (so a
 // settings tab renders and writes validate identically). In CUSTOM mode the plugin owns
 // validation of its opaque non-secret values, so the schema is checked only for valid

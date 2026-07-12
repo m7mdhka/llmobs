@@ -33,7 +33,7 @@ func (s *Store) SpansForReprice(ctx context.Context, runKey string, f storage.Re
 	}
 
 	// A derived span carries a non-empty pricing_snapshot_ref.id; a provided-cost span
-	// (R1) has an empty ref and is never scanned. Placeholders are positional in
+	// has an empty ref and is never scanned. Placeholders are positional in
 	// ClickHouse, so bind in the order the `?` appear: filter first, then the keyset.
 	var where strings.Builder
 	where.WriteString("is_deleted = 0 AND pricing_snapshot_ref != '' AND JSONExtractString(pricing_snapshot_ref, 'id') != ''")

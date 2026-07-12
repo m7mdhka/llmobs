@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestStatementTimeoutCancelsSlowQuery proves the K1.5 backstop against a REAL
+// TestStatementTimeoutCancelsSlowQuery proves the server-side statement-timeout backstop against a REAL
 // Postgres: a query that outruns the configured statement_timeout is cancelled
 // server-side in ~the timeout, not left to run to completion. Needs no schema
 // (pg_sleep only), so it runs against any Postgres.

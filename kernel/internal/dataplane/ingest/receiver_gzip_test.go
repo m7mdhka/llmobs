@@ -25,7 +25,7 @@ func gzipBytes(t *testing.T, b []byte) []byte {
 	return buf.Bytes()
 }
 
-// TestDecodeBodyGzip: a gzipped body is transparently decompressed (the #78 fix — OTLP
+// TestDecodeBodyGzip: a gzipped body is transparently decompressed (OTLP
 // exporters gzip by default), an over-cap decompressed stream is REJECTED 413 (gzip-bomb
 // bound, never buffered), and a body that claims gzip but isn't is a clean 400.
 func TestDecodeBodyGzip(t *testing.T) {

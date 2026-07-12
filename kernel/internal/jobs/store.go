@@ -8,7 +8,7 @@ import (
 )
 
 // Run is one job execution record (the audit trail of job-initiated activity, so
-// scheduled-vs-on-behalf-of-user is always answerable — H6 pin 2). Actor is
+// scheduled-vs-on-behalf-of-user is always answerable). Actor is
 // "system:job:<plugin>:<job>" for scheduled runs and "session:<email>" for
 // on-demand triggers.
 type Run struct {

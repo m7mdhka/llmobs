@@ -13,7 +13,7 @@ import (
 )
 
 // fakePrices is a table-backed PriceResolver recording how often Resolve is called
-// (so R1's short-circuit can be proven: derivation never consults the table).
+// (so the provided-cost short-circuit can be proven: derivation never consults the table).
 type fakePrices struct {
 	entries      map[string]*pricing.Entry // key: provider\x00model
 	discount     float64
@@ -48,7 +48,7 @@ func run1(t *testing.T, prices PriceResolver, payload map[string]any) map[string
 	return ing.Events[0].Payload
 }
 
-// TestEnrichProvidedCostWins is R1: a client-supplied cost short-circuits derivation
+// TestEnrichProvidedCostWins: a client-supplied cost short-circuits derivation
 // entirely — cost_details copies the provided map, cost_source=provided, no price entry
 // is consulted, and pricing_snapshot_ref stays null.
 func TestEnrichProvidedCostWins(t *testing.T) {
@@ -77,7 +77,7 @@ func TestEnrichProvidedCostWins(t *testing.T) {
 	}
 }
 
-// TestEnrichNoUsageNoCost is R4/§7.3: a model with NO usage must not fabricate cost —
+// TestEnrichNoUsageNoCost: a model with NO usage must not fabricate cost —
 // cost_details/total_cost/cost_source stay null, and no estimation happens.
 func TestEnrichNoUsageNoCost(t *testing.T) {
 	prices := &fakePrices{entries: map[string]*pricing.Entry{
@@ -93,7 +93,7 @@ func TestEnrichNoUsageNoCost(t *testing.T) {
 	}
 }
 
-// TestEnrichDerivesDataDriven is R2/R3: a Google/Gemini call (a provider NOT on any
+// TestEnrichDerivesDataDriven: a Google/Gemini call (a provider NOT on any
 // allow-list) with a cache_read bucket and a price entry carrying a cache rate → cache
 // priced at the cache rate, input on its residual, cost_source=derived, snapshot ref set.
 func TestEnrichDerivesDataDriven(t *testing.T) {
@@ -108,7 +108,7 @@ func TestEnrichDerivesDataDriven(t *testing.T) {
 		},
 	}}
 	out := run1(t, prices, map[string]any{
-		"model": "vertex_ai/gemini-1.5-pro", "provider": "vertex_ai", // aliases → canonical google/gemini-1.5-pro (R6)
+		"model": "vertex_ai/gemini-1.5-pro", "provider": "vertex_ai", // aliases → canonical google/gemini-1.5-pro
 		"start_time":             "2026-01-01T00:00:00Z",
 		"provided_usage_details": map[string]any{"input": int64(1000), "output": int64(500), "cache_read": int64(200)},
 	})
@@ -194,9 +194,9 @@ func TestEnrichNilResolverNoop(t *testing.T) {
 	}
 }
 
-// TestEnrichTieredGraduated is R7 through the enrich stage: a long-context call against
+// TestEnrichTieredGraduated through the enrich stage: a long-context call against
 // a tiered entry bills the above-threshold tranche at the tier rate (graduated), on the
-// residual (§7.7).
+// residual.
 func TestEnrichTieredGraduated(t *testing.T) {
 	prices := &fakePrices{entries: map[string]*pricing.Entry{
 		"google\x00gemini-1.5-pro": {
@@ -217,7 +217,7 @@ func TestEnrichTieredGraduated(t *testing.T) {
 
 // TestR5NoDoubleCountEndToEnd is the PRIORITY dual-incumbent proof, end-to-end through
 // normalize+enrich: an agent aggregate span carrying usage + a leaf carrying the same
-// usage. After normalize (drops the agent's usage, #81) and enrich, the AGENT span has
+// usage. After normalize (drops the agent's usage) and enrich, the AGENT span has
 // NO cost and the LEAF is costed — so summing the trace's spans equals the leaf, not 2x.
 func TestR5NoDoubleCountEndToEnd(t *testing.T) {
 	prices := &fakePrices{entries: map[string]*pricing.Entry{
@@ -267,7 +267,7 @@ func (f *fakeDiscountErr) GetDiscount(context.Context, string) (float64, bool, e
 	return 0, false, errors.New("discount db down")
 }
 
-// TestEnrichDiscountErrorLeavesNull is the M2-review fix: a discount-lookup error must
+// TestEnrichDiscountErrorLeavesNull is the review fix: a discount-lookup error must
 // leave cost NULL (backfillable), NOT derive at full price (which would silently
 // overcharge a discounted project and be undetectable by a null-based re-pricing).
 func TestEnrichDiscountErrorLeavesNull(t *testing.T) {

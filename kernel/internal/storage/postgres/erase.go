@@ -13,7 +13,7 @@ import (
 // proof-of-erasure audit row — all in one transaction. Returns the number erased
 // and the audit id. Hard delete (not the soft is_deleted tombstone) because GDPR
 // erasure must actually remove the payloads, not merely hide them; the suppression
-// tombstones (G3) then ensure a later re-delivery cannot resurrect an erased span.
+// tombstones then ensure a later re-delivery cannot resurrect an erased span.
 func (s *Store) EraseSpans(ctx context.Context, projectID, userID, actor string, from, to time.Time) (int, string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

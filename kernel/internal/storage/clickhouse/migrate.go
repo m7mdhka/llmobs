@@ -17,7 +17,8 @@ var migrationsFS embed.FS
 // clusterNameRE validates an operator-supplied cluster name before it is
 // interpolated into DDL. ClickHouse cluster names are simple identifiers; we
 // refuse anything else so a config value can never smuggle SQL into an
-// `ON CLUSTER` clause (R-CH1 / R-CH8: fail early, name the problem).
+// `ON CLUSTER` clause — fail early and name the problem rather than let a config
+// value smuggle SQL into replicated DDL.
 var clusterNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // zkPath is the ReplicatedMergeTree keeper path. The {uuid} macro binds the
@@ -38,8 +39,8 @@ type Config struct {
 	// Cluster is the ClickHouse cluster name for ON CLUSTER DDL. Empty means
 	// standalone / Replicated-database mode: no ON CLUSTER, plain MergeTree-family
 	// engines (the Replicated database, if any, replicates DDL itself). Non-empty
-	// selects Atomic + ON CLUSTER + Replicated* engines (R-CH3: one migration set,
-	// deterministic under both topologies).
+	// selects Atomic + ON CLUSTER + Replicated* engines. One migration set stays
+	// deterministic under both topologies.
 	Cluster string
 }
 
@@ -48,7 +49,7 @@ func (c Config) validate() error {
 		return fmt.Errorf("clickhouse cluster name %q is not a valid identifier ([A-Za-z0-9_-]+)", c.Cluster)
 	}
 	if c.Cluster == "default" {
-		// The literal Langfuse scar (R-CH1): a `default` cluster name is almost always
+		// A `default` cluster name is almost always
 		// an un-overridden template, and applying replicated DDL to the wrong cluster
 		// is destructive. Refuse it explicitly rather than silently proceed.
 		return fmt.Errorf("clickhouse cluster name %q is refused: set the real cluster name (R-CH1, no default literal)", c.Cluster)
@@ -84,9 +85,9 @@ func (c Config) render(sql string) string {
 
 // Migrate applies pending embedded migrations. ClickHouse has no multi-statement
 // transactions, so each statement is applied on its own; every DDL is IF NOT
-// EXISTS (R-CH2) so a re-run, or a concurrent apply from another replica, is a
+// EXISTS so a re-run, or a concurrent apply from another replica, is a
 // no-op. Migration state lives in schema_migrations, tracked replicated-safely
-// via the same engine templating as the rest of the schema (R-CH3).
+// via the same engine templating as the rest of the schema.
 func Migrate(ctx context.Context, db conn, cfg Config) error {
 	if err := cfg.validate(); err != nil {
 		return err

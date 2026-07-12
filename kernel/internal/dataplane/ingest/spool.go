@@ -11,7 +11,7 @@ import (
 )
 
 // ErrSpoolFull is returned by Append when the in-flight buffer is at capacity —
-// the receiver translates it to a retryable 503/UNAVAILABLE (G2 backpressure).
+// the receiver translates it to a retryable 503/UNAVAILABLE to apply backpressure.
 var ErrSpoolFull = errors.New("spool full")
 
 // leased is a record handed to a worker: the job plus the WAL seq it must Commit
@@ -23,7 +23,7 @@ type leased struct {
 	retry int
 }
 
-// Spool is the ack-window seam (ADR-0027). The receiver Appends a received job
+// Spool is the ack-window seam. The receiver Appends a received job
 // (durably, for the WAL impl, so the ack is ack-after-durable), workers lease via
 // Next and Commit once persisted. Two impls: memSpool (bounded channel, lite) and
 // walSpool (durable floor + replay, scale).
@@ -90,7 +90,7 @@ func (m *memSpool) requeue(l leased) {
 }
 
 // deadLetter drops a poison record (lite has no DLQ segment; the drop is the
-// terminal outcome, same as a persist error was pre-L3).
+// terminal outcome, same as a dropped persist error before the durable spool existed).
 func (m *memSpool) deadLetter(leased) {}
 
 // tryNext is a non-blocking pull used by the drain path.
@@ -127,7 +127,7 @@ type walSpool struct {
 // errStopReplay aborts boot replay when the spool is closing.
 var errStopReplay = errors.New("spool closing during replay")
 
-// NewWALSpool builds the durable WAL-backed spool for the scale profile (ADR-0027).
+// NewWALSpool builds the durable WAL-backed spool for the scale profile.
 // dir is the local WAL directory; archive is the optional object-store tier (nil =
 // local-only durable floor). The receiver swaps it in via SetSpool.
 func NewWALSpool(dir string, capacity int, maxSeg int64, archive ArchiveSink, ckptEvery time.Duration) (Spool, error) {
@@ -210,7 +210,7 @@ func (s *walSpool) replayLoop(bootWM, bootMax uint64) {
 
 func (s *walSpool) Append(j job) error {
 	// Reserve an in-flight slot first so concurrent Appends can't overshoot capacity;
-	// on overflow, release and shed (G2) WITHOUT writing to the WAL.
+	// on overflow, release and shed via backpressure WITHOUT writing to the WAL.
 	if n := s.inFlight.Add(1); n > int64(s.capacity) {
 		s.inFlight.Add(-1)
 		return ErrSpoolFull
@@ -271,7 +271,7 @@ func (s *walSpool) deadLetter(l leased) {
 func (s *walSpool) Durable() bool { return true }
 
 // Len reports queued depth (records buffered, not yet leased), matching memSpool so
-// G2 high-water backpressure fires at the same occupancy on both profiles. inFlight
+// high-water backpressure fires at the same occupancy on both profiles. inFlight
 // (appended-but-uncommitted, including in-worker) is the separate Append hard cap.
 func (s *walSpool) Len() int { return len(s.ch) }
 func (s *walSpool) Cap() int { return s.capacity }

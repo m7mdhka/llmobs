@@ -17,7 +17,7 @@ type JobSpec struct {
 }
 
 // PluginJobs is a running plugin's jobs + the grant the runner scopes the system
-// assertion to (the plugin's own capabilities/permissions — pin 1).
+// assertion to (the plugin's own capabilities/permissions — never wider).
 type PluginJobs struct {
 	PluginID    string
 	BackendURL  string
@@ -111,7 +111,7 @@ func (s *Scheduler) dispatch(ctx context.Context, pj PluginJobs, j JobSpec, trig
 	}
 	go func() {
 		// The system assertion is scoped to the plugin's OWN grant on its project —
-		// never more (pin 1). For on-demand runs by a user actor, the same bounded
+		// never more. For on-demand runs by a user actor, the same bounded
 		// grant applies (a trigger cannot elevate beyond the plugin's grant).
 		asr, err := s.runner.systemAssertion(pj.PluginID, s.defaultProject, j.Name, pj.Permissions)
 		if err != nil {

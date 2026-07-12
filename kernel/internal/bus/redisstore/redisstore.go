@@ -1,8 +1,8 @@
 // Package redisstore is the SCALE event-bus backend: a bus.Store implemented over
-// Redis/Valkey Streams (ADR-0028), parallel to the Postgres-lite store. It holds
+// Redis/Valkey Streams, parallel to the Postgres-lite store. It holds
 // ONLY the persistence — the replay / at-least-once / backlog-cap / DLQ logic lives
 // in the shared bus.Bus and is NOT reimplemented here. The same bus conformance
-// suite (H6) runs green against this backend, proving the contract is the interface.
+// suite runs green against this backend, proving the contract is the interface.
 //
 // Offset model: the bus.Store contract is int64 offsets that are the idempotency
 // key, so they must be GLOBALLY unique (matching Postgres's table-wide BIGSERIAL).
@@ -38,7 +38,7 @@ type Store struct {
 	rdb *redis.Client
 	ns  string // key namespace prefix (brand-derived)
 	// streamMaxLen bounds each per-(topic,project) stream via an APPROXIMATE XADD
-	// MAXLEN so the Streams log cannot grow without bound (#98). It is set to the bus
+	// MAXLEN so the Streams log cannot grow without bound. It is set to the bus
 	// backlog cap: the bus dead-letters any subscriber more than backlogCap behind
 	// latest (bus.go), so NOTHING below `latest-backlogCap` is ever deliverable — an
 	// approximate trim to ~backlogCap (which Redis keeps AT LEAST, trimming in whole
@@ -57,7 +57,7 @@ func New(rdb *redis.Client, ns string) *Store {
 	return &Store{rdb: rdb, ns: ns}
 }
 
-// SetStreamMaxLen sets the approximate per-stream retention (#98). Pass the bus backlog
+// SetStreamMaxLen sets the approximate per-stream retention. Pass the bus backlog
 // cap: entries older than that window are never deliverable, so trimming to it is safe.
 // Non-positive disables trimming.
 func (s *Store) SetStreamMaxLen(n int64) {
@@ -113,7 +113,7 @@ func enc(component string) string {
 // key) and XADDs the entry to the per-(topic,project) log with the explicit id
 // `<n>-0`, so ids are globally unique AND strictly ascending within each stream,
 // and stream order can never diverge from the counter under concurrent Appends.
-// When ARGV[2] (maxlen) > 0 the XADD carries an APPROXIMATE MAXLEN (#98) so the log
+// When ARGV[2] (maxlen) > 0 the XADD carries an APPROXIMATE MAXLEN so the log
 // is bounded to the delivery window in the same atomic op — no separate trim pass,
 // no drift. KEYS: global-seq, log. ARGV: subject, maxlen.
 var appendScript = redis.NewScript(`
@@ -240,7 +240,7 @@ func (s *Store) DLQLen(ctx context.Context) (int, error) {
 
 // parseEntryID extracts the int64 id from a Stream entry id `<n>-<seq>`. This
 // backend writes every entry id as `<n>-0`, so a parse failure is a backend
-// invariant violation, not attacker-reachable input (invariant #12).
+// invariant violation, not attacker-reachable input.
 func parseEntryID(streamID string) (int64, error) {
 	ms := streamID
 	if i := strings.IndexByte(streamID, '-'); i >= 0 {

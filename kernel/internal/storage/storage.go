@@ -1,12 +1,12 @@
 // Package storage defines the telemetry storage boundary the kernel dataplane
-// depends on (D7, 99-adapter-guidance.md). The lite adapter
+// depends on. The lite adapter
 // (internal/storage/postgres) and any future adapter (ClickHouse, Timescale)
 // implement these interfaces; the dataplane (query, pipeline) depends only on
 // them, never on a concrete adapter. This is the seam the flexibility audit found
 // documented but absent in code.
 //
 // It is internal/ (not pkg/) by construction: adapters are a kernel-internal
-// concern — plugins never touch storage (invariant 3, D3). The neutral ingest
+// concern — plugins never touch storage or any infrastructure directly. The neutral ingest
 // Event type lives here too, since it is a canonical-model concept, not a
 // Postgres one.
 //
@@ -29,8 +29,8 @@ import (
 // limit against an unbounded high-cardinality GROUP BY. Both adapters over-fetch ONE
 // past it (MaxAggregationGroups+1) so the caller can DETECT truncation — a result at the
 // cap is silently-maybe-complete, but a result of cap+1 is provably truncated and must be
-// flagged loudly, never returned as if complete (#108: silent-wrong aggregation is the
-// worst class — it corrupts the dual-read merge and the user trusts the number).
+// flagged loudly, never returned as if complete: a silent-wrong aggregation is the
+// worst class — it corrupts the dual-read merge and the user trusts the number.
 const MaxAggregationGroups = 10000
 
 // AggOverfetchLimitSQL is the LIMIT both adapters apply to an aggregation: one past the
@@ -58,10 +58,10 @@ func RoundCost(c float64) float64 {
 }
 
 // AggregateKinds are the span kinds whose total_cost is EXCLUDED from trace-level cost
-// roll-ups (06-usage-cost.md §7.1). An agent_step / tool_call span frequently carries
+// roll-ups. An agent_step / tool_call span frequently carries
 // usage — and thus cost — that duplicates its child model-call spans; summing it into
 // the trace total would double-count. This is the query-time counterpart to the ingest
-// gate (normalize.isAggregateUsageSpan / #81, which strips such spans' usage): trace
+// gate (normalize.isAggregateUsageSpan, which strips such spans' usage): trace
 // cost accrues only on the non-aggregate (leaf model-call) spans. Defined ONCE so every
 // adapter's trace projection (Postgres, ClickHouse) AND the dual-read re-synthesis
 // exclude the SAME set — a divergence would fork trace cost per engine (the
@@ -91,14 +91,14 @@ func IsAggregateKind(kind string) bool {
 }
 
 // ErrSuppressedByErasure is returned by PersistSpan when an incoming span matches
-// an unexpired erasure-suppression tombstone (G3): the span was GDPR-erased and a
+// an unexpired erasure-suppression tombstone: the span was GDPR-erased and a
 // re-delivery must NOT resurrect it. It is an expected outcome, not a storage
 // failure — the persist stage counts it and moves on, and it MUST NOT be folded
 // into persist-health (it is not a sign the adapter is unwell).
 var ErrSuppressedByErasure = errors.New("span suppressed by erasure tombstone")
 
 // ErrResponseTooLarge is returned by the DSL read adapters when a result set's
-// SERIALIZED bytes would exceed the per-request response ceiling (#83). Row COUNT is
+// SERIALIZED bytes would exceed the per-request response ceiling. Row COUNT is
 // already bounded by the DSL limit, but a page of wide-payload rows (large
 // input/output blobs) is not — so without a byte bound the kernel buffers an
 // unbounded response and OOMs/500s. This is a BOTH-PROFILE guard: the same unbounded
@@ -121,7 +121,7 @@ func WithResponseBudget(ctx context.Context, maxBytes int64) context.Context {
 
 // ResponseBudget tracks running serialized bytes against the ctx ceiling. It is the
 // ONE definition of the bound + error, shared by every adapter's list-read scan loop
-// (invariant 11: enforce at the convergence seam, not per-caller). A new adapter
+// (enforce at the convergence seam, not per-caller). A new adapter
 // inherits the DoS guard by calling Add in its scan loop, not by re-deriving a limit.
 type ResponseBudget struct {
 	max  int64 // <=0 disables the bound
@@ -158,8 +158,8 @@ const (
 	OpDelete Op = "delete"
 )
 
-// Event is one ingested event targeting a single entity (05-update-semantics.md
-// §1). The dataplane builds these in the normalize stage; the adapter folds them.
+// Event is one ingested event targeting a single entity. The dataplane builds
+// these in the normalize stage; the adapter folds them.
 type Event struct {
 	Op      Op
 	EventTS time.Time
@@ -173,8 +173,8 @@ type Event struct {
 // implement). Query methods take a compiled predicate + args: the lite adapter's
 // DSL→SQL compiler emits Postgres SQL, which a Postgres-compatible adapter
 // (Timescale) reuses as-is. Relocating compilation behind an adapter-owned
-// compile step (ADR-0019) is the ClickHouse-driven follow-up, not this refactor.
-// Adapter read contract (K1.5): the DSL read methods (QuerySpans/QueryTraces/
+// compile step is the ClickHouse-driven follow-up, not this refactor.
+// Adapter read contract: the DSL read methods (QuerySpans/QueryTraces/
 // QueryScores/QueryAggregation) MUST enforce a server-side statement timeout, not
 // only honor ctx cancellation — a client-side cancel stops the client, not the
 // server, so a lost/late cancel would otherwise let a pathological plan run
@@ -183,19 +183,19 @@ type Event struct {
 // adapter MUST set `max_execution_time` equivalently. The DSL's max-window +
 // ceilings bound query *shape*; this bounds query *execution time*.
 type TelemetryStore interface {
-	// PersistSpan applies one span event with merge-on-write (LM-5).
+	// PersistSpan applies one span event with merge-on-write under a row lock.
 	PersistSpan(ctx context.Context, ev Event) error
 	// QuerySpans runs a compiled spans predicate and returns folded span docs.
 	QuerySpans(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error)
 	// QueryTraces runs a compiled traces predicate over the synthesized trace
-	// projection and returns trace docs (DSL §4.1).
+	// projection and returns trace docs.
 	QueryTraces(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error)
 	// GetSpan returns a folded span doc by id, or nil if absent/deleted.
 	GetSpan(ctx context.Context, projectID, id string) (json.RawMessage, error)
 	// GetTraceSpans returns a trace's non-deleted spans in tree-buildable order.
 	GetTraceSpans(ctx context.Context, projectID, traceID string) ([]json.RawMessage, error)
 
-	// PersistScore applies one score event with merge-on-write (LM-3/LM-8).
+	// PersistScore applies one score event with merge-on-write under a row lock.
 	PersistScore(ctx context.Context, ev Event) error
 	// QueryScores runs a compiled scores predicate and returns folded score docs.
 	QueryScores(ctx context.Context, where string, args []any, order string, limit int) ([]json.RawMessage, error)
@@ -206,7 +206,7 @@ type TelemetryStore interface {
 	// records an erasure audit row; returns the count erased and the audit id.
 	EraseSpans(ctx context.Context, projectID, userID, actor string, from, to time.Time) (int, string, error)
 
-	// QueryAggregation runs a compiled aggregation (QD-4) for a target and returns
+	// QueryAggregation runs a compiled aggregation for a target and returns
 	// group rows as column-name -> value maps. sel/where/groupBy come from the
 	// aggregation compiler; the adapter supplies the FROM source per target.
 	QueryAggregation(ctx context.Context, target, sel, where, groupBy string, args []any) ([]map[string]any, error)
@@ -214,7 +214,8 @@ type TelemetryStore interface {
 
 // RepriceCursor is the TOTAL order a re-pricing run resumes from: (ts, project_id, id).
 // The tuple is fully ordering, so a keyset scan strictly advances and same-timestamp
-// spans never loop (the #7117 trap). The zero cursor starts from the beginning. It is
+// spans never loop (the infinite-loop trap where a non-strict cursor revisits a
+// same-timestamp cluster forever). The zero cursor starts from the beginning. It is
 // dialect-neutral so both adapters' SpansForReprice share one resumable contract.
 type RepriceCursor struct {
 	TS        time.Time
@@ -222,8 +223,8 @@ type RepriceCursor struct {
 	ID        string
 }
 
-// RepriceFilter selects the derived spans a re-pricing run re-derives (06-usage-cost.md
-// §5). At least one field is always set, so a run never scans the whole table:
+// RepriceFilter selects the derived spans a re-pricing run re-derives. At least one
+// field is always set, so a run never scans the whole table:
 //   - SnapshotRefID: spans priced against a specific superseded price-version id
 //     ("openai/gpt-4o#1"). GLOBAL across projects — a price change applies instance-wide.
 //   - ProjectID: constrain to one project — set ALONE for a discount change, or with
@@ -259,9 +260,9 @@ type RepriceState interface {
 }
 
 // MergeConformer is the normative-merge surface an adapter exposes to the
-// conformance harness (tools/conformance). Every adapter MUST reproduce the fold
-// in 05-update-semantics.md; the harness asserts that with the spec's V-vectors
-// and the order-independence property. Fold is the pure ordered fold;
+// conformance harness (tools/conformance). Every adapter MUST reproduce the
+// canonical merge fold; the harness asserts that with the spec's normative test
+// vectors and the order-independence property. Fold is the pure ordered fold;
 // MergeIncremental applies events one-by-one (the read-modify-write path) and
 // MUST equal Fold over the same set regardless of arrival order.
 type MergeConformer interface {

@@ -10,8 +10,8 @@ import (
 )
 
 // TestKernelKeyPublishesVerifiableKey: the endpoint publishes the raw Ed25519
-// public key (hex + base64) a plugin backend needs to verify assertions (finding
-// #2). Unauthenticated by design (the key is public); only GET.
+// public key (hex + base64) a plugin backend needs to verify assertions.
+// Unauthenticated by design (the key is public); only GET.
 func TestKernelKeyPublishesVerifiableKey(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	if err != nil {

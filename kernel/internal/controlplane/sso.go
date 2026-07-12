@@ -43,6 +43,11 @@ type SSOProvider struct {
 // ErrNoSSOProvider is returned when an org has no configured provider.
 var ErrNoSSOProvider = fmt.Errorf("no SSO provider configured for org")
 
+// ErrLocalAccountExists is returned when SSO tries to authenticate an email that already owns a
+// LOCAL-password account. SSO owns only passwordless rows; a local account is never claimable via
+// an external IdP (identity-ownership guard).
+var ErrLocalAccountExists = fmt.Errorf("an account with this email uses local login")
+
 // GetSSOProvider loads an org's provider WITH the decrypted client secret + group→role map.
 // Callers use it to run/verify the OIDC flow. Returns ErrNoSSOProvider if none.
 func GetSSOProvider(ctx context.Context, pool *pgxpool.Pool, box sealer, orgID string) (*SSOProvider, error) {
@@ -240,7 +245,16 @@ func JITProvisionSSOUser(ctx context.Context, pool *pgxpool.Pool, orgID, email, 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var uid string
-	qerr := tx.QueryRow(ctx, `SELECT id FROM users WHERE lower(email) = lower($1)`, email).Scan(&uid)
+	var existingHash *string
+	qerr := tx.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE lower(email) = lower($1)`, email).Scan(&uid, &existingHash)
+	// IDENTITY-OWNERSHIP GUARD (the boundary review's CRITICAL): SSO must NEVER authenticate an
+	// account that has a LOCAL password. Linking an IdP-asserted email to a local account would
+	// let an org-controlled IdP claim (and take over) a locally-managed account — including the
+	// break-glass owner. SSO owns only passwordless (SSO-provisioned) rows; a pre-existing
+	// local-password account with this email is off-limits, and the login is refused.
+	if qerr == nil && existingHash != nil {
+		return "", ErrLocalAccountExists
+	}
 	switch {
 	case qerr == pgx.ErrNoRows:
 		nid, ierr := randomID("usr")

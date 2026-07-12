@@ -96,15 +96,24 @@ func TestJITProvisionSSOUser(t *testing.T) {
 	if _, err := JITProvisionSSOUser(ctx, pool, "org_o5a", "o5-bob@t", perm.RoleOwner); err == nil {
 		t.Fatal("JIT must refuse the owner role")
 	}
-	// An existing OWNER is never downgraded by SSO.
-	seedUser(t, pool, "usr_o5_owner", "o5-owner@t")
-	if err := SetMembership(ctx, pool, "usr_o5_owner", "org_o5a", perm.RoleOwner); err != nil {
+	// IDENTITY-OWNERSHIP GUARD: SSO must refuse an email that owns a LOCAL-password account
+	// (seedUser sets a password) — an external IdP can never claim a local account.
+	seedUser(t, pool, "usr_o5_local", "o5-local@t")
+	if _, err := JITProvisionSSOUser(ctx, pool, "org_o5a", "o5-local@t", perm.RoleMember); err != ErrLocalAccountExists {
+		t.Fatalf("JIT must refuse a local-password account, got %v", err)
+	}
+	// An existing PASSWORDLESS owner (SSO-owned) is never downgraded by SSO.
+	ownerUID, err := JITProvisionSSOUser(ctx, pool, "org_o5a", "o5-ssoowner@t", perm.RoleMember)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := JITProvisionSSOUser(ctx, pool, "org_o5a", "o5-owner@t", perm.RoleViewer); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE org_memberships SET role='owner' WHERE user_id=$1 AND org_id='org_o5a'`, ownerUID); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := RoleInOrg(ctx, pool, "usr_o5_owner", "org_o5a"); r != perm.RoleOwner {
+	if _, err := JITProvisionSSOUser(ctx, pool, "org_o5a", "o5-ssoowner@t", perm.RoleViewer); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := RoleInOrg(ctx, pool, ownerUID, "org_o5a"); r != perm.RoleOwner {
 		t.Fatalf("SSO must not downgrade an owner, role = %q", r)
 	}
 }

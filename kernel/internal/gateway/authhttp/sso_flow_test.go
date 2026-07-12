@@ -127,7 +127,9 @@ func ssoFlowSetup(t *testing.T) (*http.ServeMux, *pgxpool.Pool, *mockIdP, string
 	}
 	h := New(pool, nil, false)
 	mux := http.NewServeMux()
-	h.RegisterSSO(mux, box, idp.srv.Client(), "http://app.test")
+	s := h.RegisterSSO(mux, box, idp.srv.Client(), "http://app.test")
+	// The test org IS the login org (in a shared DB the real DefaultOrgID is nondeterministic).
+	s.loginOrg = func(context.Context) (string, error) { return "org_o5flow", nil }
 	return mux, pool, idp, "org_o5flow"
 }
 
@@ -204,6 +206,54 @@ func TestSSOFlowHappyPath(t *testing.T) {
 	_ = pool.QueryRow(context.Background(), `SELECT password_hash FROM users WHERE id=$1`, uid).Scan(&hash)
 	if hash != nil {
 		t.Fatal("SSO-provisioned user must have no local password")
+	}
+}
+
+// TestSSOFlowIdentityOwnership is the boundary-review CRITICAL fix: SSO must NOT authenticate an
+// email that owns a LOCAL-password account (an org-controlled IdP could otherwise claim a local
+// account), and it must refuse a login into a non-login org (whose role a session wouldn't
+// resolve). It also proves the string-typed email_verified:"false" bypass is closed.
+func TestSSOFlowIdentityOwnership(t *testing.T) {
+	mux, pool, idp, org := ssoFlowSetup(t)
+	ctx := context.Background()
+	// A pre-existing LOCAL-password account with a mapped email.
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id,email,password_hash,role) VALUES ('usr_o5flow_local','o5flow-local@t','x','viewer')`); err != nil {
+		t.Fatal(err)
+	}
+
+	signValid := func(nonce, email string, ev any) string {
+		c := map[string]any{"iss": idp.srv.URL, "aud": "test-client", "sub": "s",
+			"exp": time.Now().Add(time.Hour).Unix(), "nonce": nonce, "email": email, "groups": []string{"admins"}}
+		if ev != nil {
+			c["email_verified"] = ev
+		}
+		return idp.sign(t, c)
+	}
+
+	// 1) An email that owns a LOCAL account → refused (403), no session, account untouched.
+	cookie, state, nonce := ssoStart(t, mux, org)
+	idp.idToken = signValid(nonce, "o5flow-local@t", true)
+	if rec := ssoCallback(mux, org, cookie, state); rec.Code != http.StatusForbidden {
+		t.Fatalf("SSO into a local-password account must be 403, got %d %s", rec.Code, rec.Body.String())
+	}
+	var hash *string
+	_ = pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id='usr_o5flow_local'`).Scan(&hash)
+	if hash == nil {
+		t.Fatal("the local account's password must be untouched by a refused SSO login")
+	}
+
+	// 2) email_verified as the STRING "false" must be rejected (the type-bypass fix).
+	cookie, state, nonce = ssoStart(t, mux, org)
+	idp.idToken = signValid(nonce, "o5flow-str@t", "false")
+	if rec := ssoCallback(mux, org, cookie, state); rec.Code != http.StatusUnauthorized {
+		t.Fatalf(`email_verified:"false" (string) must be rejected, got %d`, rec.Code)
+	}
+
+	// 3) A login into a NON-login org is refused before touching the IdP.
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/sso/org_not_login/start", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("SSO into a non-login org must be 404, got %d", rec.Code)
 	}
 }
 

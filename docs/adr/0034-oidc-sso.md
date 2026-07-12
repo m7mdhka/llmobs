@@ -53,6 +53,23 @@ configurer** at config-write time (`perm.RoleAbove`), so SSO can never be config
 owner; JIT refuses the owner role as defense-in-depth and never downgrades an existing owner
 (owners stay locally-managed break-glass accounts). A revoked user (O4) cannot re-enter via SSO.
 
+Two guards close the identity-ownership hole an external IdP would otherwise open (the boundary
+review's CRITICAL):
+- **SSO never authenticates a LOCAL-password account.** JIT owns only passwordless
+  (SSO-provisioned) rows; if the asserted email already owns a local-password account, the login
+  is refused. An org-controlled IdP therefore can never claim a locally-managed account
+  (including the break-glass owner) by asserting its email.
+- **Single-login-org.** SSO authenticates only into the instance's *login org* (the org whose
+  membership `ResolveSession` resolves a session's authority from). Provisioning into any other
+  org would mint a session carrying authority the session doesn't resolve there — a cross-org
+  escalation. The `sso_providers` table is per-org and multi-org-ready, but per-org SSO *login*
+  awaits per-org session authority (a future arc). The login-org is injectable for tests;
+  production resolves it to the default org.
+
+`email_verified` is coerced fail-closed: a present claim must be affirmatively `true` (bool
+`true` or string `"true"` — some IdPs emit it as a string, which a naive bool check would miss);
+an absent claim is accepted (an enterprise IdP's directory is authoritative and often omits it).
+
 ### Config authority + local-password disable + last-owner protection
 
 `GET/PUT /v1alpha1/sso/{org}` is gated on **org:manage in the target org** (owner-level;

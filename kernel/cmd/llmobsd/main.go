@@ -322,7 +322,8 @@ func run() error {
 	// ephemeral box (config re-entry after restart — dev only). NO plan gating: OSS core.
 	ssoBox, ssoStable := ssoSecretBox(cfg.SecretboxKey)
 	if !ssoStable {
-		log.Warn("SSO secret box is EPHEMERAL (set LLMOBS_SECRETBOX_KEY to a base64 32-byte key) — SSO config will not survive a restart")
+		log.Warn("SSO secret box is EPHEMERAL — SSO config will not survive a restart",
+			"set_env", brand.Env("SECRETBOX_KEY"), "value", "base64 32-byte key")
 	}
 	ssoHTTP := &http.Client{Timeout: 15 * time.Second}
 	auth.RegisterSSO(apiMux, ssoBox, ssoHTTP, cfg.PublicURL)

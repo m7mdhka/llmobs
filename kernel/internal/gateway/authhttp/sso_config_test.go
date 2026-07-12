@@ -60,7 +60,8 @@ func TestSSOConfigAuthz(t *testing.T) {
 	box, _ := secretbox.NewRandom()
 	h := New(pool, nil, false)
 	mux := http.NewServeMux()
-	h.RegisterSSO(mux, box, http.DefaultClient, "")
+	s := h.RegisterSSO(mux, box, http.DefaultClient, "")
+	s.loginOrg = func(context.Context) (string, error) { return "org_o5cfg", nil }
 
 	put := func(actor, body string) int {
 		r := httptest.NewRequest(http.MethodPut, "/v1alpha1/sso/org_o5cfg", strings.NewReader(body))

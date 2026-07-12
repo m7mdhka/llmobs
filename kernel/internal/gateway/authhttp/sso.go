@@ -33,17 +33,37 @@ type SSOHandler struct {
 	box        *secretbox.Box // seals the client secret at rest; only decrypted in memory
 	httpClient *http.Client   // bounded outbound client for discovery/JWKS/token exchange
 	publicURL  string         // base for redirect_uri (e.g. https://obs.example.com); "" => derive from request
+	// loginOrg resolves the single org SSO authenticates INTO. In the current single-org login
+	// model, a session's authority is always resolved (by ResolveSession) from the default org,
+	// so SSO must provision into THAT org — otherwise a login into another org would mint a
+	// session carrying the user's default-org authority (a cross-org escalation the boundary
+	// review caught). Injectable for tests; defaults to controlplane.DefaultOrgID. The provider
+	// config table is per-org and multi-org-ready; per-org SSO LOGIN awaits per-org session
+	// authority (a future arc).
+	loginOrg func(context.Context) (string, error)
 }
 
 // RegisterSSO mounts the SSO routes. The FLOW endpoints (providers/start/callback) are
 // UNAUTHENTICATED (there is no session yet) and CSRF-exempt at the session layer — they use the
 // OIDC `state` param for CSRF instead. The CONFIG endpoints are session-authed and org:manage-
 // gated. box may be nil (SSO disabled); httpClient must be timeout-bounded.
-func (h *Handler) RegisterSSO(mux *http.ServeMux, box *secretbox.Box, httpClient *http.Client, publicURL string) {
-	s := &SSOHandler{h: h, box: box, httpClient: httpClient, publicURL: strings.TrimRight(publicURL, "/")}
+func (h *Handler) RegisterSSO(mux *http.ServeMux, box *secretbox.Box, httpClient *http.Client, publicURL string) *SSOHandler {
+	s := &SSOHandler{
+		h: h, box: box, httpClient: httpClient, publicURL: strings.TrimRight(publicURL, "/"),
+		loginOrg: func(ctx context.Context) (string, error) { return controlplane.DefaultOrgID(ctx, h.pool) },
+	}
 	mux.HandleFunc("/auth/sso/providers", s.providers) // GET: discovery for the login page
 	mux.HandleFunc("/auth/sso/", s.flow)               // /auth/sso/{org}/start | /callback
 	mux.Handle("/v1alpha1/sso/", h.RequireAuth(http.HandlerFunc(s.config)))
+	return s
+}
+
+// isLoginOrg reports whether org is the single org SSO authenticates into (the login org). SSO
+// on any other org would provision into an org whose role the session does NOT resolve, so it is
+// refused. Fails closed on a resolution error.
+func (s *SSOHandler) isLoginOrg(ctx context.Context, org string) bool {
+	lo, err := s.loginOrg(ctx)
+	return err == nil && lo != "" && lo == org
 }
 
 // config handles GET/PUT /v1alpha1/sso/{org}. Gated on org:manage in the TARGET org (configuring
@@ -69,6 +89,12 @@ func (s *SSOHandler) config(w http.ResponseWriter, r *http.Request) {
 	}
 	if !perm.Has(perm.RoleScopes(configurerRole), perm.OrgManage) {
 		writeErr(w, http.StatusForbidden, "forbidden", "configuring SSO requires org:manage (owner) in this org")
+		return
+	}
+	// O5 ships single-login-org SSO: SSO authenticates only into the login org, so configuring
+	// it for any other org would be dead config that could never mint a coherent session.
+	if !s.isLoginOrg(r.Context(), org) {
+		writeErr(w, http.StatusConflict, "sso_not_login_org", "SSO login is only supported for the instance's login org in this version")
 		return
 	}
 
@@ -163,13 +189,17 @@ func (s *SSOHandler) providers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"providers": []any{}})
 		return
 	}
-	orgs, err := controlplane.ListEnabledSSOOrgs(r.Context(), s.h.pool)
+	all, err := controlplane.ListEnabledSSOOrgs(r.Context(), s.h.pool)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "list failed")
 		return
 	}
-	if orgs == nil {
-		orgs = []controlplane.EnabledSSOOrg{}
+	// Only advertise the login org's provider — the only one the flow will honor.
+	orgs := []controlplane.EnabledSSOOrg{}
+	for _, o := range all {
+		if s.isLoginOrg(r.Context(), o.OrgID) {
+			orgs = append(orgs, o)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": orgs})
 }
@@ -187,6 +217,13 @@ func (s *SSOHandler) flow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org, action := parts[0], parts[1]
+	// SSO authenticates ONLY into the login org (see isLoginOrg): provisioning into any other
+	// org would mint a session whose authority ResolveSession resolves elsewhere — a cross-org
+	// escalation. Refuse before touching the IdP.
+	if !s.isLoginOrg(r.Context(), org) {
+		writeErr(w, http.StatusNotFound, "not_found", "SSO login is not enabled for this org")
+		return
+	}
 	switch action {
 	case "start":
 		s.start(w, r, org)
@@ -352,8 +389,13 @@ func (s *SSOHandler) callback(w http.ResponseWriter, r *http.Request, org string
 		writeErr(w, http.StatusUnauthorized, "sso_no_email", "the IdP did not assert an email")
 		return
 	}
-	// If the IdP explicitly says the email is unverified, do NOT trust it as an identity.
-	if v, ok := claims["email_verified"].(bool); ok && !v {
+	// If the IdP asserts email_verified, it MUST be affirmatively true. Coerce robustly and
+	// FAIL CLOSED: some IdPs emit the claim as the STRING "false" (older Azure AD v1, some
+	// Keycloak configs) — a naive bool assertion would miss it and trust an explicitly-
+	// unverified email (an account-linking takeover vector). An ABSENT claim is accepted: an
+	// enterprise IdP's directory is authoritative for its emails and often omits it (documented
+	// trust assumption). Any present-but-not-true value is rejected.
+	if !emailVerifiedOK(claims) {
 		writeErr(w, http.StatusUnauthorized, "sso_email_unverified", "the IdP reports this email as unverified")
 		return
 	}
@@ -374,6 +416,10 @@ func (s *SSOHandler) callback(w http.ResponseWriter, r *http.Request, org string
 	// 9. JIT-provision through the O3 discipline: into THIS org only, at the capped mapped role,
 	//    never granting or downgrading an owner.
 	uid, err := controlplane.JITProvisionSSOUser(r.Context(), s.h.pool, org, email, role)
+	if err == controlplane.ErrLocalAccountExists {
+		writeErr(w, http.StatusForbidden, "sso_local_account", "an account with this email uses local login; sign in with your password")
+		return
+	}
 	if err != nil {
 		s.h.log.Error("sso jit provision failed", "err", err.Error())
 		writeErr(w, http.StatusInternalServerError, "internal", "provisioning failed")
@@ -387,6 +433,26 @@ func (s *SSOHandler) callback(w http.ResponseWriter, r *http.Request, org string
 	}
 	s.h.setSessionCookie(w, sess.Token, sess.ExpiresAt)
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// emailVerifiedOK reports whether the ID token's email may be trusted as an identity. It FAILS
+// CLOSED on a present-but-not-affirmatively-true claim (a bool false, the string "false", or any
+// non-true value — some IdPs emit email_verified as a STRING, which a naive bool assertion would
+// miss and wrongly trust). An ABSENT claim is accepted: an enterprise IdP's directory is
+// authoritative for its emails and often omits it (a documented trust assumption — see ADR-0034).
+func emailVerifiedOK(claims map[string]any) bool {
+	v, present := claims["email_verified"]
+	if !present {
+		return true
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(t, "true")
+	default:
+		return false
+	}
 }
 
 // stringClaim reads a string claim (email etc.).

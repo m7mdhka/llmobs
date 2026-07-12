@@ -147,6 +147,40 @@ set (top-25 closed by votes), not a claim about all issues.
 
 ---
 
+## Pillar 5 — Enterprise auth in the OSS core (shipped, not promised)
+
+**Claim.** The auth capabilities both incumbents reserve for paid tiers — SSO/OIDC, RBAC,
+provisioning, immediate revocation — ship in the LLMObs **Apache-2.0 core**, gated only by
+authorization, never by a plan or a license key.
+
+**Evidence (ours — shipped).** Arc O landed the full production-auth stack on `develop`:
+
+- **`resource:verb` RBAC** with per-org memberships, resolved at the ONE Query-API
+  intersection seam (O1 #123, O2 #124; ADR-0031/0032).
+- **Provisioning** — invite / set-role / remove / create-org — under one shared gate,
+  every role capped strictly-below the actor's own so a provisioning bug can't become
+  account-takeover (O3 #125).
+- **Immediate revocation** of every credential type (sessions, API keys, and the
+  kernel-signed plugin tokens) on the very next request, with a user-revoke cascade
+  (O4 #128, closes #63; ADR-0033).
+- **OIDC/SSO** with strict verify-before-trust (signature vs the IdP JWKS, issuer,
+  audience, expiry, nonce, and CSRF `state` all checked before any claim is read),
+  group→role mapping that fails closed, and JIT provisioning that inherits the O3 gates
+  (O5 #131; ADR-0034).
+- **Per-user state** isolated by the server-resolved identity (O6 #132; ADR-0035).
+
+Every one of these is proven by an adversarial prove-the-negative suite (44 test functions
+across the arc), each written to fail if the boundary regresses.
+
+**Contrast (fair, sourced).** SSO is **enterprise-gated at Opik/Comet** and Langfuse gates
+its `admin-api`; the incumbents' reflex is to put org-level auth behind a plan tier (Opik
+issues 7144/7123, above). LLMObs treats auth as *core, gated only by authz* — the self-hoster
+who needs SSO + RBAC to go to production gets it in the OSS build, not on a sales call. Remaining
+enterprise-auth surfaces (**SAML**, **SCIM**) are named, tracked follow-ons
+([`backlog/README.md`](backlog/README.md) Cluster B), not paywalled features.
+
+---
+
 ## Competitor-sourced structural wins (Opik cross-over mine)
 
 Concrete examples where a bug a *second* incumbent (Opik/Comet) actually shipped is
@@ -165,7 +199,8 @@ is sourced from a competitor's own issue tracker, not our marketing:
   data point (Opik #7144/#7123 gating "Cost Intelligence" on an org entitlement;
   alongside Langfuse's `admin-api` gating and Opik's enterprise-gated SSO) that the
   incumbents put value behind plan tiers. The LLMObs wedge: ungated core, gated only
-  by authz — auth/RBAC is core, never an upsell.
+  by authz — auth/RBAC is core, never an upsell. **This is now SHIPPED, not promised
+  (see Pillar 5).**
 - **Backpressure-as-503 is the right shape** — Opik #7091 independently arrived at
   fast-fail HTTP 503 on pool saturation, matching our G2 backpressure contract
   (`503` + `Retry-After: 1` → client retries into the idempotent merge). Convergent

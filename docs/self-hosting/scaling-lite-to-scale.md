@@ -11,6 +11,17 @@ migration a hard cutover: run a batch job, hope it finishes, and until it does
 LLMObs takes a different stance: **dual-read is permanent and on by default; the
 backfill is an optional convenience you can run whenever — or never.**
 
+> **Production readiness (scale profile).** The scale profile's self-hoster-facing
+> correctness surfaces are hardened and tested against real ClickHouse 25.6 / Postgres 16 /
+> Valkey 8: query responses are byte-bounded (no OOM); GDPR erasure removes data and never
+> reads it back — even under a concurrent backfill or ClickHouse lazy materialization; the
+> event bus authenticates to managed cloud Redis (ElastiCache IAM / Memorystore), runs
+> durably, and bounds its backlog; aggregations never silently truncate; the backfill is
+> single-flight across replicas; and read-after-write is guaranteed on a single/sticky
+> endpoint (opt-in quorum for multi-replica-behind-LB). The two knobs that carry a real
+> tradeoff — `LLMOBS_CH_READ_YOUR_WRITES` and the managed-Redis rotating credential — are
+> documented below with their costs; the safe defaults suit the common topology.
+
 ## How it works
 
 ### 1. Permanent dual-read (always on when scale is configured)

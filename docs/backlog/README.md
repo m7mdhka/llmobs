@@ -1,5 +1,19 @@
 # LLMObs Implementation Backlog (canonical)
 
+> **Arc P — Scale-profile readiness — COMPLETE (2026-07-12).** The deferred scale-profile
+> self-hoster bugs are drained, each proven against real ClickHouse 25.6 / Postgres 16 /
+> Valkey 8. **#83** query response now byte-bounded (both-profile DoS — closed the last lite
+> gap too). **#88/#111/#77** GDPR erasure hardened: read-back closed (apply_deleted_mask +
+> lazy-materialization guard + version floor), concurrent-resurrection closed at the read
+> seam (an adversarial-review catch), bounded delete. **#126/#112/#98** event bus: managed-
+> cloud auth (ElastiCache/Memorystore), Valkey durability, bounded stream retention.
+> **#108/#90/#109** dual-read: no silent aggregation truncation, backfill singleton guard,
+> opt-in read-your-writes. Scale profile is production-ready for a self-hoster; see the
+> production-readiness note in `docs/self-hosting/scaling-lite-to-scale.md`. Resume only on
+> explicit kickoff.
+
+---
+
 > **Developer-impact pass — COMPLETE (2026-07-12).** First-run verified clean end-to-end (quickstart + plugin-author); every unambiguous wrong-cost bug fixed with per-provider prove-the-negative fixtures (#79 audio, #146 cache_read, + the #78/#97/#130/#127/#106/#102 cluster). No developer-hits-it-today issue is unfixed. Remainders are correctly deferred: **#148** (reasoning nested spellings — cost-neutral data-quality, explicit trigger) and cross-provider audio/cache fixtures (need real captured spans, not code). Resume only on explicit kickoff.
 
 **This is the single source of truth for owed implementation work.** Every entry

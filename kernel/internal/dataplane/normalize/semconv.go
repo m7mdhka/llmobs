@@ -3,6 +3,7 @@ package normalize
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -432,6 +433,19 @@ func toInt(v any) (int64, bool) {
 		return int64(t), true
 	case float64:
 		return int64(t), true
+	case string:
+		// Some exporters emit usage counts as an OTLP StringValue ("150") rather than an
+		// IntValue (#130). Parse a plain integer, or a float-shaped string ("150.0") which we
+		// truncate to a count. A non-numeric string is not a count → (0, false), NOT a silent
+		// zero — the caller then treats the bucket as absent, exactly as before.
+		s := strings.TrimSpace(t)
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return n, true
+		}
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return int64(f), true
+		}
+		return 0, false
 	default:
 		return 0, false
 	}
@@ -445,6 +459,12 @@ func toFloat(v any) (float64, bool) {
 		return float64(t), true
 	case int:
 		return float64(t), true
+	case string:
+		// String-typed numeric (OTLP StringValue), same rationale as toInt (#130).
+		if f, err := strconv.ParseFloat(strings.TrimSpace(t), 64); err == nil {
+			return f, true
+		}
+		return 0, false
 	default:
 		return 0, false
 	}

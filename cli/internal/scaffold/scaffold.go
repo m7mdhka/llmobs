@@ -15,7 +15,7 @@ import (
 	"text/template"
 )
 
-//go:embed templates
+//go:embed all:templates
 var templates embed.FS
 
 var idRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$`)

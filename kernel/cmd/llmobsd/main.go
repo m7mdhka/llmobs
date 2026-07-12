@@ -275,6 +275,7 @@ func run() error {
 
 	maxWindow, _ := time.ParseDuration(cfg.QueryMaxWindow)
 	qsrv := query.NewServer(store, pool, log, maxWindow, mreg, pluginSigner)
+	qsrv.SetMaxResponseBytes(cfg.QueryMaxResponseBytes) // #83 response-size ceiling; 0 keeps the built-in default
 	if dual != nil {
 		qsrv.SetDualStore(dual) // reads unify lite∪scale (RULING-MIG6); see query.DualRouter
 	}

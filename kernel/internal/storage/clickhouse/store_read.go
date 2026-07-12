@@ -107,11 +107,15 @@ func (s *Store) scanDocs(ctx context.Context, sql string, bind []any) ([]json.Ra
 		return nil, fmt.Errorf("clickhouse read: %w", err)
 	}
 	defer rows.Close()
+	budget := storage.NewResponseBudget(ctx)
 	var out []json.RawMessage
 	for rows.Next() {
 		var doc string
 		if err := rows.Scan(&doc); err != nil {
 			return nil, fmt.Errorf("scan doc: %w", err)
+		}
+		if err := budget.Add(len(doc)); err != nil {
+			return nil, err
 		}
 		out = append(out, json.RawMessage(doc))
 	}
@@ -167,11 +171,15 @@ func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([
 		return nil, fmt.Errorf("clickhouse get trace spans: %w", err)
 	}
 	defer rows.Close()
+	budget := storage.NewResponseBudget(ctx)
 	var out []json.RawMessage
 	for rows.Next() {
 		var doc string
 		if err := rows.Scan(&doc); err != nil {
 			return nil, fmt.Errorf("scan doc: %w", err)
+		}
+		if err := budget.Add(len(doc)); err != nil {
+			return nil, err
 		}
 		out = append(out, json.RawMessage(doc))
 	}
@@ -262,6 +270,7 @@ FROM trace_proj`
 		return nil, fmt.Errorf("clickhouse query traces: %w", err)
 	}
 	defer rows.Close()
+	budget := storage.NewResponseBudget(ctx)
 	var out []json.RawMessage
 	for rows.Next() {
 		var (
@@ -314,6 +323,9 @@ FROM trace_proj`
 		b, err := json.Marshal(doc)
 		if err != nil {
 			return nil, fmt.Errorf("marshal trace doc: %w", err)
+		}
+		if err := budget.Add(len(b)); err != nil {
+			return nil, err
 		}
 		out = append(out, b)
 	}

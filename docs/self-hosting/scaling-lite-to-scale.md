@@ -42,6 +42,20 @@ LLMOBS_CH_MAX_ROWS_TO_READ=50000000
 LLMOBS_CH_MAX_BYTES_TO_READ=5368709120
 ```
 
+**Query response-size ceiling (both profiles).** The Query API bounds the row
+*count* of a page, but a page of wide-payload rows (large `input`/`output` blobs)
+can still serialize into an enormous response. `LLMOBS_QUERY_MAX_RESPONSE_BYTES`
+caps the serialized size of a single query or trace-tree response; a query that
+would exceed it gets a typed `response_too_large` **413** telling the caller to
+narrow the query or paginate — never an out-of-memory crash of the kernel. This
+guard applies in **both** the lite (Postgres) and scale (ClickHouse) profiles,
+enforced identically in each adapter (cross-adapter conformance covers it). Default
+is 32 MiB; `0` disables the bound (not recommended).
+
+```
+LLMOBS_QUERY_MAX_RESPONSE_BYTES=33554432   # 32 MiB (default); both profiles
+```
+
 A store that is 0%, 50%, or 100% migrated is **equally correct to a reader**. That
 is the whole point: correctness never depends on the backfill having finished.
 

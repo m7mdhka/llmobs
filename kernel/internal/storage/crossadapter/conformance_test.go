@@ -28,6 +28,7 @@ package crossadapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strconv"
 	"testing"
@@ -264,6 +265,61 @@ func TestCrossAdapterRowQueries(t *testing.T) {
 			assertSameDocs(t, pgRows, chRows)
 		})
 	}
+}
+
+// TestCrossAdapterResponseBudget is the #83 cross-adapter parity proof: the
+// serialized-response byte ceiling must hold IDENTICALLY on Postgres (lite) and
+// ClickHouse (scale) — the bug is BOTH-profile, so a fix proven on one engine is not
+// proven. Against a tight budget BOTH adapters must refuse the SAME query with
+// storage.ErrResponseTooLarge (the typed 413 the server maps, never an OOM/500);
+// against a generous budget BOTH must return the SAME rows (the bound never corrupts a
+// legitimate read). Because both adapters enforce the ONE shared storage.ResponseBudget
+// in their scan loops, this asserts that single mechanism behaves the same through two
+// different SQL engines + drivers.
+func TestCrossAdapterResponseBudget(t *testing.T) {
+	h := setup(t)
+	doc := qdoc("spans", nil, nil) // spans-all: the seeded set has multiple non-trivial rows
+	cpg := compile(t, "spans", doc, query.PostgresDialect)
+	cch := compile(t, "spans", doc, query.ClickHouseDialect)
+
+	// Sanity: an unbounded read returns a non-empty, cross-adapter-identical set.
+	base := context.Background()
+	pgFull, err := h.pg.QuerySpans(base, cpg.Where, cpg.Args, cpg.Order, cpg.Limit)
+	if err != nil {
+		t.Fatalf("pg unbounded: %v", err)
+	}
+	chFull, err := h.ch.QuerySpans(base, cch.Where, cch.Args, cch.Order, cch.Limit)
+	if err != nil {
+		t.Fatalf("ch unbounded: %v", err)
+	}
+	if len(pgFull) == 0 {
+		t.Fatal("seed produced no spans — the budget parity proof needs rows")
+	}
+	assertSameDocs(t, pgFull, chFull)
+
+	// Tight budget (1 byte): every real row exceeds it, so BOTH engines must refuse with
+	// the SAME typed sentinel — not partial rows, not an engine-specific error, not an OOM.
+	tight := storage.WithResponseBudget(context.Background(), 1)
+	if _, err := h.pg.QuerySpans(tight, cpg.Where, cpg.Args, cpg.Order, cpg.Limit); !errors.Is(err, storage.ErrResponseTooLarge) {
+		t.Fatalf("postgres: tight budget must return ErrResponseTooLarge, got %v", err)
+	}
+	if _, err := h.ch.QuerySpans(tight, cch.Where, cch.Args, cch.Order, cch.Limit); !errors.Is(err, storage.ErrResponseTooLarge) {
+		t.Fatalf("clickhouse: tight budget must return ErrResponseTooLarge, got %v", err)
+	}
+
+	// Generous budget (32 MiB): the bound is inert for a normal page — BOTH return the
+	// full, identical set (prove-the-negative: the guard does not degrade legitimate reads).
+	roomy := storage.WithResponseBudget(context.Background(), 32<<20)
+	pgOK, err := h.pg.QuerySpans(roomy, cpg.Where, cpg.Args, cpg.Order, cpg.Limit)
+	if err != nil {
+		t.Fatalf("postgres: generous budget must not refuse a normal page, got %v", err)
+	}
+	chOK, err := h.ch.QuerySpans(roomy, cch.Where, cch.Args, cch.Order, cch.Limit)
+	if err != nil {
+		t.Fatalf("clickhouse: generous budget must not refuse a normal page, got %v", err)
+	}
+	assertSameDocs(t, pgOK, chOK)
+	assertSameDocs(t, pgFull, pgOK) // a roomy bound is byte-identical to no bound
 }
 
 func TestCrossAdapterAggregation(t *testing.T) {

@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -34,6 +35,12 @@ type Server struct {
 	signer    *plugintoken.Signer // verifies plugin service tokens + user assertions (H3)
 	dialect   Dialect             // SQL dialect the compiler emits for this store
 	dual      *dualstore.Store    // when set, reads unify lite∪scale (RULING-MIG6); nil = single store
+	// maxResponseBytes caps the SERIALIZED size of a single query/tree response (#83).
+	// Row count is already bounded by the DSL limit, but a page of wide-payload rows is
+	// not — without this the kernel buffers an unbounded response and OOMs (a BOTH-profile
+	// DoS). Enforced in the adapter scan loops via storage.ResponseBudget; exceeding it
+	// yields a typed response_too_large 413, never a 500. 0 = unbounded (not recommended).
+	maxResponseBytes int64
 	// role resolves a session user's membership role in the org that owns a project
 	// (Arc O / O2) — the per-request-per-project authority the session (Case 2) auth path
 	// intersects. Defaults to controlplane.RoleForProject over the pool; injectable so the
@@ -54,6 +61,19 @@ func (s *Server) SetRoleResolver(fn func(ctx context.Context, userID, projectID 
 // compile per-dialect and merge. The write path (pipeline) must use the same dual
 // store so a span is immediately readable across the boundary.
 func (s *Server) SetDualStore(d *dualstore.Store) { s.dual = d }
+
+// DefaultMaxResponseBytes is the default serialized-response ceiling (#83): 32 MiB,
+// comfortably above any legitimate 1000-row page yet far below what OOMs the kernel.
+const DefaultMaxResponseBytes int64 = 32 << 20
+
+// SetMaxResponseBytes overrides the serialized-response ceiling (operator knob
+// LLMOBS_QUERY_MAX_RESPONSE_BYTES). n<=0 disables the bound; non-positive is ignored
+// here so a misconfig can't silently un-cap — the caller passes the resolved default.
+func (s *Server) SetMaxResponseBytes(n int64) {
+	if n > 0 {
+		s.maxResponseBytes = n
+	}
+}
 
 // pointReads is the non-compiled-SQL read/erase/score-ingest surface both the
 // single store and the dual decorator satisfy.
@@ -78,6 +98,7 @@ func (s *Server) reads() pointReads {
 func NewServer(store storage.TelemetryStore, pool *pgxpool.Pool, log *slog.Logger, maxWindow time.Duration, reg *metrics.Registry, signer *plugintoken.Signer) *Server {
 	return &Server{
 		store: store, pool: pool, log: log, maxWindow: maxWindow, metrics: reg, signer: signer, dialect: PostgresDialect,
+		maxResponseBytes: DefaultMaxResponseBytes,
 		role: func(ctx context.Context, userID, projectID string) (string, error) {
 			return controlplane.RoleForProject(ctx, pool, userID, projectID)
 		},
@@ -308,8 +329,13 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 	if target == "scores" {
 		anchor = "timestamp"
 	}
-	rows, err := s.listRows(r.Context(), target, doc, id.ProjectID, c)
+	ctx := storage.WithResponseBudget(r.Context(), s.maxResponseBytes)
+	rows, err := s.listRows(ctx, target, doc, id.ProjectID, c)
 	if err != nil {
+		if errors.Is(err, storage.ErrResponseTooLarge) {
+			writeErr(w, s.errResponseTooLarge())
+			return
+		}
 		s.log.Error("query execution", "err", err.Error())
 		writeErr(w, errf("internal", 500, "query failed"))
 		return
@@ -350,7 +376,7 @@ func (s *Server) RunQuery(w http.ResponseWriter, r *http.Request) {
 		s.metrics.CounterAdd("llmobs_query_requests_total", "Query requests by target.", lbl, 1)
 		s.metrics.Observe("llmobs_query_duration_seconds", "Query latency by target (seconds).", lbl, time.Since(started).Seconds())
 	}
-	writeJSON(w, http.StatusOK, resp)
+	s.writeData(w, resp)
 }
 
 // runAggregation handles an aggregation query (QD-4). Group rows carry only
@@ -388,7 +414,7 @@ func (s *Server) runAggregation(w http.ResponseWriter, r *http.Request, doc map[
 	for i, w := range warnings {
 		warns[i] = w
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	s.writeData(w, map[string]any{
 		"version":  "v1alpha1",
 		"data":     data,
 		"stats":    map[string]any{"elapsed_ms": time.Since(started).Milliseconds(), "returned": len(groups)},
@@ -563,6 +589,38 @@ func cursorFromDoc(doc json.RawMessage, anchorField string) (time.Time, string, 
 		return time.Time{}, "", false
 	}
 	return st, id, true
+}
+
+// writeData is the SINGLE serialization seam for query-API data responses and the
+// AUTHORITATIVE #83 response-size guard (invariant 11: enforce at the ONE convergence
+// seam, not per-caller). Because the byte check and the write are the SAME call, a
+// handler cannot emit a data response without the ceiling being applied — a new
+// read/aggregation handler inherits the guard by calling writeData, not by remembering
+// a separate check. The adapter scan-loop budget bounds memory DURING accumulation (the
+// OOM guard); this bounds the final serialized envelope after any dual-read merge, so
+// the ceiling holds exactly even when two per-adapter-bounded sets merge past it.
+func (s *Server) writeData(w http.ResponseWriter, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		writeErr(w, errf("internal", 500, "encode failed"))
+		return
+	}
+	if s.maxResponseBytes > 0 && int64(len(b)) > s.maxResponseBytes {
+		writeErr(w, s.errResponseTooLarge())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b)
+}
+
+// errResponseTooLarge is the typed 413 for #83: a valid query whose serialized result
+// would exceed the response ceiling. The message tells the caller how to recover
+// (narrow or paginate) rather than dumping an opaque 500.
+func (s *Server) errResponseTooLarge() *CompileError {
+	return errf("response_too_large", 413,
+		"query response exceeds the %d-byte ceiling; narrow the query (fewer or narrower fields, a tighter filter) or paginate with a smaller limit and follow the cursor",
+		s.maxResponseBytes)
 }
 
 func writeErr(w http.ResponseWriter, e *CompileError) {

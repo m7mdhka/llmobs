@@ -273,6 +273,7 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 		return nil, err
 	}
 	defer done()
+	budget := storage.NewResponseBudget(ctx)
 	var out []json.RawMessage
 	for rows.Next() {
 		var (
@@ -325,6 +326,9 @@ func (s *Store) QueryTraces(ctx context.Context, where string, args []any, order
 		if err != nil {
 			return nil, err
 		}
+		if err := budget.Add(len(b)); err != nil {
+			return nil, err
+		}
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -340,10 +344,14 @@ func (s *Store) GetTraceSpans(ctx context.Context, projectID, traceID string) ([
 		return nil, err
 	}
 	defer rows.Close()
+	budget := storage.NewResponseBudget(ctx)
 	var out []json.RawMessage
 	for rows.Next() {
 		var doc []byte
 		if err := rows.Scan(&doc); err != nil {
+			return nil, err
+		}
+		if err := budget.Add(len(doc)); err != nil {
 			return nil, err
 		}
 		out = append(out, doc)
@@ -368,10 +376,14 @@ func (s *Store) QuerySpans(ctx context.Context, where string, args []any, order 
 		return nil, err
 	}
 	defer done()
+	budget := storage.NewResponseBudget(ctx)
 	var out []json.RawMessage
 	for rows.Next() {
 		var doc []byte
 		if err := rows.Scan(&doc); err != nil {
+			return nil, err
+		}
+		if err := budget.Add(len(doc)); err != nil {
 			return nil, err
 		}
 		out = append(out, doc)

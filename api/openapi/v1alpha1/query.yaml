@@ -53,6 +53,7 @@ paths:
               schema: { $ref: "#/components/schemas/QueryResponse" }
         "400": { $ref: "#/components/responses/InvalidQuery" }
         "403": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/ResponseTooLarge" }
         "422": { $ref: "#/components/responses/OverLimit" }
 
   /v1alpha1/traces/{trace_id}/tree:
@@ -75,6 +76,7 @@ paths:
               schema: { $ref: "#/components/schemas/TraceTree" }
         "403": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/ResponseTooLarge" }
 
   /v1alpha1/spans:
     delete:
@@ -134,6 +136,7 @@ paths:
               schema: { $ref: "../../model/v1alpha1/schema/trace.schema.json" }
         "403": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/ResponseTooLarge" }
 
   /v1alpha1/scores/{id}:
     get:
@@ -220,6 +223,16 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    ResponseTooLarge:
+      description: >
+        413: the query is valid but its serialized result would exceed the server's
+        response-size ceiling (response_too_large). The kernel refuses to buffer an
+        unbounded response — a both-profile DoS guard (row count is bounded, but a
+        page of wide-payload rows is not). Narrow the query (fewer/narrower fields,
+        tighter filter) or paginate with a smaller limit and follow the cursor.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
     QueryResponse:
@@ -280,7 +293,7 @@ components:
       properties:
         code:
           type: string
-          enum: [schema_invalid, unknown_field, operator_not_allowed, condition_limit_exceeded, ceiling_exceeded, score_type_mismatch, not_orderable, not_groupable, unauthorized, not_found]
+          enum: [schema_invalid, unknown_field, operator_not_allowed, condition_limit_exceeded, ceiling_exceeded, response_too_large, score_type_mismatch, not_orderable, not_groupable, unauthorized, not_found]
         message: { type: string }
         detail:
           type: object

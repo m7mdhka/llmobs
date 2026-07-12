@@ -2,10 +2,12 @@ package query
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane/perm"
+	"github.com/m7mdhka/llmobs/kernel/internal/storage"
 )
 
 // GetTraceTree: GET /v1alpha1/traces/{trace_id}/tree — the trace and its spans in
@@ -17,8 +19,13 @@ func (s *Server) GetTraceTree(w http.ResponseWriter, r *http.Request, traceID st
 		writeErr(w, aerr)
 		return
 	}
-	rows, err := s.reads().GetTraceSpans(r.Context(), ident.ProjectID, traceID)
+	ctx := storage.WithResponseBudget(r.Context(), s.maxResponseBytes)
+	rows, err := s.reads().GetTraceSpans(ctx, ident.ProjectID, traceID)
 	if err != nil {
+		if errors.Is(err, storage.ErrResponseTooLarge) {
+			writeErr(w, s.errResponseTooLarge())
+			return
+		}
 		s.log.Error("trace tree fetch", "err", err.Error())
 		writeErr(w, errf("internal", 500, "fetch failed"))
 		return
@@ -42,7 +49,7 @@ func (s *Server) GetTraceTree(w http.ResponseWriter, r *http.Request, traceID st
 		delete(trace, "attributes")
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	s.writeData(w, map[string]any{
 		"trace": trace,
 		"spans": ordered,
 	})
@@ -55,8 +62,13 @@ func (s *Server) GetTrace(w http.ResponseWriter, r *http.Request, id string) {
 		writeErr(w, aerr)
 		return
 	}
-	rows, err := s.reads().GetTraceSpans(r.Context(), ident.ProjectID, id)
+	ctx := storage.WithResponseBudget(r.Context(), s.maxResponseBytes)
+	rows, err := s.reads().GetTraceSpans(ctx, ident.ProjectID, id)
 	if err != nil {
+		if errors.Is(err, storage.ErrResponseTooLarge) {
+			writeErr(w, s.errResponseTooLarge())
+			return
+		}
 		writeErr(w, errf("internal", 500, "fetch failed"))
 		return
 	}
@@ -68,7 +80,7 @@ func (s *Server) GetTrace(w http.ResponseWriter, r *http.Request, id string) {
 	if !ident.HasScope(perm.TracesReadPayloads) {
 		delete(trace, "attributes")
 	}
-	writeJSON(w, http.StatusOK, trace)
+	s.writeData(w, trace)
 }
 
 func decodeSpans(rows []json.RawMessage) []map[string]any {

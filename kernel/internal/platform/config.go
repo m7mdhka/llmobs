@@ -28,6 +28,12 @@ type Config struct {
 	BootstrapAdminPwd  string `json:"bootstrap_admin_password"`
 	QueryMaxWindow     string `json:"query_max_window"`     // e.g. "720h"; LLMOBS_QUERY_MAX_WINDOW
 	QueryStmtTimeout   string `json:"query_stmt_timeout"`   // server-side statement_timeout for DSL reads; e.g. "30s"
+	// QueryMaxResponseBytes caps the SERIALIZED size of a single query/trace-tree response
+	// (#83). Row count is already bounded, but a page of wide-payload rows is not — without
+	// this the kernel buffers an unbounded response and OOMs (a BOTH-profile DoS). Exceeding
+	// it returns a typed response_too_large 413. LLMOBS_QUERY_MAX_RESPONSE_BYTES; 0 => the
+	// built-in 32 MiB default (query.DefaultMaxResponseBytes).
+	QueryMaxResponseBytes int64 `json:"query_max_response_bytes"`
 	CookieSecure       bool   `json:"cookie_secure"`        // set Secure on session cookies
 	PublicURL          string `json:"public_url"`           // external origin for OIDC redirect_uri (O5); empty => derive from request Host
 	SecretboxKey       string `json:"secretbox_key"`        // base64 32-byte key sealing SSO client secrets (O5); empty => ephemeral (config lost on restart)
@@ -177,6 +183,7 @@ func LoadConfig() (Config, error) {
 	envInt64(brand.Env("CH_MAX_MEMORY_BYTES"), &c.CHMaxMemoryBytes)
 	envInt64(brand.Env("CH_MAX_ROWS_TO_READ"), &c.CHMaxRowsToRead)
 	envInt64(brand.Env("CH_MAX_BYTES_TO_READ"), &c.CHMaxBytesToRead)
+	envInt64(brand.Env("QUERY_MAX_RESPONSE_BYTES"), &c.QueryMaxResponseBytes)
 	envBool(brand.Env("BACKFILL_ON_BOOT"), &c.BackfillOnBoot)
 	envInt(brand.Env("BACKFILL_CHUNK_SIZE"), &c.BackfillChunkSize)
 	envStr(brand.Env("BACKFILL_BUDGET"), &c.BackfillBudget)

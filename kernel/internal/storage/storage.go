@@ -85,6 +85,59 @@ func IsAggregateKind(kind string) bool {
 // into persist-health (it is not a sign the adapter is unwell).
 var ErrSuppressedByErasure = errors.New("span suppressed by erasure tombstone")
 
+// ErrResponseTooLarge is returned by the DSL read adapters when a result set's
+// SERIALIZED bytes would exceed the per-request response ceiling (#83). Row COUNT is
+// already bounded by the DSL limit, but a page of wide-payload rows (large
+// input/output blobs) is not — so without a byte bound the kernel buffers an
+// unbounded response and OOMs/500s. This is a BOTH-PROFILE guard: the same unbounded
+// accumulation happens on Postgres (lite) and ClickHouse (scale), so both adapters
+// enforce the SAME bound at the SAME seam. The query server maps this to a typed
+// `response_too_large` 413, never a 500 — the caller learns to narrow/paginate.
+var ErrResponseTooLarge = errors.New("query response exceeds size ceiling")
+
+type responseBudgetKey struct{}
+
+// WithResponseBudget attaches a serialized-response byte ceiling to ctx. maxBytes<=0
+// means unbounded — the opt-out for internal/tooling callers (backfill, conformance)
+// that are not serving an HTTP response and must not be capped. The DSL read adapters
+// read the budget via NewResponseBudget and enforce it WHILE accumulating rows, so a
+// pathological result set is refused before it is ever fully buffered (the OOM guard,
+// not just a post-hoc size check).
+func WithResponseBudget(ctx context.Context, maxBytes int64) context.Context {
+	return context.WithValue(ctx, responseBudgetKey{}, maxBytes)
+}
+
+// ResponseBudget tracks running serialized bytes against the ctx ceiling. It is the
+// ONE definition of the bound + error, shared by every adapter's list-read scan loop
+// (invariant 11: enforce at the convergence seam, not per-caller). A new adapter
+// inherits the DoS guard by calling Add in its scan loop, not by re-deriving a limit.
+type ResponseBudget struct {
+	max  int64 // <=0 disables the bound
+	used int64
+}
+
+// NewResponseBudget reads the ceiling attached by WithResponseBudget. An absent
+// budget (internal callers) yields an unbounded budget whose Add is a no-op.
+func NewResponseBudget(ctx context.Context) *ResponseBudget {
+	max, _ := ctx.Value(responseBudgetKey{}).(int64)
+	return &ResponseBudget{max: max}
+}
+
+// Add records n serialized bytes and returns ErrResponseTooLarge once the running
+// total exceeds the ceiling. Called per-row during accumulation, so an adapter never
+// holds more than ceiling + one row before refusing — bounding memory, not just the
+// returned slice. A disabled budget (max<=0) always returns nil.
+func (b *ResponseBudget) Add(n int) error {
+	if b.max <= 0 {
+		return nil
+	}
+	b.used += int64(n)
+	if b.used > b.max {
+		return ErrResponseTooLarge
+	}
+	return nil
+}
+
 // Op is an ingested event operation.
 type Op string
 

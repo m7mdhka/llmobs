@@ -28,6 +28,7 @@ const (
 	ErrorCodeNotGroupable           ErrorCode = "not_groupable"
 	ErrorCodeNotOrderable           ErrorCode = "not_orderable"
 	ErrorCodeOperatorNotAllowed     ErrorCode = "operator_not_allowed"
+	ErrorCodeResponseTooLarge       ErrorCode = "response_too_large"
 	ErrorCodeSchemaInvalid          ErrorCode = "schema_invalid"
 	ErrorCodeScoreTypeMismatch      ErrorCode = "score_type_mismatch"
 	ErrorCodeUnauthorized           ErrorCode = "unauthorized"
@@ -90,6 +91,9 @@ type NotFound = Error
 
 // OverLimit defines model for OverLimit.
 type OverLimit = Error
+
+// ResponseTooLarge defines model for ResponseTooLarge.
+type ResponseTooLarge = Error
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Error

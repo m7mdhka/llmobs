@@ -109,10 +109,14 @@ func (s *Store) QueryScores(ctx context.Context, where string, args []any, order
 		return nil, err
 	}
 	defer done()
+	budget := storage.NewResponseBudget(ctx)
 	var out []json.RawMessage
 	for rows.Next() {
 		var doc []byte
 		if err := rows.Scan(&doc); err != nil {
+			return nil, err
+		}
+		if err := budget.Add(len(doc)); err != nil {
 			return nil, err
 		}
 		out = append(out, doc)

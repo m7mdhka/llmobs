@@ -1,0 +1,32 @@
+{
+  "$comment": "#79 (Opik #7137). OpenAI's Chat Completions reports audio tokens under the NESTED usage details (prompt_tokens_details.audio_tokens / completion_tokens_details.audio_tokens) — the real API shape, distinct from the flat *_audio_tokens spelling. The normalizer must map BOTH nested spellings to audio_input/audio_output so audio bills at the audio rate, not the text rate. Synthetic.",
+  "resourceSpans": [
+    {
+      "resource": { "attributes": [ { "key": "service.name", "value": { "stringValue": "audio-svc" } } ] },
+      "scopeSpans": [
+        {
+          "scope": { "name": "otel-genai-demo", "version": "0.1.0" },
+          "spans": [
+            {
+              "traceId": "33333f3577b34da6a3ce929d0e0e4736",
+              "spanId": "d4d4d4d4d4d4d4d4",
+              "name": "chat gpt-4o-audio (nested)",
+              "kind": 3,
+              "startTimeUnixNano": "1720000000000000000",
+              "endTimeUnixNano": "1720000002000000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o-audio-preview" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "500" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "200" } },
+                { "key": "gen_ai.usage.prompt_tokens_details.audio_tokens", "value": { "intValue": "300" } },
+                { "key": "gen_ai.usage.completion_tokens_details.audio_tokens", "value": { "intValue": "150" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

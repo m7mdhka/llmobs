@@ -14,6 +14,7 @@
 package ingest
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -162,9 +163,9 @@ func (r *Receiver) Handler() http.Handler {
 			retryable503(w, reason)
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes))
-		if err != nil {
-			http.Error(w, "read error", http.StatusBadRequest)
+		body, status := decodeBody(req)
+		if status != http.StatusOK {
+			http.Error(w, "cannot read request body", status)
 			return
 		}
 		bearer := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
@@ -181,6 +182,40 @@ func (r *Receiver) Handler() http.Handler {
 		writeExportResponse(w, ct)
 	})
 	return mux
+}
+
+// decodeBody reads the request body, transparently decompressing `Content-Encoding: gzip`
+// (OTLP exporters — the OTel SDKs, the Collector's otlphttp exporter — commonly enable gzip;
+// without this a normal gzipped export fails to unmarshal, #78). Decompression is BOUNDED to
+// maxBodyBytes to defeat a gzip bomb: a tiny compressed body cannot expand into unbounded
+// memory — an over-cap decompressed stream is rejected (413), never buffered or partially
+// processed. Returns the body and http.StatusOK, or (nil, statusCode) on a read/decode error.
+func decodeBody(req *http.Request) ([]byte, int) {
+	if strings.Contains(strings.ToLower(req.Header.Get("Content-Encoding")), "gzip") {
+		// Cap the COMPRESSED read too, so an oversized compressed upload can't be buffered
+		// before we even start inflating it.
+		gz, err := gzip.NewReader(io.LimitReader(req.Body, maxBodyBytes))
+		if err != nil {
+			return nil, http.StatusBadRequest
+		}
+		defer func() { _ = gz.Close() }()
+		// Read one byte past the cap so an exactly-at-cap body is accepted but anything larger
+		// is detected and rejected rather than silently truncated.
+		body, err := io.ReadAll(io.LimitReader(gz, maxBodyBytes+1))
+		if err != nil {
+			return nil, http.StatusBadRequest
+		}
+		if len(body) > maxBodyBytes {
+			return nil, http.StatusRequestEntityTooLarge
+		}
+		return body, http.StatusOK
+	}
+	// Non-gzip path: unchanged here (its silent-truncation cap is fixed under #97).
+	body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes))
+	if err != nil {
+		return nil, http.StatusBadRequest
+	}
+	return body, http.StatusOK
 }
 
 // retryable503 signals a retryable rejection with a conservative Retry-After so

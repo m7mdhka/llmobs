@@ -1,5 +1,7 @@
 # LLMObs Implementation Backlog (canonical)
 
+> **Developer-impact pass — COMPLETE (2026-07-12).** First-run verified clean end-to-end (quickstart + plugin-author); every unambiguous wrong-cost bug fixed with per-provider prove-the-negative fixtures (#79 audio, #146 cache_read, + the #78/#97/#130/#127/#106/#102 cluster). No developer-hits-it-today issue is unfixed. Remainders are correctly deferred: **#148** (reasoning nested spellings — cost-neutral data-quality, explicit trigger) and cross-provider audio/cache fixtures (need real captured spans, not code). Resume only on explicit kickoff.
+
 **This is the single source of truth for owed implementation work.** Every entry
 traces to an already-banked decision (a pinned rule, a fixture-to-add, a verify-now, a
 hardening, a design-note for a future arc). Nothing here is invented — provenance is

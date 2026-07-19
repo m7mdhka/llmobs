@@ -52,3 +52,7 @@ Thumbs.db
 # ---- Example app build outputs ----
 examples/*/otel-genai-demo
 examples/**/*.bin
+
+# Python bytecode cache
+__pycache__/
+*.pyc

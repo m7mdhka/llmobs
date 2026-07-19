@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../api/schemas/manifest/v1alpha1/llmobs-plugin.schema.json
+apiVersion: llmobs.dev/v1alpha1
+kind: Plugin
+metadata:
+  id: llmobs/n8n-compat
+  name: n8n workflow tracing
+  version: 0.1.0
+  description: >
+    Traces n8n workflow runs with NO upstream instrumentation. n8n emits no
+    OpenTelemetry, so this is a cold-path compat plugin: on a schedule it polls n8n's
+    execution REST API, maps each finished workflow run into canonical spans (workflow
+    = trace, each node = a span), and pushes them through the ingest capability. The #1
+    community request an incumbent structurally cannot ship, delivered as a container +
+    a manifest.
+spec:
+  capabilities:
+    - ingest # push the translated spans (cold-path, service-token only)
+    - secrets # hold the n8n API key
+    - kv # remember the last-polled execution id (the poll cursor)
+  permissions:
+    - traces:write
+  # The kernel POSTs to /plugin/v1/poll on this cadence with a system identity
+  # assertion scoped to the plugin's own grant; each invocation runs one poll cycle.
+  jobs:
+    - name: poll
+      schedule: "@every 1m"
+      path: /plugin/v1/poll
+  backend:
+    url: http://n8n-compat:8080
+    healthPath: /plugin/v1/health
+    infoPath: /plugin/v1/info
+    # A poller makes progress only when n8n has new executions; a longer budget avoids
+    # flagging an idle-but-healthy plugin as degraded.
+    watermarkBudget: 10m

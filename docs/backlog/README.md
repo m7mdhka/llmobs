@@ -14,6 +14,20 @@
 
 ---
 
+> **Four-track sprint — COMPLETE (2026-07-19).** Four independent arcs landed on develop,
+> each adversarially reviewed (security + boundary) and green:
+> **(1)** P0 live-surface cluster — C3 fields.json accept-or-reject consistency check (real,
+> caught a `total_cost` drift), A8 null usage-detail tolerance, D1 fail-loud compose creds.
+> **(2)** Event-bus poison-message dead-letter (#110, ADR-0036) — `events.fail()` as the
+> permanent-vs-transient seam; no poison can head-of-line-block or trigger the bulk-drop of
+> good events. **(3)** Blobs primitive foundation (#120, ADR-0037) — the `blob.Store` seam +
+> tenant-isolating, fs-safe, injective key derivation + local adapter; gateway/cap/SDK/S3/GC
+> are the tracked build follow-on. **(4)** n8n compat plugin (#35) — the flagship demand item,
+> now a first-party reference plugin (workflow→span mapping, scheduled poller with the same
+> permanent-vs-transient taxonomy as #110). Reviews caught real bugs in each (a UTF-8 truncation,
+> a NAME_MAX segment overflow, and — notably — the poller re-committing the #110 invariant-12
+> violation, all fixed). Resume only on explicit kickoff.
+
 > **Developer-impact pass — COMPLETE (2026-07-12).** First-run verified clean end-to-end (quickstart + plugin-author); every unambiguous wrong-cost bug fixed with per-provider prove-the-negative fixtures (#79 audio, #146 cache_read, + the #78/#97/#130/#127/#106/#102 cluster). No developer-hits-it-today issue is unfixed. Remainders are correctly deferred: **#148** (reasoning nested spellings — cost-neutral data-quality, explicit trigger) and cross-provider audio/cache fixtures (need real captured spans, not code). Resume only on explicit kickoff.
 
 **This is the single source of truth for owed implementation work.** Every entry
@@ -72,9 +86,9 @@ These four apply to code that ships today. Recommended order:
 | ID | Entry | Type | Blocking | Effort | Sources | Issue |
 |---|---|---|---|---|---|---|
 | C1 | Permission intersection covers name/slug resolution, not just id | verify-now | live tenant-isolation | S | Opik mine (#7019); ADR-0025 R6; CLAUDE.md inv-11 | #70 |
-| C3 | `fields.json` field rejected-at-validate if a path can't evaluate it | add-fixture | live DSL correctness | M | Opik mine (#6344); DSL §9.1; `08-data-quality.md` | #71 |
-| A8 | Null usage-detail objects normalize as absent, never error | add-fixture | live ingest robustness | S | Opik mine (#3397); canonical model spec §7; DSL §9.1 | #71 |
-| D1 | Compose creds fail-loud (`${VAR:?err}` + e2e env-file) | hardening | prod copy-paste safety | M | Opik mine (#5596); deploy.md | #69 |
+| ~~C3~~ | ~~`fields.json` field rejected-at-validate if a path can't evaluate it~~ **DONE** — `fields_consistency_test` asserts every contract field is evaluable on all four query paths or 422-rejected; caught + fixed a real drift (`total_cost` queryable-but-undocumented on traces); 3 unevaluable fields marked `deferred`. | add-fixture | live DSL correctness | M | Opik mine (#6344) | #71 ✅ |
+| ~~A8~~ | ~~Null usage-detail objects normalize as absent, never error~~ **DONE** — `null_usage_detail_test` proves the OTLP path is immune (nil-safe AsRaw + toInt); no fabricated cost on all-null usage. | add-fixture | live ingest robustness | S | Opik mine (#3397) | #71 ✅ |
+| ~~D1~~ | ~~Compose creds fail-loud (`${VAR:?err}` + e2e env-file)~~ **DONE** — every compose credential is a required `${VAR:?}`; committed dev-only `dev.env` wired via `--env-file`; `dev.sh` sources it so `make dev` stays green. | hardening | prod copy-paste safety | M | Opik mine (#5596) | ✅ |
 
 ---
 

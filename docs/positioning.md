@@ -132,7 +132,10 @@ endpoint) that polls n8n's execution REST API (`/executions/{id}` exposes node
 inputs, outputs, and sub-workflow structure) and translates workflow runs into
 canonical spans server-side — a container + manifest, no upstream instrumentation
 required, shippable by anyone without touching kernel code. The single strongest
-validation of the plugin thesis in the entire corpus.
+validation of the plugin thesis in the entire corpus. **This now exists as a
+first-party reference plugin** (`plugins/n8n-compat/`): the workflow-run→span mapping
+is fixture-tested (workflow = trace, each node = a span, the node graph = the span
+tree), proving the claim concretely rather than only rhetorically.
 
 **Evidence (the economics).** Demand is a long tail of *target systems*, each a
 plugin/normalizer in our model but a roadmap line item in a monolith. Ranked by

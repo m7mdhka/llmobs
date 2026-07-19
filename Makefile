@@ -86,9 +86,10 @@ test: ## Run unit tests (Go + TS)
 	@pnpm --filter @llmobs/plugin-tracing test
 
 .PHONY: plugin-python-test
-plugin-python-test: ## Python plugin backend tests (cross-language interop + Langfuse translation)
-	@echo ">> plugin-python: Python verifies a Go-signed token vector + Langfuse->OTLP translation"
+plugin-python-test: ## Python plugin backend tests (cross-language interop + Langfuse/n8n translation)
+	@echo ">> plugin-python: Python verifies a Go-signed token vector + Langfuse->OTLP + n8n->OTLP translation"
 	@cd plugins/langfuse-compat/backend && python3 interop_test.py && python3 translate_test.py
+	@cd plugins/n8n-compat/backend && python3 translate_test.py && python3 poll_test.py
 
 .PHONY: lint
 lint: ## Run all linters (Go + TS + boundary/import checks)

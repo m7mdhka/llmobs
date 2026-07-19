@@ -1,6 +1,7 @@
 {
   "version": "v1alpha1",
-  "_comment": "QUERYABLE FIELD REGISTRY. HAND-AUTHORED NOW, TO BE GENERATED from api/model/v1alpha1 later. It MUST exactly match the promoted/first-class fields in api/model/v1alpha1/02-span.md (spans), 03-trace.md (traces), and 04-score.md (scores). A CI consistency check asserts this. class values map to the operator sets in 00-dsl-spec.md \u00a72. 'orderable' = usable in orderBy (promoted/indexed); 'groupable' = usable in groupBy; map/reference fields are queried via key-scoped / reference conditions, never orderBy/groupBy.",
+  "_comment": "QUERYABLE FIELD REGISTRY. HAND-AUTHORED NOW, TO BE GENERATED from the canonical model spec later. It MUST exactly match the promoted/first-class fields in the model spec (span, trace, and score sections). The kernel's fields_consistency_test asserts this against the compiler's field maps. class values map to the operator sets in the DSL spec. 'orderable' = usable in orderBy (promoted/indexed); 'groupable' = usable in groupBy; map/reference fields are queried via key-scoped / reference conditions, never orderBy/groupBy.",
+  "_deferred_comment": "'deferred':true marks a field the contract RESERVES but the compiler cannot yet evaluate (e.g. no string_array support, or a raw-preserved field not yet exposed to filters). A deferred field MUST be REJECTED at validate time (unknown_field 422) on every path \u2014 never accepted-then-silently-ignored. The consistency test enforces that a deferred field is absent from the compiler map (so it 422s) and a non-deferred field is present. Promoting a field = drop the marker AND wire it into the compiler in the same change.",
   "classes": [
     "string",
     "enum",
@@ -165,7 +166,8 @@
           "value_type": "numeric",
           "orderable": false,
           "groupable": false,
-          "anchor": "06-usage-cost.md \u00a71"
+          "deferred": true,
+          "anchor": "06-usage-cost.md \u00a71 (raw-preserved input; filter via canonical usage_details)"
         },
         {
           "name": "provided_cost_details",
@@ -173,7 +175,8 @@
           "value_type": "numeric",
           "orderable": false,
           "groupable": false,
-          "anchor": "06-usage-cost.md \u00a71"
+          "deferred": true,
+          "anchor": "06-usage-cost.md \u00a71 (raw-preserved input; filter via canonical cost_details)"
         },
         {
           "name": "prompt_ref",
@@ -292,7 +295,8 @@
           "class": "string_array",
           "orderable": false,
           "groupable": false,
-          "anchor": "03-trace.md \u00a72"
+          "deferred": true,
+          "anchor": "03-trace.md \u00a72 (string_array; compiler has no string_array support yet)"
         },
         {
           "name": "attributes",
@@ -325,6 +329,14 @@
           "groupable": true,
           "computed": true,
           "anchor": "08-data-quality.md (llmobs.dq.incomplete_trace)"
+        },
+        {
+          "name": "total_cost",
+          "class": "decimal",
+          "orderable": true,
+          "groupable": false,
+          "computed": true,
+          "anchor": "06-usage-cost.md §7.1 (derived: SUM of non-aggregate spans' total_cost)"
         }
       ]
     },

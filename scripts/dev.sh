@@ -14,6 +14,12 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# Load the dev-only credentials the compose Postgres is configured with (the same file
+# compose reads via --env-file), so the go-run kernel below connects with the SAME
+# password. dev.env is the single source of truth; a drift here is what makes `make dev`
+# fail to connect.
+set -a; . deploy/compose/dev.env; set +a
+
 SHELL_PORT="${SHELL_PORT:-3000}"
 PLUGIN_PORT="${PLUGIN_PORT:-3001}"
 KERNEL_API_PORT="${KERNEL_API_PORT:-8080}"
@@ -21,7 +27,7 @@ PG_PORT="${LLMOBS_DEV_PG_PORT:-5432}"
 ADMIN_EMAIL="${LLMOBS_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
 ADMIN_PW="${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:-admin-dev-password}"
 DEMO_KEY="${LLMOBS_BOOTSTRAP_API_KEY:-sk-dev-demo-key}"
-COMPOSE=(docker compose -f deploy/compose/dev.yaml)
+COMPOSE=(docker compose --env-file deploy/compose/dev.env -f deploy/compose/dev.yaml)
 
 pids=()
 cleanup() {
@@ -69,7 +75,7 @@ echo ">> dev: edit plugins/tracing/frontend/src/* → hot-reloads; edit kernel c
 # down. DEV_PLUGIN_REMOTES makes the registry advertise the plugin's live dev server.
 cd kernel
 exec env \
-  LLMOBS_DATABASE_URL="postgres://llmobs:llmobs@localhost:${PG_PORT}/llmobs?sslmode=disable" \
+  LLMOBS_DATABASE_URL="postgres://llmobs:${LLMOBS_POSTGRES_PASSWORD}@localhost:${PG_PORT}/llmobs?sslmode=disable" \
   LLMOBS_MIGRATE_ON_BOOT=true \
   LLMOBS_LOG_FORMAT=text \
   LLMOBS_API_ADDR=":${KERNEL_API_PORT}" \

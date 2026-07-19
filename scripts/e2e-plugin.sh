@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-COMPOSE=(docker compose -f deploy/compose/lite.yaml -f deploy/compose/e2e-plugin.yaml)
+COMPOSE=(docker compose --env-file deploy/compose/dev.env -f deploy/compose/lite.yaml -f deploy/compose/e2e-plugin.yaml)
 KEY="sk-e2e-demo-key"
 export LLMOBS_BOOTSTRAP_API_KEY="$KEY"
 export LLMOBS_API_PORT="${LLMOBS_API_PORT:-18080}"

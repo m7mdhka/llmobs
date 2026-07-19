@@ -1,5 +1,7 @@
 # Scale profile (foundation): Postgres + ClickHouse + the kernel.
-#   docker compose -f deploy/compose/scale.yaml up -d
+#   docker compose --env-file deploy/compose/dev.env -f deploy/compose/scale.yaml up -d
+# Credentials are REQUIRED (${VAR:?...}) with no inline defaults — a run without an
+# env-file fails loudly rather than booting with a known password (see dev.env).
 #
 # Per RULING-MIG6 (permanent dual-read), Postgres is NOT replaced by ClickHouse —
 # it stays as the historical/lite store while ClickHouse takes new high-volume
@@ -13,7 +15,9 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: llmobs
-      POSTGRES_PASSWORD: llmobs
+      # Required, no default: a compose-up without deploy/compose/dev.env (or a real
+      # secret) fails loudly rather than booting with a known password. See dev.env.
+      POSTGRES_PASSWORD: "${LLMOBS_POSTGRES_PASSWORD:?set LLMOBS_POSTGRES_PASSWORD — use --env-file deploy/compose/dev.env for dev, or your secret store}"
       POSTGRES_DB: llmobs
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U llmobs -d llmobs"]
@@ -28,7 +32,8 @@ services:
     environment:
       CLICKHOUSE_DB: llmobs
       CLICKHOUSE_USER: llmobs
-      CLICKHOUSE_PASSWORD: llmobs
+      # Required, no default (see POSTGRES_PASSWORD above / dev.env).
+      CLICKHOUSE_PASSWORD: "${LLMOBS_CLICKHOUSE_PASSWORD:?set LLMOBS_CLICKHOUSE_PASSWORD — use --env-file deploy/compose/dev.env for dev, or your secret store}"
       # Let the bootstrap user self-manage grants in this single-node profile; a
       # real cluster grants the exact set from clickhouse.RequiredGrants() (R-CH8).
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
@@ -41,7 +46,7 @@ services:
       - ./clickhouse/config.d/system-log-ttl.xml:/etc/clickhouse-server/config.d/system-log-ttl.xml:ro
       - clickhouse-data:/var/lib/clickhouse
     healthcheck:
-      test: ["CMD", "clickhouse-client", "--user", "llmobs", "--password", "llmobs", "-q", "SELECT 1"]
+      test: ["CMD", "clickhouse-client", "--user", "llmobs", "--password", "${LLMOBS_CLICKHOUSE_PASSWORD:?set LLMOBS_CLICKHOUSE_PASSWORD — see deploy/compose/dev.env}", "-q", "SELECT 1"]
       interval: 2s
       timeout: 3s
       retries: 40
@@ -81,10 +86,10 @@ services:
       context: ../..
       dockerfile: deploy/compose/kernel.Dockerfile
     environment:
-      LLMOBS_DATABASE_URL: "postgres://llmobs:llmobs@postgres:5432/llmobs?sslmode=disable"
+      LLMOBS_DATABASE_URL: "postgres://llmobs:${LLMOBS_POSTGRES_PASSWORD:?set LLMOBS_POSTGRES_PASSWORD — see deploy/compose/dev.env}@postgres:5432/llmobs?sslmode=disable"
       # Native protocol DSN; credentials are URL-safe-encoded when built via
       # clickhouse.BuildDSN (R-CH7). Read by the scale storage wiring in L2.
-      LLMOBS_CLICKHOUSE_URL: "clickhouse://llmobs:llmobs@clickhouse:9000/llmobs"
+      LLMOBS_CLICKHOUSE_URL: "clickhouse://llmobs:${LLMOBS_CLICKHOUSE_PASSWORD:?set LLMOBS_CLICKHOUSE_PASSWORD — see deploy/compose/dev.env}@clickhouse:9000/llmobs"
       # Setting CLICKHOUSE_URL turns on PERMANENT dual-read (ADR-0026 RULING-MIG6):
       # historical Postgres-lite data and new ClickHouse-scale data are unified on
       # every Query-API read, so nothing is stranded crossing the boundary (L5). The
@@ -99,9 +104,9 @@ services:
       # distributing LB with a hard RYW need — it enables insert_quorum + sequential
       # consistency at the cost of quorum write latency (see docs/self-hosting).
       #   LLMOBS_CH_READ_YOUR_WRITES: "false"
-      LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:-sk-e2e-demo-key}"
+      LLMOBS_BOOTSTRAP_API_KEY: "${LLMOBS_BOOTSTRAP_API_KEY:?set LLMOBS_BOOTSTRAP_API_KEY — see deploy/compose/dev.env}"
       LLMOBS_BOOTSTRAP_ADMIN_EMAIL: "${LLMOBS_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}"
-      LLMOBS_BOOTSTRAP_ADMIN_PASSWORD: "${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:-admin-dev-password}"
+      LLMOBS_BOOTSTRAP_ADMIN_PASSWORD: "${LLMOBS_BOOTSTRAP_ADMIN_PASSWORD:?set LLMOBS_BOOTSTRAP_ADMIN_PASSWORD — see deploy/compose/dev.env}"
       # Durable WAL ingest spool (ADR-0027): the ack becomes durable when bytes hit
       # this local WAL, and undrained records replay on boot. Backed by a volume so
       # the WAL survives container restarts.

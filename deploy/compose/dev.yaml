@@ -2,7 +2,8 @@
 # `make dev` runs the kernel with `go run` and the shell + plugin with their rspack
 # dev servers locally — so only the database needs to be containerized. The kernel
 # reaches it at localhost:5432.
-#   docker compose -f deploy/compose/dev.yaml up -d
+#   docker compose --env-file deploy/compose/dev.env -f deploy/compose/dev.yaml up -d
+# (the env-file supplies the required POSTGRES_PASSWORD; see dev.env)
 name: llmobs-dev
 
 services:
@@ -10,7 +11,9 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: llmobs
-      POSTGRES_PASSWORD: llmobs
+      # Required, no default: a compose-up without deploy/compose/dev.env (or a real
+      # secret) fails loudly rather than booting with a known password. See dev.env.
+      POSTGRES_PASSWORD: "${LLMOBS_POSTGRES_PASSWORD:?set LLMOBS_POSTGRES_PASSWORD — use --env-file deploy/compose/dev.env for dev, or your secret store}"
       POSTGRES_DB: llmobs
     ports:
       # Published to the host so the locally-run kernel can connect. Override the

@@ -8,6 +8,14 @@ block the "any language, any framework, plug-and-play" promise, and it deserves 
 small arc, not a cram into N. Until it lands, use the interim below — which is sufficient
 for real plugins today.
 
+**Status update — the design is now pinned (ADR-0037).** The `blobs` primitive's design
+is settled and its foundation has landed: a backend-agnostic `blob.Store` seam, one
+tenant-scoped, filesystem-safe, injective key derivation (so no plugin can address another
+tenant's objects), and a local filesystem adapter for the lite profile. The plugin-facing
+surface — the `cap:blobs` capability, the gateway put/get/delete endpoints, the SDK
+`BlobsClient`, an S3 scale adapter, signed URLs, and GC — is the tracked build follow-on.
+**Until that surface ships, the bring-your-own-bucket interim below is still the way.**
+
 ## The interim — bring your own bucket
 
 Large binary artifacts (a plugin's exported reports, model files, big attachments) do not

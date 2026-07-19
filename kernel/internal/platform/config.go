@@ -112,6 +112,18 @@ type Config struct {
 	BackfillOnBoot    bool   `json:"backfill_on_boot"`
 	BackfillChunkSize int    `json:"backfill_chunk_size"` // rows per batch; default 500
 	BackfillBudget    string `json:"backfill_budget"`     // SEPARATE execution budget (NOT the read timeout); e.g. "30m"
+	// Blobs primitive (large-artifact storage). The backend is chosen by config: if
+	// BlobS3Endpoint is set the scale S3 adapter is used, else the lite local filesystem
+	// adapter rooted at BlobDir. Both are behind the one blob.Store seam.
+	BlobDir          string `json:"blob_dir"`            // local backend root (lite); default under the data dir
+	BlobMaxBytes     int64  `json:"blob_max_bytes"`      // per-object upload ceiling; default 64 MiB
+	BlobS3Endpoint   string `json:"blob_s3_endpoint"`    // host[:port]; presence selects the S3 backend
+	BlobS3AccessKey  string `json:"blob_s3_access_key"`  //
+	BlobS3SecretKey  string `json:"blob_s3_secret_key"`  //
+	BlobS3Bucket     string `json:"blob_s3_bucket"`      //
+	BlobS3Region     string `json:"blob_s3_region"`      // may be empty for MinIO
+	BlobS3UseSSL     bool   `json:"blob_s3_use_ssl"`     //
+	BlobS3RequestSSE bool   `json:"blob_s3_request_sse"` // opt into a per-object SSE header (KMS backends)
 }
 
 func defaults() Config {
@@ -142,6 +154,8 @@ func defaults() Config {
 		CHMaxBytesToRead:          5 << 30, // 5 GiB
 		BackfillChunkSize:         500,
 		BackfillBudget:            "30m",
+		BlobDir:                   "/var/lib/" + strings.ToLower(brand.Name) + "/blobs",
+		BlobMaxBytes:              64 << 20, // 64 MiB
 	}
 }
 
@@ -207,6 +221,15 @@ func LoadConfig() (Config, error) {
 	envStr(brand.Env("PUBLIC_URL"), &c.PublicURL)
 	envStr(brand.Env("SECRETBOX_KEY"), &c.SecretboxKey)
 	envBool(brand.Env("SERVE_SHELL"), &c.ServeShell)
+	envStr(brand.Env("BLOB_DIR"), &c.BlobDir)
+	envInt64(brand.Env("BLOB_MAX_BYTES"), &c.BlobMaxBytes)
+	envStr(brand.Env("BLOB_S3_ENDPOINT"), &c.BlobS3Endpoint)
+	envStr(brand.Env("BLOB_S3_ACCESS_KEY"), &c.BlobS3AccessKey)
+	envStr(brand.Env("BLOB_S3_SECRET_KEY"), &c.BlobS3SecretKey)
+	envStr(brand.Env("BLOB_S3_BUCKET"), &c.BlobS3Bucket)
+	envStr(brand.Env("BLOB_S3_REGION"), &c.BlobS3Region)
+	envBool(brand.Env("BLOB_S3_USE_SSL"), &c.BlobS3UseSSL)
+	envBool(brand.Env("BLOB_S3_REQUEST_SSE"), &c.BlobS3RequestSSE)
 	return c, nil
 }
 

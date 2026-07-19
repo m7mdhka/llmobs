@@ -37,6 +37,10 @@ export type { StoreConfig, StoreQuery, StoreFilter, StoreOp, StorePage } from ".
 export { EventsClient, PermanentEventError } from "./events.js";
 export type { EventsConfig, Event } from "./events.js";
 
+// Data primitive: `blobs` (kernel-brokered large-artifact storage; backend double-token).
+export { BlobsClient } from "./blobs.js";
+export type { BlobsConfig, BlobInfo } from "./blobs.js";
+
 // Capability: `ingest` (compat plugins push OTLP through the kernel pipeline).
 export { IngestClient } from "./ingest.js";
 export type { IngestConfig } from "./ingest.js";

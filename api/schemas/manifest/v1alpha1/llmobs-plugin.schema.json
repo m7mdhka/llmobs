@@ -40,7 +40,7 @@
           "type": "array",
           "description": "Requested data primitives. Capabilities are nouns about data, never verbs about features. `ingest` lets a compat plugin write telemetry through its own cold-path endpoint (ADR-0003); the plugin ingestion endpoint itself is Tier-3 work.",
           "items": {
-            "enum": ["ingest", "query", "write", "events", "jobs", "kv", "secrets", "surface"]
+            "enum": ["ingest", "query", "write", "events", "jobs", "kv", "secrets", "surface", "blobs"]
           },
           "uniqueItems": true
         },

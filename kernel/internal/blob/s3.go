@@ -121,3 +121,19 @@ func (s *S3Store) Delete(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+// BucketDefaultEncryptionEnabled reports whether the bucket has a default-encryption
+// policy. The wiring calls this at startup to WARN loudly if a scale deployment would
+// otherwise write blobs unencrypted (the encryption-at-rest guarantee rests on this
+// policy, since a per-object SSE header isn't portable). A "not found" result is a clean
+// false, not an error.
+func (s *S3Store) BucketDefaultEncryptionEnabled(ctx context.Context) (bool, error) {
+	_, err := s.client.GetBucketEncryption(ctx, s.bucket)
+	if err != nil {
+		if minio.ToErrorResponse(err).Code == "ServerSideEncryptionConfigurationNotFoundError" {
+			return false, nil
+		}
+		return false, fmt.Errorf("blob s3 get bucket encryption: %w", err)
+	}
+	return true, nil
+}

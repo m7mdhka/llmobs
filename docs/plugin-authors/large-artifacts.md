@@ -8,13 +8,28 @@ block the "any language, any framework, plug-and-play" promise, and it deserves 
 small arc, not a cram into N. Until it lands, use the interim below — which is sufficient
 for real plugins today.
 
-**Status update — the design is now pinned (ADR-0037).** The `blobs` primitive's design
-is settled and its foundation has landed: a backend-agnostic `blob.Store` seam, one
-tenant-scoped, filesystem-safe, injective key derivation (so no plugin can address another
-tenant's objects), and a local filesystem adapter for the lite profile. The plugin-facing
-surface — the `cap:blobs` capability, the gateway put/get/delete endpoints, the SDK
-`BlobsClient`, an S3 scale adapter, signed URLs, and GC — is the tracked build follow-on.
-**Until that surface ships, the bring-your-own-bucket interim below is still the way.**
+**Update — the `blobs` primitive has SHIPPED (ADR-0037).** You no longer need the
+bring-your-own-bucket interim for most cases. Declare `capabilities: [blobs]` and use the
+SDK `BlobsClient`:
+
+```ts
+import { BlobsClient } from "@llmobs/plugin-sdk";
+// put / get / delete, addressed by a logical key you choose. The kernel scopes every
+// object to your (plugin, project) — another plugin or project cannot read it.
+await blobs.put("reports/q3.pdf", bytes, "application/pdf");
+const got = await blobs.get("reports/q3.pdf"); // { bytes, info } | null
+await blobs.delete("reports/q3.pdf");
+```
+
+It works in both profiles behind one seam (local filesystem for lite; an S3-compatible
+store for scale), with a per-object upload ceiling (default 64 MiB). Objects are private
+and, on scale, encrypted at rest via the bucket's default-encryption policy (the operator
+enables it; the kernel warns loudly at boot if it is missing). Signed URLs and lifecycle/GC
+are tracked follow-ons; until then get/put stream through the kernel.
+
+**Use the interim below only when you need something `blobs` does not yet cover** — e.g. a
+browser uploading directly to your bucket via a signed URL, or an existing bucket you must
+read from. Otherwise, prefer the primitive.
 
 ## The interim — bring your own bucket
 

@@ -45,34 +45,86 @@ export class EventsClient {
   }
 
   /**
-   * Run a poll→handle→ack loop until stopped. The handler is invoked once per
-   * event; because delivery is at-least-once the handler MUST be idempotent (it
+   * Dead-letter ONE event this subscriber can never process — a PERMANENT failure
+   * (malformed subject, a deterministic handler rejection). The event is recorded to
+   * the dead-letter log and the offset advances past it, so the good events queued
+   * behind it flow on the next poll.
+   *
+   * Use this ONLY for permanent failures. For a TRANSIENT failure (your downstream is
+   * momentarily down), do NOT ack and do NOT fail — the event is re-delivered on the
+   * next poll and is never dropped. `id` must be the head of your unacked window (the
+   * lowest un-acked id): ack the good events before the poison first, else the kernel
+   * refuses with a 409.
+   */
+  async fail(topic: string, id: number, reason: string): Promise<void> {
+    const res = await this.call("fail", { topic, id, reason });
+    if (!res.ok && res.status !== 204) throw await eErr(res);
+  }
+
+  /**
+   * Run a poll→handle→ack loop until stopped. The handler is invoked once per event
+   * in id order; because delivery is at-least-once the handler MUST be idempotent (it
    * receives the event id to dedupe). Returns a stop() function.
+   *
+   * The handler signals the permanent-vs-transient taxonomy by how it fails:
+   *   - returns normally  → success; the event is acked.
+   *   - throws PermanentEventError → the event is dead-lettered (fail) and skipped;
+   *     the loop continues with the events behind it.
+   *   - throws anything else → treated as TRANSIENT: the batch stops at that event and
+   *     it is re-delivered on the next poll (never dropped). Ack/fail happen per event,
+   *     so a permanent poison never blocks the good events queued behind it.
    */
   subscribe(topics: string[], handler: (e: Event) => Promise<void> | void, opts: { intervalMs?: number } = {}): () => void {
     let stopped = false;
     const interval = opts.intervalMs ?? 1000;
     const loop = async () => {
       while (!stopped) {
+        let progressed = false;
         try {
           const events = await this.poll(topics);
-          // Group the max acked id per topic so one ack advances the whole batch.
-          const maxByTopic = new Map<string, number>();
           for (const e of events) {
-            await handler(e);
-            maxByTopic.set(e.topic, Math.max(maxByTopic.get(e.topic) ?? 0, e.id));
+            if (stopped) break;
+            try {
+              await handler(e);
+              await this.ack(e.topic, e.id);
+              progressed = true;
+            } catch (err) {
+              if (err instanceof PermanentEventError) {
+                // Permanent: dead-letter this one and advance past it. Because we ack
+                // each event as it succeeds, this event is the head of the unacked
+                // window, so fail() is accepted.
+                await this.fail(e.topic, e.id, err.reason);
+                progressed = true;
+                continue;
+              }
+              // Transient: stop the batch here. The offset sits at the last acked event,
+              // so this one is re-delivered on the next poll — retried, never dropped.
+              break;
+            }
           }
-          for (const [topic, id] of maxByTopic) await this.ack(topic, id);
-          if (events.length === 0) await sleep(interval);
         } catch {
-          await sleep(interval);
+          /* poll failed; back off below */
         }
+        if (!progressed) await sleep(interval);
       }
     };
     void loop();
     return () => {
       stopped = true;
     };
+  }
+}
+
+/**
+ * Throw this from a subscribe() handler to mark an event as a PERMANENT failure — one
+ * that can never succeed for this subscriber (a malformed subject, a deterministic
+ * rejection). The event is dead-lettered and skipped. For a transient failure, throw
+ * any other error (or let one propagate) and the event is retried on the next poll.
+ */
+export class PermanentEventError extends Error {
+  constructor(public readonly reason: string) {
+    super(`permanent event failure: ${reason}`);
+    this.name = "PermanentEventError";
   }
 }
 

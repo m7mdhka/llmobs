@@ -16,6 +16,7 @@ package bustest
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/bus"
@@ -38,6 +39,7 @@ func pub(t *testing.T, b *bus.Bus, topic, subject string) {
 func RunConformance(t *testing.T, f Factory) {
 	t.Run("H6ReplayFromOffset", func(t *testing.T) { replayFromOffset(t, f) })
 	t.Run("BacklogCapDeadLetters", func(t *testing.T) { backlogCapDeadLetters(t, f) })
+	t.Run("PoisonMessageFailAndSkip", func(t *testing.T) { poisonMessageFailAndSkip(t, f) })
 	t.Run("TenantAndTopicIsolation", func(t *testing.T) { tenantAndTopicIsolation(t, f) })
 	t.Run("MultiTopicPollAndMax", func(t *testing.T) { multiTopicPollAndMax(t, f) })
 	t.Run("GlobalIDUniqueness", func(t *testing.T) { globalIDUniqueness(t, f) })
@@ -161,6 +163,55 @@ func backlogCapDeadLetters(t *testing.T, f Factory) {
 	}
 	if got[0].ID != 16 || got[4].ID != 20 {
 		t.Fatalf("expected the newest 5 (ids 16..20), got %d..%d", got[0].ID, got[4].ID)
+	}
+}
+
+// poisonMessageFailAndSkip: a subscriber that PERMANENTLY fails one event dead-letters
+// exactly that event and advances past it, so the good events queued behind the poison
+// still flow — the permanent-vs-transient taxonomy. (The transient half — a not-acked
+// event is re-delivered, never dropped — is the at-least-once proof above.) It also
+// proves the head-only guard (failing an id ahead of the head is refused, so unprocessed
+// events are never skipped) and idempotence (re-failing an already-passed id is a no-op).
+func poisonMessageFailAndSkip(t *testing.T, f Factory) {
+	b, dlqLen := f(t, 1000)
+	ctx := context.Background()
+	const sub, topic = "acme/w", "span.ingested"
+	pub(t, b, topic, "e1")
+	pub(t, b, topic, "e2-poison")
+	pub(t, b, topic, "e3")
+
+	// Head-only guard: with offset 0 the head is id 1; failing id 2 must be refused so
+	// e1 is never silently skipped (and thereby acked).
+	if err := b.Fail(ctx, sub, proj, topic, 2, "bad"); !errors.Is(err, bus.ErrNotHead) {
+		t.Fatalf("failing ahead of the head must return ErrNotHead, got %v", err)
+	}
+
+	// Process e1 normally (ack up to 1), then declare e2 a permanent poison.
+	if err := b.Ack(ctx, sub, proj, topic, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Fail(ctx, sub, proj, topic, 2, "malformed subject"); err != nil {
+		t.Fatalf("failing the head poison must succeed: %v", err)
+	}
+	if dlqLen() != 1 {
+		t.Fatalf("exactly one event should be dead-lettered, got %d", dlqLen())
+	}
+
+	// The good event behind the poison now flows; the poison never re-delivers.
+	got, err := b.Poll(ctx, sub, proj, []string{topic}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != 3 || got[0].SubjectID != "e3" {
+		t.Fatalf("after failing the poison, poll must return only e3, got %+v", got)
+	}
+
+	// Idempotence: re-failing an already-passed id is a no-op — no new DLQ record, no error.
+	if err := b.Fail(ctx, sub, proj, topic, 2, "again"); err != nil {
+		t.Fatalf("re-failing a passed id must be a no-op, got %v", err)
+	}
+	if dlqLen() != 1 {
+		t.Fatalf("re-failing must not add a DLQ record, got %d", dlqLen())
 	}
 }
 

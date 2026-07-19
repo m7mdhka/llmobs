@@ -34,7 +34,7 @@ export { StoreClient } from "./store.js";
 export type { StoreConfig, StoreQuery, StoreFilter, StoreOp, StorePage } from "./store.js";
 
 // Data primitive: `events` (durable subscribe; at-least-once; backend double-token).
-export { EventsClient } from "./events.js";
+export { EventsClient, PermanentEventError } from "./events.js";
 export type { EventsConfig, Event } from "./events.js";
 
 // Capability: `ingest` (compat plugins push OTLP through the kernel pipeline).

@@ -108,6 +108,50 @@ func TestEventsRequireCapability(t *testing.T) {
 	if rec := callEvents(h, "poll", svc, asr, `{"topics":["span.ingested"]}`); rec.Code != http.StatusForbidden {
 		t.Fatalf("missing cap:events must be 403, got %d", rec.Code)
 	}
+	// fail is on the same capability seam as poll/ack.
+	if rec := callEvents(h, "fail", svc, asr, `{"topic":"span.ingested","id":1,"reason":"x"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("missing cap:events must 403 the fail path too, got %d", rec.Code)
+	}
+}
+
+// TestEventsFailDeadLettersPoison drives /fail through the HTTP + double-token path: a
+// permanent poison at the head of the unacked window is dead-lettered and skipped so the
+// good event behind it flows; failing an id ahead of the head is a 409.
+func TestEventsFailDeadLettersPoison(t *testing.T) {
+	h, b, signer := eventsSetup(t)
+	ctx := context.Background()
+	_ = b.Publish(ctx, "span.ingested", "projA", "e1")
+	_ = b.Publish(ctx, "span.ingested", "projA", "poison")
+	_ = b.Publish(ctx, "span.ingested", "projA", "e3")
+	svc, asr := evTokens(t, signer, "acme/w", "projA")
+
+	// Failing id 2 while the head is 1 must be a 409 (would skip e1).
+	if rec := callEvents(h, "fail", svc, asr, `{"topic":"span.ingested","id":2,"reason":"early"}`); rec.Code != http.StatusConflict {
+		t.Fatalf("failing ahead of head must be 409, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Ack e1, then fail the poison at the head (id 2).
+	if rec := callEvents(h, "ack", svc, asr, `{"topic":"span.ingested","offset":1}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("ack e1: %d", rec.Code)
+	}
+	if rec := callEvents(h, "fail", svc, asr, `{"topic":"span.ingested","id":2,"reason":"malformed subject"}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("fail poison: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// The good event behind the poison now flows; the poison never re-delivers.
+	rec := callEvents(h, "poll", svc, asr, `{"topics":["span.ingested"],"max":10}`)
+	var out struct {
+		Events []bus.Delivered `json:"events"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if len(out.Events) != 1 || out.Events[0].SubjectID != "e3" {
+		t.Fatalf("after failing the poison, only e3 should remain: %+v", out.Events)
+	}
+
+	// Missing id is a 400.
+	if bad := callEvents(h, "fail", svc, asr, `{"topic":"span.ingested"}`); bad.Code != http.StatusBadRequest {
+		t.Fatalf("fail without id must be 400, got %d", bad.Code)
+	}
 }
 
 func itoaID(n int64) string {

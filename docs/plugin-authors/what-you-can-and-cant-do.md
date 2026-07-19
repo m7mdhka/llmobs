@@ -29,6 +29,23 @@ enrichment, scoring, alerting, export. At-least-once delivery, durable, replayab
 see every span; you just see it a moment after it's safely stored, not in the middle of
 storing it.
 
+*Classify your failures.* Delivery is at-least-once, so your handler must be idempotent
+(dedupe on the event `id`). When a handler fails, the kind of failure decides what you
+do — and getting this wrong is the classic event-consumer bug:
+
+- **Transient** (your downstream is momentarily down): do nothing — don't ack. The event
+  is re-delivered on the next poll. It is retried, never dropped.
+- **Permanent** (a malformed subject, a record your handler can never process): call
+  `events.fail(topic, id, reason)` — or, in the `subscribe()` loop, throw
+  `PermanentEventError(reason)`. The event is dead-lettered and skipped so the good
+  events queued behind it keep flowing; its payload stays in the log for inspection.
+
+Never "ack past" a permanent failure to move on — that is silent data loss. And never
+retry a permanent failure forever — one poison event left un-failed eventually forces the
+backlog cap to bulk-drop it *and the good events behind it*. `fail` is the one right
+move. `fail`'s `id` must be the head of your unacked window (ack the good events before
+the poison first); failing ahead of the head is a `409`.
+
 **If you truly need a new wire dialect on the hot path**, that is a kernel normalizer (a
 pure function + a fixture) or a cold-path compat plugin with its own ingest endpoint
 (`cap:ingest`) — a deliberate choice, not an in-process hook.

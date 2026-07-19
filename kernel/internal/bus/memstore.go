@@ -74,7 +74,13 @@ func (m *MemStore) Offset(_ context.Context, pluginID, projectID, topic string) 
 func (m *MemStore) SetOffset(_ context.Context, pluginID, projectID, topic string, id int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.offsets[offKey(pluginID, projectID, topic)] = id
+	// Monotonic, matching the Postgres (GREATEST) and Redis (Lua guard) stores: the
+	// offset never regresses, so a concurrent Ack/Fail race re-delivers at worst, never
+	// skips. The Store contract requires this of every backend.
+	k := offKey(pluginID, projectID, topic)
+	if id > m.offsets[k] {
+		m.offsets[k] = id
+	}
 	return nil
 }
 

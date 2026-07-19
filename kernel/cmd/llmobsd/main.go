@@ -20,6 +20,7 @@ import (
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"google.golang.org/grpc"
 
+	"github.com/m7mdhka/llmobs/kernel/internal/blob"
 	"github.com/m7mdhka/llmobs/kernel/internal/bus"
 	"github.com/m7mdhka/llmobs/kernel/internal/bus/redisstore"
 	"github.com/m7mdhka/llmobs/kernel/internal/controlplane"
@@ -597,6 +598,15 @@ func run() error {
 	// Ingest: a compat plugin (cap:ingest) pushes OTLP spans through the SAME
 	// pipeline as native OTLP — kernel-stamped source, project from the assertion.
 	pluginapi.NewIngest(pluginAuthz, pipe, defaultProject).Register(apiMux, "/v1alpha1/plugin/ingest")
+	// Blobs: kernel-brokered large-artifact storage. The backend is chosen by config —
+	// the S3 adapter when BlobS3Endpoint is set (scale), else the local filesystem adapter
+	// (lite) — behind the one blob.Store seam, so both profiles expose the identical
+	// primitive. Objects are tenant-scoped at the blob.DeriveKey seam inside the handler.
+	blobStore, err := buildBlobStore(rootCtx, cfg, log)
+	if err != nil {
+		return err
+	}
+	pluginapi.NewBlobs(pluginAuthz, blobStore, cfg.BlobMaxBytes).Register(apiMux, "/v1alpha1/plugin/blobs")
 	apiMux.HandleFunc("/v1alpha1/whoami", qsrv.Whoami)
 	apiMux.Handle("/v1alpha1/", qsrv.Handler())
 	// The web shell (static SPA) is served at the origin root unless the kernel is
@@ -844,6 +854,53 @@ func serve(s *http.Server, log *slog.Logger, name string, errCh chan<- error) {
 	}
 	_ = log
 	_ = name
+}
+
+// buildBlobStore selects the blobs backend by config: the S3 adapter when BlobS3Endpoint
+// is set (scale), else the local filesystem adapter (lite). Both satisfy the one seam, so
+// the primitive is identical across profiles.
+func buildBlobStore(ctx context.Context, cfg platform.Config, log *slog.Logger) (pluginapi.BlobStore, error) {
+	if cfg.BlobS3Endpoint != "" {
+		s3, err := blob.NewS3Store(ctx, blob.S3Config{
+			Endpoint:   cfg.BlobS3Endpoint,
+			AccessKey:  cfg.BlobS3AccessKey,
+			SecretKey:  cfg.BlobS3SecretKey,
+			Bucket:     cfg.BlobS3Bucket,
+			Region:     cfg.BlobS3Region,
+			UseSSL:     cfg.BlobS3UseSSL,
+			RequestSSE: cfg.BlobS3RequestSSE,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("blob s3 store: %w", err)
+		}
+		// Fail-loud encryption-at-rest check: encryption rests on the bucket's default-
+		// encryption policy, so warn PROMINENTLY at boot if it is absent (blobs would be
+		// written unencrypted) — unless a per-object SSE header was requested. A check
+		// error is non-fatal: some setups encrypt at a layer the API doesn't report.
+		if !cfg.BlobS3RequestSSE {
+			if enabled, err := s3.BucketDefaultEncryptionEnabled(ctx); err != nil {
+				log.Warn("blob s3: could not verify bucket default-encryption", "err", err)
+			} else if !enabled {
+				log.Warn("blob s3: bucket has NO default-encryption policy — blobs will be written UNENCRYPTED; enable bucket default-encryption or set "+brand.Env("BLOB_S3_REQUEST_SSE"),
+					"bucket", cfg.BlobS3Bucket)
+			}
+		}
+		log.Info("blob store: s3", "endpoint", cfg.BlobS3Endpoint, "bucket", cfg.BlobS3Bucket)
+		return s3, nil
+	}
+	// A scale deployment (ClickHouse configured) running isolated/replicated containers has
+	// no shared filesystem, so the local blob adapter would be per-container and ephemeral —
+	// a silent two-profile break. Warn loudly to configure an S3 backend.
+	if cfg.ClickHouseURL != "" {
+		log.Warn("blob store: falling back to LOCAL filesystem on a scale deployment — blobs will be per-container and lost on restart; set "+brand.Env("BLOB_S3_ENDPOINT")+" to use object storage",
+			"dir", cfg.BlobDir)
+	}
+	local, err := blob.NewLocalStore(cfg.BlobDir)
+	if err != nil {
+		return nil, fmt.Errorf("blob local store: %w", err)
+	}
+	log.Info("blob store: local", "dir", cfg.BlobDir)
+	return local, nil
 }
 
 func waitForDB(ctx context.Context, pool interface {

@@ -96,7 +96,9 @@ prove-the-negative; the `@llmobs/plugin-sdk` `BlobsClient`; the per-profile wiri
 for lite, S3 for scale) — the change that first EXPOSES `cap:blobs`, and which MUST ship
 both adapters together so the primitive works in both profiles (invariant 9). Then, as
 enhancements: signed-URL mint (kernel-brokered for lite, presigned for S3, under the
-ADR-0025 R2 egress rules); lifecycle/GC (orphan reaping, per-tenant quota); and a
+ADR-0025 R2 egress rules); lifecycle/GC (orphan reaping, **per-tenant storage + object-count quota** — blobs raises
+the per-object ceiling to 64 MiB, so it is the primitive that most needs an aggregate cap;
+tracked with the GC work); and a
 **fail-loud encryption-at-rest check** — at scale-profile startup, query the bucket's
 default-encryption policy (`GetBucketEncryption`) and log a prominent warning (or refuse to
 start) if it is absent, so a mis-configured bucket that would write blobs unencrypted is

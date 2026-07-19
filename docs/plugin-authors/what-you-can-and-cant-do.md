@@ -95,18 +95,20 @@ credential, the egress rules for the call). Full details in
 
 ---
 
-## Wall 4 — Large binaries don't go in kernel storage (yet)
+## Wall 4 — Large binaries: use the `blobs` primitive (it shipped)
 
-**The wall.** There's no first-class `blobs` primitive. `kv` is small key→value; `store`
-is structured relational entities. Neither is a BLOB store.
+**Formerly a wall, now a primitive.** There is now a first-class `blobs` primitive
+(ADR-0037): declare `capabilities: [blobs]` and use the SDK `BlobsClient` (put/get/delete)
+for large binary artifacts. `kv` stays small key→value and `store` stays structured
+relational entities; `blobs` is the byte store. Objects are tenant-scoped by the kernel, so
+a plugin can only reach its own; it works in both profiles (local filesystem for lite, an
+S3-compatible store for scale) behind one seam.
 
-**Why.** A blob store is a real, additive primitive (a new adapter across both profiles,
-signed URLs, lifecycle/GC) — an ADR-level arc of its own (tracked as #120), not something
-to bolt onto the frontend arc.
-
-**The escape — bring your own bucket.** Hold bucket creds in `secrets`, move bytes from
-your backend under the egress rules, hand the frontend short-lived signed URLs, keep only
-references in kernel storage. Full details in [large-artifacts.md](large-artifacts.md).
+**Still bring-your-own-bucket for the edges.** Signed URLs (a browser uploading straight to
+storage) and lifecycle/GC are tracked follow-ons. Until then, if you need a direct-to-bucket
+signed URL or must read an existing external bucket, use the interim: bucket creds in
+`secrets`, bytes moved from your backend under the egress rules. Full details in
+[large-artifacts.md](large-artifacts.md).
 
 ---
 
@@ -132,8 +134,8 @@ references in kernel storage. Full details in [large-artifacts.md](large-artifac
 
 **"Any language, any framework, plug-and-play" is now true** for the shapes real plugins
 take: any-language backends, any-framework frontends, plugin-owned queryable data, a free
-or custom settings UI, localization. The walls that remain — hot-path exclusion,
-same-origin frontend trust, plugin islands, no first-class blobs — are **deliberate**, each
-with a supported escape, and the two that are genuinely additive (origin isolation, a blobs
-primitive) have named future homes. That is the difference between a *designed* boundary
-and a *missing* feature.
+or custom settings UI, localization, and now first-class large-artifact storage (the
+`blobs` primitive). The walls that remain — hot-path exclusion, same-origin frontend trust,
+plugin islands — are **deliberate**, each with a supported escape, and the one that is
+genuinely additive (origin isolation) has a named future home. That is the difference
+between a *designed* boundary and a *missing* feature.

@@ -81,6 +81,41 @@ services:
     volumes:
       - valkey-data:/data
 
+  minio:
+    # S3-compatible object store for the blobs primitive (ADR-0037). The scale profile
+    # uses a shared object store, not per-container local disk. Version pinned.
+    image: quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${LLMOBS_BLOB_S3_ACCESS_KEY:?set LLMOBS_BLOB_S3_ACCESS_KEY — see deploy/compose/dev.env}"
+      MINIO_ROOT_PASSWORD: "${LLMOBS_BLOB_S3_SECRET_KEY:?set LLMOBS_BLOB_S3_SECRET_KEY — see deploy/compose/dev.env}"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+    volumes:
+      - minio-data:/data
+
+  # One-shot: create the blobs bucket and enable default-encryption + block-public-access,
+  # so the bucket meets the operator security requirements the kernel checks at boot.
+  minio-init:
+    image: quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set m http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb -p m/llmobs-blobs &&
+        mc anonymous set none m/llmobs-blobs &&
+        mc encrypt set sse-s3 m/llmobs-blobs || true
+    environment:
+      MINIO_ROOT_USER: "${LLMOBS_BLOB_S3_ACCESS_KEY:?set LLMOBS_BLOB_S3_ACCESS_KEY — see deploy/compose/dev.env}"
+      MINIO_ROOT_PASSWORD: "${LLMOBS_BLOB_S3_SECRET_KEY:?set LLMOBS_BLOB_S3_SECRET_KEY — see deploy/compose/dev.env}"
+
   kernel:
     build:
       context: ../..
@@ -114,6 +149,15 @@ services:
       # Scale event bus (ADR-0028): Redis/Valkey Streams instead of Postgres. For HA,
       # set LLMOBS_EVENT_REDIS_MASTER_NAME + LLMOBS_EVENT_REDIS_SENTINEL_ADDRS (R-EV1).
       LLMOBS_EVENT_REDIS_URL: "redis://valkey:6379/0"
+      # Blobs primitive (ADR-0037): the scale profile uses the S3-compatible adapter (a
+      # shared object store), NOT the per-container local filesystem. A production bucket
+      # must have block-public-access + default-encryption enabled (the kernel warns at boot
+      # if the bucket has no default-encryption policy).
+      LLMOBS_BLOB_S3_ENDPOINT: "minio:9000"
+      LLMOBS_BLOB_S3_ACCESS_KEY: "${LLMOBS_BLOB_S3_ACCESS_KEY:?set LLMOBS_BLOB_S3_ACCESS_KEY — see deploy/compose/dev.env}"
+      LLMOBS_BLOB_S3_SECRET_KEY: "${LLMOBS_BLOB_S3_SECRET_KEY:?set LLMOBS_BLOB_S3_SECRET_KEY — see deploy/compose/dev.env}"
+      LLMOBS_BLOB_S3_BUCKET: "llmobs-blobs"
+      LLMOBS_BLOB_S3_USE_SSL: "false"
       LLMOBS_LOG_FORMAT: "text"
       LLMOBS_OTLP_HTTP_ADDR: ":4318"
       LLMOBS_OTLP_GRPC_ADDR: ":4317"
@@ -126,6 +170,8 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     volumes:
       - kernel-wal:/var/lib/llmobs/wal
     ports:
@@ -138,3 +184,4 @@ volumes:
   clickhouse-data:
   kernel-wal:
   valkey-data:
+  minio-data:

@@ -2,6 +2,7 @@ package pluginapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/m7mdhka/llmobs/kernel/internal/bus"
@@ -12,6 +13,7 @@ import (
 type EventBus interface {
 	Poll(ctx context.Context, pluginID, projectID string, topics []string, max int) ([]bus.Delivered, error)
 	Ack(ctx context.Context, pluginID, projectID, topic string, upTo int64) error
+	Fail(ctx context.Context, pluginID, projectID, topic string, id int64, reason string) error
 }
 
 // Events serves the `events` primitive (poll + ack), gated on cap:events. Delivery
@@ -29,6 +31,7 @@ func NewEvents(authz *pluginauth.Authorizer, b EventBus) *Events {
 func (h *Events) Register(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc(prefix+"/poll", h.handle(h.poll))
 	mux.HandleFunc(prefix+"/ack", h.handle(h.ack))
+	mux.HandleFunc(prefix+"/fail", h.handle(h.fail))
 }
 
 func (h *Events) handle(fn func(http.ResponseWriter, *http.Request, pluginauth.Caller)) http.HandlerFunc {
@@ -51,6 +54,8 @@ type eventsReq struct {
 	Max    int      `json:"max,omitempty"`
 	Topic  string   `json:"topic,omitempty"`
 	Offset int64    `json:"offset,omitempty"`
+	ID     int64    `json:"id,omitempty"`
+	Reason string   `json:"reason,omitempty"`
 }
 
 const maxPollTopics = 64 // per-poll topic fan-out cap (DoS bound)
@@ -94,6 +99,36 @@ func (h *Events) ack(w http.ResponseWriter, r *http.Request, c pluginauth.Caller
 	}
 	if err := h.bus.Ack(r.Context(), c.PluginID, c.ProjectID, req.Topic, req.Offset); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "ack failed"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// fail dead-letters ONE poison event (the head of the subscriber's unacked window) and
+// advances past it, so good events queued behind it flow. This is the permanent half of
+// the permanent-vs-transient taxonomy: a transient failure is signalled by NOT acking
+// (the event is re-delivered); a permanent one is signalled here (dead-lettered, never
+// re-delivered, recorded for inspection). The tenant/plugin come from the assertion.
+func (h *Events) fail(w http.ResponseWriter, r *http.Request, c pluginauth.Caller) {
+	var req eventsReq
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if req.Topic == "" || req.ID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "topic and id required"})
+		return
+	}
+	err := h.bus.Fail(r.Context(), c.PluginID, c.ProjectID, req.Topic, req.ID, req.Reason)
+	if errors.Is(err, bus.ErrNotHead) {
+		// The subscriber tried to fail an event ahead of its head — a client error: it
+		// must ack the good events before the poison, then fail the poison. Returned as
+		// a 409 so a retry-past-head is not mistaken for a server fault.
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "id not at head of unacked window; ack preceding events first"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "fail failed"})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

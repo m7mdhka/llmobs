@@ -14,7 +14,18 @@
 // next poll regardless of whether it received a notification.
 package bus
 
-import "context"
+import (
+	"context"
+	"errors"
+	"strings"
+)
+
+// ErrNotHead is returned by Fail when the event id is ahead of the subscriber's
+// current head (offset+1). A subscriber may only dead-letter the event at the head of
+// its unacked window; failing a later id would silently skip — and thereby ack — the
+// unprocessed events between the offset and that id. Ack the good events first, then
+// fail the poison at the head.
+var ErrNotHead = errors.New("event id is not at the head of the unacked window")
 
 // Delivered is one event handed to a subscriber. ID is the monotonic log offset
 // and the idempotency key (at-least-once => the SDK dedupes on ID).
@@ -127,4 +138,76 @@ func (b *Bus) Ack(ctx context.Context, pluginID, projectID, topic string, upTo i
 		return nil
 	}
 	return b.store.SetOffset(ctx, pluginID, projectID, topic, upTo)
+}
+
+const maxFailReasonLen = 256
+
+// Fail is the PERMANENT-failure classifier at the seam. A subscriber calls it when a
+// specific event can never succeed for it — a malformed subject, a deterministic
+// handler rejection — as opposed to a transient failure (its downstream is momentarily
+// down), for which the subscriber simply does NOT ack and the event is re-delivered on
+// the next poll. This is the permanent-vs-transient taxonomy the bus needs: without an
+// explicit permanent path, a poison event forces the subscriber to either loop on it
+// forever (pinning the log until the backlog cap bulk-drops the poison AND every good
+// event queued behind it) or ack past it silently (data loss with no audit row).
+//
+// Fail dead-letters exactly one event — the one at the head of the unacked window (id
+// must equal offset+1) — and advances the offset by one, so the good events queued
+// behind the poison flow on the next poll. The event itself is NOT deleted from the
+// log: the DLQ records that this subscriber skipped id, and the payload stays readable
+// in the log for recovery/inspection.
+//
+// id at or below the offset is an idempotent no-op (a retried Fail after the offset
+// already moved). id beyond the head returns ErrNotHead — failing it would skip the
+// unprocessed events in between. reason is subscriber-supplied and recorded verbatim
+// (bounded, control-chars stripped, prefixed to distinguish it from kernel reasons).
+func (b *Bus) Fail(ctx context.Context, pluginID, projectID, topic string, id int64, reason string) error {
+	if id <= 0 {
+		return ErrNotHead
+	}
+	cur, err := b.store.Offset(ctx, pluginID, projectID, topic)
+	if err != nil {
+		return err
+	}
+	if id <= cur {
+		return nil // already past this event — idempotent
+	}
+	if id != cur+1 {
+		return ErrNotHead // would skip (and thereby ack) unprocessed events (cur, id-1]
+	}
+	if err := b.store.DeadLetter(ctx, pluginID, projectID, topic, cur, id, sanitizeReason(reason)); err != nil {
+		return err
+	}
+	return b.store.SetOffset(ctx, pluginID, projectID, topic, id)
+}
+
+// sanitizeReason bounds and neutralizes a subscriber-supplied dead-letter reason: it
+// strips control characters (no log/record injection), caps the length by RUNE count,
+// and prefixes "subscriber:" so a plugin reason can never be mistaken for a kernel-
+// generated one (e.g. "backlog_cap_exceeded"). An empty reason becomes a stable
+// placeholder.
+//
+// The cap counts runes, not bytes: a byte-slice truncation could split a multibyte rune
+// and yield invalid UTF-8, which a UTF-8 Postgres DLQ column rejects — so the DeadLetter
+// write would fail, Fail would 500, and the poison could never be dead-lettered (it would
+// be re-delivered until the backlog cap bulk-dropped it — the exact failure this feature
+// exists to prevent). Only whole runes are ever written, so the result is always valid.
+func sanitizeReason(reason string) string {
+	var sb strings.Builder
+	n := 0
+	for _, r := range reason {
+		if r < 0x20 || r == 0x7F {
+			continue // strip C0 controls and DEL
+		}
+		if n >= maxFailReasonLen {
+			break
+		}
+		sb.WriteRune(r)
+		n++
+	}
+	clean := strings.TrimSpace(sb.String())
+	if clean == "" {
+		clean = "unspecified"
+	}
+	return "subscriber:" + clean
 }
